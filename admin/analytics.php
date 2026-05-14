@@ -142,6 +142,7 @@ class Analytics {
 			'forms_using_custom_css'     => $this->forms_using_custom_css(),
 			'ai_generated_forms'         => $this->ai_generated_forms(),
 			'ai_generated_payment_forms' => $this->ai_generated_forms( 'payments' ),
+			'ai_dashboard_widget_uses'   => (int) Helper::get_srfm_option( 'ai_dashboard_widget_uses', 0 ),
 			'payment_forms'              => $this->get_payment_forms_count(),
 			'total_entries'              => Entries::get_total_entries_by_status(),
 			'restricted_forms'           => $this->get_restricted_forms(),

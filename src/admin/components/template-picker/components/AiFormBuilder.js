@@ -20,7 +20,6 @@ const AiFormBuilder = () => {
 	const [ message, setMessage ] = useState(
 		__( 'Connecting to AI service', 'sureforms' )
 	);
-	const [ isBuildingForm, setIsBuildingForm ] = useState( false );
 	const [ percentBuild, setPercentBuild ] = useState( 0 );
 	const [ formCreationErr, setFormCreationErr ] = useState( '' );
 	const [ showAuthErrorPopup, setShowAuthErrorPopup ] = useState( false );
@@ -47,6 +46,15 @@ const AiFormBuilder = () => {
 
 	const urlParams = new URLSearchParams( window.location.search );
 	const accessKey = urlParams.get( 'access_key' );
+	const dashboardPromptFromWidget = (
+		urlParams.get( 'srfm_ai_dashboard_prompt' ) || ''
+	).trim();
+	const [ initialPromptFromWidget ] = useState( dashboardPromptFromWidget );
+	const [ hasHandledWidgetPrompt, setHasHandledWidgetPrompt ] =
+		useState( false );
+	const [ isBuildingForm, setIsBuildingForm ] = useState(
+		Boolean( dashboardPromptFromWidget )
+	);
 
 	const isRTL = srfm_admin?.is_rtl;
 	const toasterPosition = isRTL ? 'bottom-left' : 'bottom-right';
@@ -240,6 +248,35 @@ const AiFormBuilder = () => {
 	const errorCode = srfm_admin?.srfm_ai_usage_details?.code;
 	const resetAt = srfm_admin?.srfm_ai_usage_details?.resetAt;
 
+	useEffect( () => {
+		if ( ! initialPromptFromWidget || hasHandledWidgetPrompt ) {
+			return;
+		}
+
+		setHasHandledWidgetPrompt( true );
+
+		const normalizedUrl = new URL( window.location.href );
+		normalizedUrl.searchParams.delete( 'srfm_ai_dashboard_prompt' );
+		window.history.replaceState( {}, '', normalizedUrl.toString() );
+
+		const shouldProceedWithGeneration =
+			formCreationleft > 0 && ! errorCode && ! accessKey;
+
+		if ( shouldProceedWithGeneration ) {
+			handleCreateAiForm( initialPromptFromWidget, [], true );
+			setIsBuildingForm( true );
+			return;
+		}
+
+		setIsBuildingForm( false );
+	}, [
+		accessKey,
+		errorCode,
+		formCreationleft,
+		hasHandledWidgetPrompt,
+		initialPromptFromWidget,
+	] );
+
 	const isRegistered =
 		srfm_admin?.srfm_ai_usage_details?.type === 'registered';
 	const finalFormCreationCountRemaining =
@@ -415,6 +452,7 @@ const AiFormBuilder = () => {
 			<div className="mt-14">
 				<AiFormBuilderForm
 					handleCreateAiForm={ handleCreateAiForm }
+					prefilledPrompt={ initialPromptFromWidget }
 					formTypeObj={ formTypeObj }
 					setFormTypeObj={ setFormTypeObj }
 					setFormType={ setFormType }

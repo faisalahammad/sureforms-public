@@ -120,6 +120,7 @@ class Admin {
 		add_action( 'wp_ajax_sureforms_dismiss_pointer', [ $this, 'pointer_dismissed' ] );
 		add_action( 'wp_ajax_sureforms_accept_cta', [ $this, 'pointer_accepted_cta' ] );
 		add_action( 'wp_ajax_srfm_notice_response', [ $this, 'handle_notice_response' ] );
+		add_action( 'wp_ajax_srfm_ai_widget_usage', [ $this, 'track_ai_widget_usage' ] );
 
 		// Register dashboard widget only if there are recent entries.
 		add_action( 'admin_init', [ $this, 'maybe_register_dashboard_widget' ] );
@@ -1921,6 +1922,9 @@ class Admin {
 			return;
 		}
 
+		// Always register the AI quick draft dashboard widget.
+		add_action( 'wp_dashboard_setup', [ $this, 'register_ai_dashboard_widget' ] );
+
 		// Quick check if there are any entries in the last 7 days.
 		$seven_days_ago = strtotime( '-7 days' );
 		$total_entries  = Entries::get_entries_count_after( $seven_days_ago );
@@ -1954,6 +1958,136 @@ class Admin {
 			'normal',
 			'high'
 		);
+	}
+
+	/**
+	 * Register the AI quick draft dashboard widget.
+	 *
+	 * @return void
+	 * @since 2.7.0
+	 */
+	public function register_ai_dashboard_widget() {
+		wp_add_dashboard_widget(
+			'sureforms_ai_quick_draft',
+			__( 'SureForms AI Quick Draft', 'sureforms' ),
+			[ $this, 'render_ai_dashboard_widget' ],
+			null,
+			null,
+			'normal',
+			'high'
+		);
+	}
+
+	/**
+	 * Render AI quick draft dashboard widget content.
+	 *
+	 * @return void
+	 * @since 2.7.0
+	 */
+	public function render_ai_dashboard_widget() {
+		$redirect_url = admin_url( 'admin.php?page=add-new-form' );
+		?>
+		<div class="srfm-ai-dashboard-widget">
+			<p>
+				<?php esc_html_e( 'Describe the form and let SureForms AI generate it for you.', 'sureforms' ); ?>
+			</p>
+			<label for="srfm-ai-dashboard-prompt" class="screen-reader-text">
+				<?php esc_html_e( 'Describe your form', 'sureforms' ); ?>
+			</label>
+			<textarea
+				id="srfm-ai-dashboard-prompt"
+				class="widefat"
+				rows="5"
+				maxlength="2000"
+				placeholder="<?php esc_attr_e( 'Example: Create a contact form with name, email, phone, and message fields.', 'sureforms' ); ?>"
+			></textarea>
+			<p style="margin-top:10px;margin-bottom:0;display:flex;align-items:center;gap:10px;">
+				<button type="button" class="button button-primary" id="srfm-ai-dashboard-generate" disabled>
+					<?php esc_html_e( 'Create New Form', 'sureforms' ); ?>
+				</button>
+				<span id="srfm-ai-dashboard-char-count" style="color:#646970;">0/2000</span>
+			</p>
+		</div>
+		<script>
+			( function () {
+				const generateButton = document.getElementById( 'srfm-ai-dashboard-generate' );
+				const promptField = document.getElementById( 'srfm-ai-dashboard-prompt' );
+				const charCount = document.getElementById( 'srfm-ai-dashboard-char-count' );
+				if ( ! generateButton || ! promptField ) {
+					return;
+				}
+
+				const updateWidgetState = function () {
+					const promptValue = promptField.value.trim();
+					generateButton.disabled = ! promptValue;
+					if ( charCount ) {
+						charCount.textContent = `${promptField.value.length}/2000`;
+					}
+				};
+
+				const triggerGeneration = function () {
+					const prompt = promptField.value.trim();
+					if ( ! prompt ) {
+						promptField.focus();
+						return;
+					}
+
+					generateButton.disabled = true;
+					generateButton.textContent = <?php echo wp_json_encode( __( 'Redirecting...', 'sureforms' ) ); ?>;
+
+					const redirectUrl = new URL( <?php echo wp_json_encode( $redirect_url ); ?>, window.location.origin );
+					redirectUrl.searchParams.set( 'srfm_ai_dashboard_prompt', prompt );
+
+					const requestBody = new URLSearchParams();
+					requestBody.append( 'action', 'srfm_ai_widget_usage' );
+					requestBody.append( 'nonce', <?php echo wp_json_encode( wp_create_nonce( 'srfm_ai_widget_usage' ) ); ?> );
+
+					fetch( <?php echo wp_json_encode( admin_url( 'admin-ajax.php' ) ); ?>, {
+						method: 'POST',
+						credentials: 'same-origin',
+						headers: {
+							'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+						},
+						body: requestBody.toString(),
+					} ).finally( function () {
+						window.location.href = redirectUrl.toString();
+					} );
+				};
+
+				promptField.addEventListener( 'input', updateWidgetState );
+				generateButton.addEventListener( 'click', triggerGeneration );
+				promptField.addEventListener( 'keydown', function ( event ) {
+					if ( event.key === 'Enter' && ( event.metaKey || event.ctrlKey ) ) {
+						event.preventDefault();
+						triggerGeneration();
+					}
+				} );
+
+				updateWidgetState();
+			}() );
+		</script>
+		<?php
+	}
+
+	/**
+	 * Track AI dashboard widget usage.
+	 *
+	 * @return void
+	 * @since 2.7.0
+	 */
+	public function track_ai_widget_usage() {
+		if ( ! check_ajax_referer( 'srfm_ai_widget_usage', 'nonce', false ) ) {
+			wp_send_json_error( [ 'message' => __( 'Invalid nonce.', 'sureforms' ) ], 403 );
+		}
+
+		if ( ! Helper::current_user_can() ) {
+			wp_send_json_error( [ 'message' => __( 'Unauthorized user.', 'sureforms' ) ], 403 );
+		}
+
+		$current_count = (int) Helper::get_srfm_option( 'ai_dashboard_widget_uses', 0 );
+		Helper::update_srfm_option( 'ai_dashboard_widget_uses', $current_count + 1 );
+
+		wp_send_json_success();
 	}
 
 	/**
