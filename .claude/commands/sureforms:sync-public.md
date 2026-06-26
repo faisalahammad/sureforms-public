@@ -18,7 +18,7 @@ Edit this list when the leak surface changes — there is no other place to upda
 .scripts/git-hooks
 internal-docs
 docs
-CLAUDE.md            # ALL CLAUDE.md at ANY depth (root + nested, e.g. inc/abilities/, tests/play/specs/) — stripped via `git ls-files '*CLAUDE.md' 'CLAUDE.md'`, NOT just the root path
+CLAUDE.md            # ALL CLAUDE.md at ANY depth (root + nested, e.g. inc/abilities/, tests/play/specs/) — stripped via `git ls-files '*CLAUDE.md'` (matches the root file too), NOT just the root path
 ARCHITECTURE.md
 COMPREHENSIVE_ANALYSIS.md
 PRODUCT_ANALYSIS.md
@@ -143,20 +143,32 @@ for p in \
   fi
 done
 
-# Strip ALL CLAUDE.md at any depth (root + nested) — NOT just the root path
-git ls-files '*CLAUDE.md' 'CLAUDE.md' | while read -r f; do
-  git rm --quiet "$f"
-done
+# Strip ALL CLAUDE.md at any depth (root + nested) — NOT just the root path.
+# No pipe-to-while: a subshell would swallow a failing `git rm`. These paths never
+# contain spaces, so word-splitting the list is safe.
+CLAUDE_FILES=$(git ls-files '*CLAUDE.md')
+if [ -n "$CLAUDE_FILES" ]; then
+  git rm --quiet $CLAUDE_FILES
+fi
 
 # Remove now-empty .scripts directory if applicable
 if [ -d .scripts ] && [ -z "$(ls -A .scripts 2>/dev/null)" ]; then
   rmdir .scripts
 fi
 
-# Sanity check: README.md must be the ONLY non-third-party markdown doc left
-git ls-files '*.md' | grep -vE '^(README\.md|inc/lib/|modules/gutenberg/readme\.md|tests/play/README\.md|inc/abilities/ABILITIES\.md)$' \
-  && echo "WARNING: unexpected .md files remain — review before continuing" || echo "OK: only README.md + known readmes"
+# Sanity check (FAIL-CLOSED): README.md must be the ONLY non-third-party markdown
+# doc left. This control already leaked once — a detected anomaly must HALT the
+# sync, not just warn. The check runs in the temp worktree before any push, so
+# aborting here means nothing internal reaches the mirror.
+LEAKS=$(git ls-files '*.md' | grep -vE '^(README\.md|inc/lib/.*|modules/gutenberg/readme\.md|tests/play/README\.md|inc/abilities/ABILITIES\.md)$') || true
+if [ -n "$LEAKS" ]; then
+  printf 'ABORT: unexpected markdown would be published:\n%s\n' "$LEAKS"
+  exit 1
+fi
+echo "OK: only README.md + known readmes"
 ```
+
+> If the sanity check aborts (`exit 1`), treat it as a failed step: jump to **Error Recovery** to tear down the temp worktree and restore the developer's branch/stash before investigating which path needs adding to the **Stripped paths** list.
 
 ### Step 6: Commit the strip, then bulk re-sign ALL commits
 
