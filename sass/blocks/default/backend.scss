@@ -83,6 +83,123 @@
 		.srfm-textarea-quill {
 			@include srfm-textarea-quill-styles;
 
+			// Quill 1.x (react-quill) renders list markers via CSS ::before pseudo-elements.
+			// The vendor quill.snow.css uses .ql-ui child elements (Quill 2.x approach) which
+			// only applies to the frontend textarea. These rules cover the block-editor canvas.
+			.ql-editor {
+				min-height: 200px;
+
+				ul > li::before {
+					content: '\2022';
+				}
+
+				li::before {
+					display: inline-block;
+					white-space: nowrap;
+					width: 1.2em;
+				}
+
+				li:not( .ql-direction-rtl )::before {
+					margin-left: -1.5em;
+					margin-right: 0.3em;
+					text-align: right;
+				}
+
+				li.ql-direction-rtl::before {
+					margin-left: 0.3em;
+					margin-right: -1.5em;
+				}
+
+				ol li {
+					counter-reset: list-1 list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9;
+					counter-increment: list-0;
+				}
+
+				ol li::before {
+					content: counter( list-0, decimal ) '. ';
+				}
+
+				ol li.ql-indent-1 {
+					counter-increment: list-1;
+					counter-reset: list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9;
+				}
+
+				ol li.ql-indent-1::before {
+					content: counter( list-1, lower-alpha ) '. ';
+				}
+
+				ol li.ql-indent-2 {
+					counter-increment: list-2;
+					counter-reset: list-3 list-4 list-5 list-6 list-7 list-8 list-9;
+				}
+
+				ol li.ql-indent-2::before {
+					content: counter( list-2, lower-roman ) '. ';
+				}
+
+				ol li.ql-indent-3 {
+					counter-increment: list-3;
+					counter-reset: list-4 list-5 list-6 list-7 list-8 list-9;
+				}
+
+				ol li.ql-indent-3::before {
+					content: counter( list-3, decimal ) '. ';
+				}
+
+				ol li.ql-indent-4 {
+					counter-increment: list-4;
+					counter-reset: list-5 list-6 list-7 list-8 list-9;
+				}
+
+				ol li.ql-indent-4::before {
+					content: counter( list-4, lower-alpha ) '. ';
+				}
+
+				ol li.ql-indent-5 {
+					counter-increment: list-5;
+					counter-reset: list-6 list-7 list-8 list-9;
+				}
+
+				ol li.ql-indent-5::before {
+					content: counter( list-5, lower-roman ) '. ';
+				}
+
+				ol li.ql-indent-6 {
+					counter-increment: list-6;
+					counter-reset: list-7 list-8 list-9;
+				}
+
+				ol li.ql-indent-6::before {
+					content: counter( list-6, decimal ) '. ';
+				}
+
+				ol li.ql-indent-7 {
+					counter-increment: list-7;
+					counter-reset: list-8 list-9;
+				}
+
+				ol li.ql-indent-7::before {
+					content: counter( list-7, lower-alpha ) '. ';
+				}
+
+				ol li.ql-indent-8 {
+					counter-increment: list-8;
+					counter-reset: list-9;
+				}
+
+				ol li.ql-indent-8::before {
+					content: counter( list-8, lower-roman ) '. ';
+				}
+
+				ol li.ql-indent-9 {
+					counter-increment: list-9;
+				}
+
+				ol li.ql-indent-9::before {
+					content: counter( list-9, decimal ) '. ';
+				}
+			}
+
 			// Add the background color for the quill textarea input.
 			.quill {
 				background-color: var( --srfm-color-input-background );
@@ -92,9 +209,6 @@
 
 			.ql-container.ql-snow {
 				border: none;
-			}
-			.ql-editor {
-				min-height: 200px;
 			}
 		}
 	}
