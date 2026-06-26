@@ -313,11 +313,20 @@ class Field_Validation {
 				$domain_max   = isset( $email_limits['domain'] ) ? absint( $email_limits['domain'] ) : 255;
 				$local_len    = mb_strlen( substr( $value, 0, $at_pos ) );
 				$domain_len   = mb_strlen( substr( $value, $at_pos + 1 ) );
-				if ( ( $local_max > 0 && $local_len > $local_max ) || ( $domain_max > 0 && $domain_len > $domain_max ) ) {
-					$dynamic_messages         = Translatable::dynamic_validation_messages();
-					$not_valid_fields[ $key ] = isset( $dynamic_messages['srfm_email_char_limit'] ) && is_string( $dynamic_messages['srfm_email_char_limit'] ) && '' !== $dynamic_messages['srfm_email_char_limit']
-						? $dynamic_messages['srfm_email_char_limit']
-						: __( 'Please enter a shorter email address.', 'sureforms' );
+
+				$dynamic_messages = Translatable::dynamic_validation_messages();
+				if ( $local_max > 0 && $local_len > $local_max ) {
+					$local_message = isset( $dynamic_messages['srfm_email_local_max_length'] ) && is_string( $dynamic_messages['srfm_email_local_max_length'] ) && '' !== $dynamic_messages['srfm_email_local_max_length']
+						? $dynamic_messages['srfm_email_local_max_length']
+						/* translators: %s: maximum characters allowed before the @ symbol. */
+						: __( 'The part before @ may not exceed %s characters.', 'sureforms' );
+					$not_valid_fields[ $key ] = sprintf( $local_message, $local_max );
+				} elseif ( $domain_max > 0 && $domain_len > $domain_max ) {
+					$domain_message = isset( $dynamic_messages['srfm_email_domain_max_length'] ) && is_string( $dynamic_messages['srfm_email_domain_max_length'] ) && '' !== $dynamic_messages['srfm_email_domain_max_length']
+						? $dynamic_messages['srfm_email_domain_max_length']
+						/* translators: %s: maximum characters allowed after the @ symbol. */
+						: __( 'The part after @ may not exceed %s characters.', 'sureforms' );
+					$not_valid_fields[ $key ] = sprintf( $domain_message, $domain_max );
 				}
 			}
 		}
