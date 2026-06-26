@@ -321,6 +321,30 @@ export async function fieldValidation(
 					validateResult = true;
 				}
 
+				// RFC 5321 length limits — local part <= 64, domain <= 255 (split on the
+				// last @). Mirrors the server-side check (which is authoritative, so a
+				// `srfm_email_field_char_limits` filter override is still enforced there).
+				const exceedsEmailLength = ( val ) => {
+					if ( typeof val !== 'string' || ! val.includes( '@' ) ) {
+						return false;
+					}
+					const at = val.lastIndexOf( '@' );
+					return (
+						val.slice( 0, at ).length > 64 ||
+						val.slice( at + 1 ).length > 255
+					);
+				};
+
+				if ( inputValue && exceedsEmailLength( inputValue ) ) {
+					if ( errorMessage ) {
+						errorMessage.textContent =
+							window?.srfm_submit?.messages?.srfm_email_char_limit;
+					}
+					window?.srfm?.toggleErrorState( parent, true );
+					setFirstErrorInput( inputField, parent );
+					validateResult = true;
+				}
+
 				if ( confirmParent ) {
 					const confirmInput = confirmParent.querySelector(
 						'.srfm-input-email-confirm'
@@ -356,6 +380,18 @@ export async function fieldValidation(
 						validateResult = true;
 					} else {
 						window?.srfm?.toggleErrorState( confirmParent, false );
+					}
+
+					// Length check on the confirm value too (it must match the main
+					// value, but flag it directly so the error surfaces on this input).
+					if ( confirmValue && exceedsEmailLength( confirmValue ) ) {
+						if ( confirmError ) {
+							confirmError.textContent =
+								window?.srfm_submit?.messages?.srfm_email_char_limit;
+						}
+						window?.srfm?.toggleErrorState( confirmParent, true );
+						setFirstErrorInput( confirmInput, confirmParent );
+						validateResult = true;
 					}
 
 					// remove the error message on input of the email confirm field

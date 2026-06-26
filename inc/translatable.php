@@ -93,6 +93,8 @@ class Translatable {
 			/* translators: %s represents the minimum number of characters required */
 			'srfm_textarea_min_chars'          => __( 'Please enter at least %s characters.', 'sureforms' ),
 
+			'srfm_email_char_limit'            => __( 'Please enter a shorter email address.', 'sureforms' ),
+
 			/* translators: %s represents the minimum acceptable value */
 			'srfm_input_min_value'             => __( 'Minimum value is %s.', 'sureforms' ),
 
@@ -132,6 +134,7 @@ class Translatable {
 			'srfm_confirm_email_same'          => 'Confirmation email does not match.',
 			'srfm_valid_email'                 => 'Enter a valid email address.',
 			'srfm_textarea_min_chars'          => 'Please enter at least %s characters.',
+			'srfm_email_char_limit'            => 'Please enter a shorter email address.',
 			'srfm_input_min_value'             => 'Minimum value is %s.',
 			'srfm_input_max_value'             => 'Maximum value is %s.',
 			'srfm_dropdown_min_selections'     => 'Select at least %s options.',

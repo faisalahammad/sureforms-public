@@ -295,6 +295,31 @@ class Field_Validation {
 					$not_valid_fields[ $key ] = sprintf( $min_chars_message, $min_length );
 				}
 			}
+
+			// Email field RFC 5321 length limits (local part / domain), overridable via filter.
+			// Only the main email value is in form data (the confirm input has no `name`),
+			// so the server validates that value; the client mirrors this for both inputs.
+			// Split on the LAST @ per RFC 5321 so the local part may contain a quoted @.
+			$at_pos = is_string( $value ) && '' !== $value ? strrpos( $value, '@' ) : false;
+			if ( 'srfm-email' === $get_field_name && is_string( $value ) && false !== $at_pos ) {
+				$email_limits = apply_filters(
+					'srfm_email_field_char_limits',
+					[
+						'local'  => 64,
+						'domain' => 255,
+					]
+				);
+				$local_max    = isset( $email_limits['local'] ) ? absint( $email_limits['local'] ) : 64;
+				$domain_max   = isset( $email_limits['domain'] ) ? absint( $email_limits['domain'] ) : 255;
+				$local_len    = mb_strlen( substr( $value, 0, $at_pos ) );
+				$domain_len   = mb_strlen( substr( $value, $at_pos + 1 ) );
+				if ( ( $local_max > 0 && $local_len > $local_max ) || ( $domain_max > 0 && $domain_len > $domain_max ) ) {
+					$dynamic_messages         = Translatable::dynamic_validation_messages();
+					$not_valid_fields[ $key ] = isset( $dynamic_messages['srfm_email_char_limit'] ) && is_string( $dynamic_messages['srfm_email_char_limit'] ) && '' !== $dynamic_messages['srfm_email_char_limit']
+						? $dynamic_messages['srfm_email_char_limit']
+						: __( 'Please enter a shorter email address.', 'sureforms' );
+				}
+			}
 		}
 
 		// Return the array of invalid fields and their error messages.
