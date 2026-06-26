@@ -339,6 +339,11 @@ export async function fieldValidation(
 					if ( errorMessage ) {
 						errorMessage.textContent =
 							window?.srfm_submit?.messages?.srfm_email_char_limit;
+						// The email field's error message is hidden by default and only
+						// revealed via an explicit display:block (same as the format-error
+						// and confirm-mismatch handlers) — without this the red border
+						// shows but the message stays hidden.
+						errorMessage.style.display = 'block';
 					}
 					window?.srfm?.toggleErrorState( parent, true );
 					setFirstErrorInput( inputField, parent );
@@ -388,6 +393,7 @@ export async function fieldValidation(
 						if ( confirmError ) {
 							confirmError.textContent =
 								window?.srfm_submit?.messages?.srfm_email_char_limit;
+							confirmError.style.display = 'block';
 						}
 						window?.srfm?.toggleErrorState( confirmParent, true );
 						setFirstErrorInput( confirmInput, confirmParent );
@@ -1125,14 +1131,25 @@ function addEmailBlurListener( areaInput, blockClass ) {
 				confirmErrorContainer.style.display = 'none';
 			}
 
+			// RFC 5321 length limits (local <= 64, domain <= 255, split on the last @).
+			// A too-long address can still be a valid format, so flag it here too and
+			// show the length-specific message; otherwise fall back to the format error.
+			const emailValueAt = emailField.value.lastIndexOf( '@' );
+			const exceedsEmailLength =
+				emailValueAt !== -1 &&
+				( emailField.value.slice( 0, emailValueAt ).length > 64 ||
+					emailField.value.slice( emailValueAt + 1 ).length > 255 );
+
 			// Handle general email validation
-			if ( '' !== emailField?.value && ! isValidEmail ) {
+			if ( '' !== emailField?.value && ( ! isValidEmail || exceedsEmailLength ) ) {
 				inputBlock.parentElement.classList.add(
 					'srfm-valid-email-error'
 				);
 				errorContainer.style.display = 'block';
 				errorContainer.innerHTML =
-					window?.srfm_submit?.messages?.srfm_valid_email;
+					exceedsEmailLength && isValidEmail
+						? window?.srfm_submit?.messages?.srfm_email_char_limit
+						: window?.srfm_submit?.messages?.srfm_valid_email;
 				errorContainer.id =
 					errorContainer.getAttribute( 'data-srfm-id' );
 			} else {
