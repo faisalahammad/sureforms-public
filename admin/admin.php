@@ -894,6 +894,13 @@ class Admin {
 			wp_enqueue_style( SRFM_SLUG . '-intl', $vendor_css_uri . 'intl/intlTelInput-backend.min.css', [], SRFM_VER );
 			wp_enqueue_style( SRFM_SLUG . '-common', $css_uri . 'common' . $file_prefix . '.css', [], SRFM_VER );
 			wp_enqueue_style( SRFM_SLUG . '-reactQuill', $vendor_css_uri . 'quill/quill.snow.css', [], SRFM_VER );
+			// Quill 1.x (react-quill) renders bullet list markers via CSS ::before pseudo-elements,
+			// whereas the vendor quill.snow.css targets .ql-ui child elements (Quill 2.x approach).
+			// These rules restore bullet-point visibility when react-quill is used in the admin editor.
+			wp_add_inline_style(
+				SRFM_SLUG . '-reactQuill',
+				'.ql-editor ul,.ql-editor ol{padding-left:1.5em}.ql-editor ul>li,.ql-editor ol>li{list-style-type:none}.ql-editor ul>li::before{content:"\2022"}.ql-editor li::before{display:inline-block;white-space:nowrap;width:1.2em}.ql-editor li:not(.ql-direction-rtl)::before{margin-left:-1.5em;margin-right:.3em;text-align:right}.ql-editor li.ql-direction-rtl::before{margin-left:.3em;margin-right:-1.5em}'
+			);
 			wp_enqueue_style( SRFM_SLUG . '-single-form-modal', $css_uri . 'single-form-setting' . $file_prefix . '.css', [], SRFM_VER );
 
 			// if version is equal to or lower than 6.6.2 then add compatibility css.
@@ -1334,6 +1341,13 @@ class Admin {
 			// Enqueue Tailwind and Quill editor styles for the settings page.
 			wp_enqueue_style( SRFM_SLUG . '-settings-build', SRFM_URL . 'assets/build/settings.css', [], SRFM_VER, 'all' );
 			wp_enqueue_style( SRFM_SLUG . '-reactQuill', SRFM_URL . 'assets/css/minified/deps/quill/quill.snow.css', [], SRFM_VER );
+			// Quill 1.x (react-quill) renders bullet list markers via CSS ::before pseudo-elements,
+			// whereas the vendor quill.snow.css targets .ql-ui child elements (Quill 2.x approach).
+			// These rules restore bullet-point visibility when react-quill is used in the admin editor.
+			wp_add_inline_style(
+				SRFM_SLUG . '-reactQuill',
+				'.ql-editor ul,.ql-editor ol{padding-left:1.5em}.ql-editor ul>li,.ql-editor ol>li{list-style-type:none}.ql-editor ul>li::before{content:"\2022"}.ql-editor li::before{display:inline-block;white-space:nowrap;width:1.2em}.ql-editor li:not(.ql-direction-rtl)::before{margin-left:-1.5em;margin-right:.3em;text-align:right}.ql-editor li.ql-direction-rtl::before{margin-left:.3em;margin-right:-1.5em}'
+			);
 
 			$script_translations_handlers[] = SRFM_SLUG . '-settings';
 		}

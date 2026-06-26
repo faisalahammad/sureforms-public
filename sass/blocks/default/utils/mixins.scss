@@ -449,6 +449,41 @@
 			box-shadow: none; // Override astra theme styling for the box shadow
 		}
 	}
+	// Quill 1.x (react-quill) renders bullet list markers via CSS ::before pseudo-elements,
+	// whereas the vendor quill.snow.css targets .ql-ui child elements (Quill 2.x approach).
+	// These rules ensure bullet points are visible when react-quill is used in the admin editor.
+	.ql-editor {
+		ol,
+		ul {
+			padding-left: 1.5em;
+		}
+
+		ol > li,
+		ul > li {
+			list-style-type: none;
+		}
+
+		ul > li::before {
+			content: '\2022';
+		}
+
+		li::before {
+			display: inline-block;
+			white-space: nowrap;
+			width: 1.2em;
+		}
+
+		li:not( .ql-direction-rtl )::before {
+			margin-left: -1.5em;
+			margin-right: 0.3em;
+			text-align: right;
+		}
+
+		li.ql-direction-rtl::before {
+			margin-left: 0.3em;
+			margin-right: -1.5em;
+		}
+	}
 }
 // Row Gap and Column Gap Mixin.
 @mixin srfm-gap-styles {
