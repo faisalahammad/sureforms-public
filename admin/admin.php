@@ -1922,7 +1922,7 @@ class Admin {
 			return;
 		}
 
-		// Always register the AI quick draft dashboard widget.
+		// Register the AI quick draft widget for capable users (the capability gate above applies); unlike the recent-entries widget below, it is not conditional on having entries.
 		add_action( 'wp_dashboard_setup', [ $this, 'register_ai_dashboard_widget' ] );
 
 		// Quick check if there are any entries in the last 7 days.
