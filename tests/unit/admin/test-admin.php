@@ -292,6 +292,122 @@ class Test_Admin extends TestCase {
 		$this->assertStringContainsString( 'Recent Entries', $output );
 		$this->assertStringContainsString( 'Contact Form', $output );
 	}
+
+	/**
+	 * Test maybe_register_dashboard_widget wires up the dashboard widgets.
+	 *
+	 * It always hooks the AI quick draft widget onto wp_dashboard_setup and
+	 * returns void without throwing. (With no logged-in user the capability
+	 * check short-circuits, so this also covers the early-return path.)
+	 *
+	 * @since 2.13.0
+	 */
+	public function test_maybe_register_dashboard_widget() {
+		$admin = Admin::get_instance();
+
+		// Should not throw; returns void.
+		$this->assertNull( $admin->maybe_register_dashboard_widget() );
+
+		$reflection  = new \ReflectionMethod( $admin, 'maybe_register_dashboard_widget' );
+		$source_file = $reflection->getFileName();
+		$start_line  = $reflection->getStartLine();
+		$end_line    = $reflection->getEndLine();
+		$source      = implode( '', array_slice( file( $source_file ), $start_line - 1, $end_line - $start_line + 1 ) );
+
+		$this->assertStringContainsString( 'register_ai_dashboard_widget', $source, 'AI quick draft widget should always be registered.' );
+		$this->assertStringContainsString( 'wp_dashboard_setup', $source, 'Widgets should register on the wp_dashboard_setup hook.' );
+	}
+
+	/**
+	 * Test register_dashboard_widget registers the recent-entries widget.
+	 *
+	 * @since 2.13.0
+	 */
+	public function test_register_dashboard_widget() {
+		$admin = Admin::get_instance();
+
+		$reflection  = new \ReflectionMethod( $admin, 'register_dashboard_widget' );
+		$source_file = $reflection->getFileName();
+		$start_line  = $reflection->getStartLine();
+		$end_line    = $reflection->getEndLine();
+		$source      = implode( '', array_slice( file( $source_file ), $start_line - 1, $end_line - $start_line + 1 ) );
+
+		$this->assertStringContainsString( 'sureforms_recent_entries', $source, 'Recent entries widget should use the sureforms_recent_entries id.' );
+		$this->assertStringContainsString( 'render_dashboard_widget', $source, 'Recent entries widget should render via render_dashboard_widget.' );
+
+		// Calling it should not throw when the dashboard API is available.
+		if ( function_exists( 'wp_add_dashboard_widget' ) ) {
+			$this->assertNull( $admin->register_dashboard_widget() );
+		}
+	}
+
+	/**
+	 * Test register_ai_dashboard_widget registers the AI quick draft widget.
+	 *
+	 * @since 2.13.0
+	 */
+	public function test_register_ai_dashboard_widget() {
+		$admin = Admin::get_instance();
+
+		$reflection  = new \ReflectionMethod( $admin, 'register_ai_dashboard_widget' );
+		$source_file = $reflection->getFileName();
+		$start_line  = $reflection->getStartLine();
+		$end_line    = $reflection->getEndLine();
+		$source      = implode( '', array_slice( file( $source_file ), $start_line - 1, $end_line - $start_line + 1 ) );
+
+		$this->assertStringContainsString( 'sureforms_ai_quick_draft', $source, 'AI dashboard widget should use the sureforms_ai_quick_draft id.' );
+		$this->assertStringContainsString( 'render_ai_dashboard_widget', $source, 'AI dashboard widget should render via render_ai_dashboard_widget.' );
+
+		// Calling it should not throw when the dashboard API is available.
+		if ( function_exists( 'wp_add_dashboard_widget' ) ) {
+			$this->assertNull( $admin->register_ai_dashboard_widget() );
+		}
+	}
+
+	/**
+	 * Test render_ai_dashboard_widget outputs the AI quick draft widget markup.
+	 *
+	 * @since 2.13.0
+	 */
+	public function test_render_ai_dashboard_widget() {
+		$admin = Admin::get_instance();
+
+		ob_start();
+		$admin->render_ai_dashboard_widget();
+		$output = ob_get_clean();
+
+		$this->assertStringContainsString( 'srfm-ai-dashboard-widget', $output, 'Widget should render its wrapper.' );
+		$this->assertStringContainsString( 'srfm-ai-dashboard-prompt', $output, 'Widget should render the prompt field.' );
+		$this->assertStringContainsString( 'srfm-ai-dashboard-generate', $output, 'Widget should render the generate button.' );
+	}
+
+	/**
+	 * Test track_ai_widget_usage verifies the nonce, checks capability, and
+	 * increments the usage counter.
+	 *
+	 * The method is an AJAX handler that terminates via wp_send_json_*; rather
+	 * than invoke it (which would exit the test runner), we assert its contract
+	 * by inspecting the resolved source — matching the established pattern for
+	 * AJAX handlers in this suite.
+	 *
+	 * @since 2.13.0
+	 */
+	public function test_track_ai_widget_usage() {
+		$admin = Admin::get_instance();
+		$this->assertTrue( method_exists( $admin, 'track_ai_widget_usage' ) );
+
+		$reflection = new \ReflectionMethod( $admin, 'track_ai_widget_usage' );
+		$this->assertTrue( $reflection->isPublic(), 'track_ai_widget_usage should be a public method.' );
+
+		$source_file = $reflection->getFileName();
+		$start_line  = $reflection->getStartLine();
+		$end_line    = $reflection->getEndLine();
+		$source      = implode( '', array_slice( file( $source_file ), $start_line - 1, $end_line - $start_line + 1 ) );
+
+		$this->assertStringContainsString( "check_ajax_referer( 'srfm_ai_widget_usage'", $source, 'Usage tracking must verify the srfm_ai_widget_usage nonce.' );
+		$this->assertStringContainsString( 'current_user_can', $source, 'Usage tracking must check the user capability.' );
+		$this->assertStringContainsString( 'ai_dashboard_widget_uses', $source, 'Usage tracking must increment the ai_dashboard_widget_uses counter.' );
+	}
 }
 
 /**
