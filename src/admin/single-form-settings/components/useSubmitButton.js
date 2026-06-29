@@ -1,7 +1,6 @@
-import { useEffect, useRef } from '@wordpress/element';
+import { useEffect, useRef, createRoot } from '@wordpress/element';
 import { useSelect } from '@wordpress/data';
 import { store as editorStore } from '@wordpress/editor';
-import { createRoot } from 'react-dom/client';
 import { RichText } from '@wordpress/block-editor';
 import { __ } from '@wordpress/i18n';
 import { BlockInserterWrapper } from '../Inserter.js';
