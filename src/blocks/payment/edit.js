@@ -24,6 +24,26 @@ import MultiButtonsControl from '@Components/multi-buttons-control';
 import BillingCyclesControl from './components/billing-cycles-control.js';
 // BOTH MODE: "both" mode reuses the same single-select controls as subscription mode.
 
+/**
+ * Recursively flatten a block tree into a single list (parents + all descendants).
+ *
+ * Field-mapping dropdowns must see fields nested inside container blocks — e.g. the
+ * User Registration (`srfm/register`) and Address (`srfm/address`) blocks hold their
+ * `srfm/email` / `srfm/input` fields as innerBlocks. Without flattening, those nested
+ * fields never appear in the Email / Name / amount selectors.
+ *
+ * @param {Array} blocks Block list (each may have an `innerBlocks` array).
+ * @return {Array} Flat list of all blocks including nested innerBlocks.
+ */
+const flattenBlocks = ( blocks ) =>
+	( blocks || [] ).reduce( ( acc, block ) => {
+		acc.push( block );
+		if ( block?.innerBlocks?.length ) {
+			acc.push( ...flattenBlocks( block.innerBlocks ) );
+		}
+		return acc;
+	}, [] );
+
 const Edit = ( props ) => {
 	const { clientId, attributes, setAttributes, isSelected } = props;
 	const {
@@ -82,7 +102,9 @@ const Edit = ( props ) => {
 		}
 
 		try {
-			const blocks = getBlocks();
+			// Flatten so fields nested inside container blocks (User Registration,
+			// Address, …) are enumerated too, not just top-level blocks.
+			const blocks = flattenBlocks( getBlocks() );
 			const emailsFields = [];
 			const nameFields = [];
 			const variableAmountFields = [];
