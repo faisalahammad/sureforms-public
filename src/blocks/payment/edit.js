@@ -13,6 +13,7 @@ import InspectorTab, {
 import SRFMAdvancedPanelBody from '@Components/advanced-panel-body';
 import SRFMTextControl from '@Components/text-control';
 import { useGetCurrentFormId } from '../../blocks-attributes/getFormId';
+import { flattenBlocks } from '@Utils/Helpers';
 import { PaymentComponent } from './components/default.js';
 import AddInitialAttr from '@Controls/addInitialAttr';
 import { compose } from '@wordpress/compose';
@@ -23,26 +24,6 @@ import Separator from '@Components/separator';
 import MultiButtonsControl from '@Components/multi-buttons-control';
 import BillingCyclesControl from './components/billing-cycles-control.js';
 // BOTH MODE: "both" mode reuses the same single-select controls as subscription mode.
-
-/**
- * Recursively flatten a block tree into a single list (parents + all descendants).
- *
- * Field-mapping dropdowns must see fields nested inside container blocks — e.g. the
- * User Registration (`srfm/register`) and Address (`srfm/address`) blocks hold their
- * `srfm/email` / `srfm/input` fields as innerBlocks. Without flattening, those nested
- * fields never appear in the Email / Name / amount selectors.
- *
- * @param {Array} blocks Block list (each may have an `innerBlocks` array).
- * @return {Array} Flat list of all blocks including nested innerBlocks.
- */
-const flattenBlocks = ( blocks ) =>
-	( blocks || [] ).reduce( ( acc, block ) => {
-		acc.push( block );
-		if ( block?.innerBlocks?.length ) {
-			acc.push( ...flattenBlocks( block.innerBlocks ) );
-		}
-		return acc;
-	}, [] );
 
 const Edit = ( props ) => {
 	const { clientId, attributes, setAttributes, isSelected } = props;
@@ -102,9 +83,28 @@ const Edit = ( props ) => {
 		}
 
 		try {
+			const allBlocks = getBlocks();
 			// Flatten so fields nested inside container blocks (User Registration,
-			// Address, …) are enumerated too, not just top-level blocks.
-			const blocks = flattenBlocks( getBlocks() );
+			// Address, …) are enumerated too, not just top-level blocks. Repeater
+			// children are excluded: every instance shares the same slug class and
+			// values submit as indexed arrays, so they can't resolve to a single
+			// payment customer email/name value.
+			const blocks = flattenBlocks( allBlocks, {
+				excludeChildrenOf: [ 'srfm/repeater' ],
+			} );
+
+			// Address inner inputs (City / State / Line 1) resolve fine but clutter the
+			// Customer Name dropdown, so collect their slugs to skip them from that list.
+			const addressDescendantSlugs = new Set(
+				flattenBlocks( allBlocks )
+					.filter( ( block ) => block?.name === 'srfm/address' )
+					.flatMap( ( addressBlock ) =>
+						flattenBlocks( addressBlock.innerBlocks || [] )
+							.map( ( child ) => child.attributes?.slug )
+							.filter( Boolean )
+					)
+			);
+
 			const emailsFields = [];
 			const nameFields = [];
 			const variableAmountFields = [];
@@ -127,11 +127,14 @@ const Edit = ( props ) => {
 							type: 'email',
 						} );
 					} else if ( blockName === 'srfm/input' ) {
-						nameFields.push( {
-							slug,
-							label: `${ label } (input)`,
-							type: 'input',
-						} );
+						// Skip Address inner inputs — UX noise in the Name dropdown.
+						if ( ! addressDescendantSlugs.has( slug ) ) {
+							nameFields.push( {
+								slug,
+								label: `${ label } (input)`,
+								type: 'input',
+							} );
+						}
 					} else if ( blockName === 'srfm/number' ) {
 						variableAmountFields.push( {
 							slug,
