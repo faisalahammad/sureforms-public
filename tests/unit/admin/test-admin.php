@@ -393,6 +393,49 @@ class Test_Admin extends TestCase {
 	}
 
 	/**
+	 * Test enqueue_ai_dashboard_widget_assets enqueues the widget script only on the dashboard.
+	 *
+	 * Asserts the gate (no enqueue outside index.php) and that, on the dashboard for a capable user,
+	 * the script is enqueued with its localized config — instead of grepping the method source.
+	 *
+	 * @since x.x.x
+	 */
+	public function test_enqueue_ai_dashboard_widget_assets() {
+		$admin = Admin::get_instance();
+
+		$user_id = wp_insert_user(
+			[
+				'user_login' => 'srfm_admin_' . uniqid(),
+				'user_pass'  => 'password',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( $user_id );
+
+		// Not the dashboard: nothing should be enqueued.
+		wp_dequeue_script( 'srfm-ai-dashboard-widget' );
+		wp_deregister_script( 'srfm-ai-dashboard-widget' );
+		$admin->enqueue_ai_dashboard_widget_assets( 'edit.php' );
+		$this->assertFalse(
+			wp_script_is( 'srfm-ai-dashboard-widget', 'enqueued' ),
+			'Widget script should not load outside the dashboard.'
+		);
+
+		// Dashboard + capable user: the script is enqueued with its localized config.
+		$admin->enqueue_ai_dashboard_widget_assets( 'index.php' );
+		$this->assertTrue(
+			wp_script_is( 'srfm-ai-dashboard-widget', 'enqueued' ),
+			'Widget script should be enqueued on the dashboard for capable users.'
+		);
+		$data = wp_scripts()->get_data( 'srfm-ai-dashboard-widget', 'data' );
+		$this->assertStringContainsString(
+			'srfmAiDashboardWidget',
+			(string) $data,
+			'Localized config object should be attached to the widget script.'
+		);
+	}
+
+	/**
 	 * Test track_ai_widget_usage increments the usage counter for a valid, capable request.
 	 *
 	 * The handler ends in wp_send_json_success() (which calls wp_die), so the wp_die handlers are
