@@ -1,5 +1,22 @@
 import { applyFilters } from '@wordpress/hooks';
 
+/**
+ * Resolve the RFC 5321 email character limits.
+ *
+ * Reads the server-resolved limits localized into `srfm_submit` (which honor the
+ * `srfm_email_field_char_limits` filter), falling back to the RFC defaults so a site that
+ * raises a limit isn't false-blocked client-side with the wrong number.
+ *
+ * @return {{local: number, domain: number}} Resolved limits (0 disables a check).
+ */
+function getEmailCharLimits() {
+	const limits = window?.srfm_submit?.email_char_limits;
+	return {
+		local: limits?.local ?? 64,
+		domain: limits?.domain ?? 255,
+	};
+}
+
 async function getUniqueValidationData( checkData, formId, ajaxUrl, token ) {
 	let queryString =
 		'action=validation_ajax_action&token=' +
@@ -329,19 +346,24 @@ export async function fieldValidation(
 					if ( typeof val !== 'string' || ! val.includes( '@' ) ) {
 						return '';
 					}
+					const { local: localMax, domain: domainMax } =
+						getEmailCharLimits();
 					const at = val.lastIndexOf( '@' );
-					if ( val.slice( 0, at ).length > 64 ) {
+					if ( localMax > 0 && val.slice( 0, at ).length > localMax ) {
 						return window?.srfm?.srfmSprintfString(
 							window?.srfm_submit?.messages
 								?.srfm_email_local_max_length,
-							64
+							localMax
 						);
 					}
-					if ( val.slice( at + 1 ).length > 255 ) {
+					if (
+						domainMax > 0 &&
+						val.slice( at + 1 ).length > domainMax
+					) {
 						return window?.srfm?.srfmSprintfString(
 							window?.srfm_submit?.messages
 								?.srfm_email_domain_max_length,
-							255
+							domainMax
 						);
 					}
 					return '';
@@ -1150,22 +1172,27 @@ function addEmailBlurListener( areaInput, blockClass ) {
 			// RFC 5321 length limits (local <= 64, domain <= 255, split on the last @).
 			// A too-long address can still be a valid format, so flag it here too and
 			// show the length-specific message; otherwise fall back to the format error.
+			const { local: localMax, domain: domainMax } = getEmailCharLimits();
 			const emailValueAt = emailField.value.lastIndexOf( '@' );
 			let lengthErrorMessage = '';
 			if ( emailValueAt !== -1 ) {
-				if ( emailField.value.slice( 0, emailValueAt ).length > 64 ) {
+				if (
+					localMax > 0 &&
+					emailField.value.slice( 0, emailValueAt ).length > localMax
+				) {
 					lengthErrorMessage = window?.srfm?.srfmSprintfString(
 						window?.srfm_submit?.messages
 							?.srfm_email_local_max_length,
-						64
+						localMax
 					);
 				} else if (
-					emailField.value.slice( emailValueAt + 1 ).length > 255
+					domainMax > 0 &&
+					emailField.value.slice( emailValueAt + 1 ).length > domainMax
 				) {
 					lengthErrorMessage = window?.srfm?.srfmSprintfString(
 						window?.srfm_submit?.messages
 							?.srfm_email_domain_max_length,
-						255
+						domainMax
 					);
 				}
 			}
@@ -1179,10 +1206,11 @@ function addEmailBlurListener( areaInput, blockClass ) {
 					'srfm-valid-email-error'
 				);
 				errorContainer.style.display = 'block';
-				errorContainer.innerHTML =
-					lengthErrorMessage && isValidEmail
-						? lengthErrorMessage
-						: window?.srfm_submit?.messages?.srfm_valid_email;
+				// Length message wins whenever set (matches the submit path); fall back
+				// to the generic format error only when there's no length error.
+				errorContainer.innerHTML = lengthErrorMessage
+					? lengthErrorMessage
+					: window?.srfm_submit?.messages?.srfm_valid_email;
 				errorContainer.id =
 					errorContainer.getAttribute( 'data-srfm-id' );
 			} else {
