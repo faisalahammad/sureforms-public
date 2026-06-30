@@ -269,6 +269,10 @@ const AiFormBuilder = () => {
 		}
 
 		setIsBuildingForm( false );
+		// Fires once for the dashboard widget prompt with the default form type. handleCreateAiForm
+		// is intentionally omitted — adding it (a new ref each render) would risk re-triggering
+		// generation.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [
 		accessKey,
 		errorCode,

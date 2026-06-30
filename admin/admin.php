@@ -125,6 +125,9 @@ class Admin {
 		// Register dashboard widget only if there are recent entries.
 		add_action( 'admin_init', [ $this, 'maybe_register_dashboard_widget' ] );
 
+		// Enqueue the AI quick draft widget script on the dashboard screen.
+		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_ai_dashboard_widget_assets' ] );
+
 		// Save first form creation time stamp.
 		add_action( 'admin_init', [ $this, 'save_first_form_creation_time_stamp' ] );
 		add_action( 'admin_notices', [ $this, 'display_srfm_rating_notice' ] );
@@ -1964,7 +1967,7 @@ class Admin {
 	 * Register the AI quick draft dashboard widget.
 	 *
 	 * @return void
-	 * @since 2.7.0
+	 * @since x.x.x
 	 */
 	public function register_ai_dashboard_widget() {
 		wp_add_dashboard_widget(
@@ -1982,10 +1985,9 @@ class Admin {
 	 * Render AI quick draft dashboard widget content.
 	 *
 	 * @return void
-	 * @since 2.7.0
+	 * @since x.x.x
 	 */
 	public function render_ai_dashboard_widget() {
-		$redirect_url = admin_url( 'admin.php?page=add-new-form' );
 		?>
 		<div class="srfm-ai-dashboard-widget">
 			<p>
@@ -2008,72 +2010,110 @@ class Admin {
 				<span id="srfm-ai-dashboard-char-count" style="color:#646970;">0/2000</span>
 			</p>
 		</div>
-		<script>
-			( function () {
-				const generateButton = document.getElementById( 'srfm-ai-dashboard-generate' );
-				const promptField = document.getElementById( 'srfm-ai-dashboard-prompt' );
-				const charCount = document.getElementById( 'srfm-ai-dashboard-char-count' );
-				if ( ! generateButton || ! promptField ) {
-					return;
-				}
-
-				const updateWidgetState = function () {
-					const promptValue = promptField.value.trim();
-					generateButton.disabled = ! promptValue;
-					if ( charCount ) {
-						charCount.textContent = `${promptField.value.length}/2000`;
-					}
-				};
-
-				const triggerGeneration = function () {
-					const prompt = promptField.value.trim();
-					if ( ! prompt ) {
-						promptField.focus();
-						return;
-					}
-
-					generateButton.disabled = true;
-					generateButton.textContent = <?php echo wp_json_encode( __( 'Redirecting...', 'sureforms' ) ); ?>;
-
-					const redirectUrl = new URL( <?php echo wp_json_encode( $redirect_url ); ?>, window.location.origin );
-					redirectUrl.searchParams.set( 'srfm_ai_dashboard_prompt', prompt );
-
-					const requestBody = new URLSearchParams();
-					requestBody.append( 'action', 'srfm_ai_widget_usage' );
-					requestBody.append( 'nonce', <?php echo wp_json_encode( wp_create_nonce( 'srfm_ai_widget_usage' ) ); ?> );
-
-					fetch( <?php echo wp_json_encode( admin_url( 'admin-ajax.php' ) ); ?>, {
-						method: 'POST',
-						credentials: 'same-origin',
-						headers: {
-							'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-						},
-						body: requestBody.toString(),
-					} ).finally( function () {
-						window.location.href = redirectUrl.toString();
-					} );
-				};
-
-				promptField.addEventListener( 'input', updateWidgetState );
-				generateButton.addEventListener( 'click', triggerGeneration );
-				promptField.addEventListener( 'keydown', function ( event ) {
-					if ( event.key === 'Enter' && ( event.metaKey || event.ctrlKey ) ) {
-						event.preventDefault();
-						triggerGeneration();
-					}
-				} );
-
-				updateWidgetState();
-			}() );
-		</script>
 		<?php
+	}
+
+	/**
+	 * Enqueue the AI quick draft dashboard widget script on the dashboard screen.
+	 *
+	 * The widget's behavior lives here (attached via wp_add_inline_script) rather than as an
+	 * inline <script> in the render callback, so it passes Plugin Check and keeps server values
+	 * out of the markup. Server values are passed through wp_localize_script.
+	 *
+	 * @param string $hook_suffix The current admin page hook suffix.
+	 * @return void
+	 * @since x.x.x
+	 */
+	public function enqueue_ai_dashboard_widget_assets( $hook_suffix ) {
+		// Only on the main dashboard, and only for capable users (matches the widget gate).
+		if ( 'index.php' !== $hook_suffix || ! Helper::current_user_can() ) {
+			return;
+		}
+
+		// Register an inline-only handle (empty src) — the WordPress-core pattern for attaching
+		// localized data plus an inline script without shipping a separate asset file.
+		wp_register_script( 'srfm-ai-dashboard-widget', '', [], SRFM_VER, true );
+		wp_enqueue_script( 'srfm-ai-dashboard-widget' );
+
+		wp_localize_script(
+			'srfm-ai-dashboard-widget',
+			'srfmAiDashboardWidget',
+			[
+				'redirectUrl'    => admin_url( 'admin.php?page=add-new-form' ),
+				'ajaxUrl'        => admin_url( 'admin-ajax.php' ),
+				'nonce'          => wp_create_nonce( 'srfm_ai_widget_usage' ),
+				'redirectingTxt' => __( 'Redirecting...', 'sureforms' ),
+			]
+		);
+
+		$inline_script = <<<'JS'
+( function () {
+	const config = window.srfmAiDashboardWidget || {};
+	const generateButton = document.getElementById( 'srfm-ai-dashboard-generate' );
+	const promptField = document.getElementById( 'srfm-ai-dashboard-prompt' );
+	const charCount = document.getElementById( 'srfm-ai-dashboard-char-count' );
+	if ( ! generateButton || ! promptField ) {
+		return;
+	}
+
+	const updateWidgetState = function () {
+		const promptValue = promptField.value.trim();
+		generateButton.disabled = ! promptValue;
+		if ( charCount ) {
+			charCount.textContent = `${ promptField.value.length }/2000`;
+		}
+	};
+
+	const triggerGeneration = function () {
+		const prompt = promptField.value.trim();
+		if ( ! prompt ) {
+			promptField.focus();
+			return;
+		}
+
+		generateButton.disabled = true;
+		generateButton.textContent = config.redirectingTxt;
+
+		const redirectUrl = new URL( config.redirectUrl, window.location.origin );
+		redirectUrl.searchParams.set( 'srfm_ai_dashboard_prompt', prompt );
+
+		const requestBody = new URLSearchParams();
+		requestBody.append( 'action', 'srfm_ai_widget_usage' );
+		requestBody.append( 'nonce', config.nonce );
+
+		fetch( config.ajaxUrl, {
+			method: 'POST',
+			credentials: 'same-origin',
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+			},
+			body: requestBody.toString(),
+		} ).finally( function () {
+			window.location.href = redirectUrl.toString();
+		} );
+	};
+
+	promptField.addEventListener( 'input', updateWidgetState );
+	generateButton.addEventListener( 'click', triggerGeneration );
+	promptField.addEventListener( 'keydown', function ( event ) {
+		if ( event.key === 'Enter' && ( event.metaKey || event.ctrlKey ) ) {
+			event.preventDefault();
+			triggerGeneration();
+		}
+	} );
+
+	updateWidgetState();
+}() );
+JS;
+
+		wp_add_inline_script( 'srfm-ai-dashboard-widget', $inline_script );
 	}
 
 	/**
 	 * Track AI dashboard widget usage.
 	 *
 	 * @return void
-	 * @since 2.7.0
+	 * @since x.x.x
 	 */
 	public function track_ai_widget_usage() {
 		if ( ! check_ajax_referer( 'srfm_ai_widget_usage', 'nonce', false ) ) {
@@ -2084,8 +2124,13 @@ class Admin {
 			wp_send_json_error( [ 'message' => __( 'Unauthorized user.', 'sureforms' ) ], 403 );
 		}
 
-		$current_count = (int) Helper::get_srfm_option( 'ai_dashboard_widget_uses', 0 );
-		Helper::update_srfm_option( 'ai_dashboard_widget_uses', $current_count + 1 );
+		$current_count = (int) Helper::get_srfm_option( 'ai_dashboard_widget_uses', 0 ) + 1;
+		Helper::update_srfm_option( 'ai_dashboard_widget_uses', $current_count );
+
+		// Emit an analytics event so usage lands in the warehouse via events_record.
+		// $force = true because this is a cumulative counter, not a one-time event —
+		// it must re-send the latest count each cycle (bypasses one-time dedup).
+		Analytics::events()->track( 'ai_dashboard_widget_used', (string) $current_count, [], true );
 
 		wp_send_json_success();
 	}
