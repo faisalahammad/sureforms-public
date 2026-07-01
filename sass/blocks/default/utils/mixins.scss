@@ -450,13 +450,23 @@
 		}
 	}
 	// Override any theme CSS reset that may strip padding/markers from list elements
-	// inside the Quill editor. The Quill 1.x vs 2.x list-marker rules are NOT included
-	// here because they differ per context — see backend.scss (.srfm-textarea-quill) for
-	// the Quill 1.x rules used in the block-editor canvas (react-quill).
+	// inside the Quill editor. Use @include srfm-quill-1x-list-markers inside the
+	// consuming .ql-editor block for the full Quill 1.x ::before marker rule set.
 	.ql-editor {
 		ol,
 		ul {
 			padding-left: 1.5em;
+		}
+
+		// Per-<li> base padding — canonical Quill 1.3.7.
+		ol li:not( .ql-direction-rtl ),
+		ul li:not( .ql-direction-rtl ) {
+			padding-left: 1.5em;
+		}
+
+		ol li.ql-direction-rtl,
+		ul li.ql-direction-rtl {
+			padding-right: 1.5em;
 		}
 
 		ol > li,
@@ -465,6 +475,133 @@
 		}
 	}
 }
+
+// Quill 1.x list-marker rules (::before pseudo-element approach used by react-quill).
+// Include this mixin inside a .ql-editor block (admin/backend) or directly inside the
+// confirmation-message container (form.scss) where no .ql-editor wrapper is present.
+@mixin srfm-quill-1x-list-markers {
+	// Per-<li> base padding — canonical Quill 1.3.7, separate from the container ol/ul padding.
+	ol li:not( .ql-direction-rtl ),
+	ul li:not( .ql-direction-rtl ) {
+		padding-left: 1.5em;
+	}
+
+	ol li.ql-direction-rtl,
+	ul li.ql-direction-rtl {
+		padding-right: 1.5em;
+	}
+
+	ul > li::before {
+		content: '\2022';
+	}
+
+	li::before {
+		display: inline-block;
+		white-space: nowrap;
+		width: 1.2em;
+	}
+
+	li:not( .ql-direction-rtl )::before {
+		margin-left: -1.5em;
+		margin-right: 0.3em;
+		text-align: right;
+	}
+
+	li.ql-direction-rtl::before {
+		margin-left: 0.3em;
+		margin-right: -1.5em;
+	}
+
+	ol li {
+		counter-reset: list-1 list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9;
+		counter-increment: list-0;
+	}
+
+	ol li::before {
+		content: counter( list-0, decimal ) '. ';
+	}
+
+	ol li.ql-indent-1 {
+		counter-increment: list-1;
+		counter-reset: list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9;
+	}
+
+	ol li.ql-indent-1::before {
+		content: counter( list-1, lower-alpha ) '. ';
+	}
+
+	ol li.ql-indent-2 {
+		counter-increment: list-2;
+		counter-reset: list-3 list-4 list-5 list-6 list-7 list-8 list-9;
+	}
+
+	ol li.ql-indent-2::before {
+		content: counter( list-2, lower-roman ) '. ';
+	}
+
+	ol li.ql-indent-3 {
+		counter-increment: list-3;
+		counter-reset: list-4 list-5 list-6 list-7 list-8 list-9;
+	}
+
+	ol li.ql-indent-3::before {
+		content: counter( list-3, decimal ) '. ';
+	}
+
+	ol li.ql-indent-4 {
+		counter-increment: list-4;
+		counter-reset: list-5 list-6 list-7 list-8 list-9;
+	}
+
+	ol li.ql-indent-4::before {
+		content: counter( list-4, lower-alpha ) '. ';
+	}
+
+	ol li.ql-indent-5 {
+		counter-increment: list-5;
+		counter-reset: list-6 list-7 list-8 list-9;
+	}
+
+	ol li.ql-indent-5::before {
+		content: counter( list-5, lower-roman ) '. ';
+	}
+
+	ol li.ql-indent-6 {
+		counter-increment: list-6;
+		counter-reset: list-7 list-8 list-9;
+	}
+
+	ol li.ql-indent-6::before {
+		content: counter( list-6, decimal ) '. ';
+	}
+
+	ol li.ql-indent-7 {
+		counter-increment: list-7;
+		counter-reset: list-8 list-9;
+	}
+
+	ol li.ql-indent-7::before {
+		content: counter( list-7, lower-alpha ) '. ';
+	}
+
+	ol li.ql-indent-8 {
+		counter-increment: list-8;
+		counter-reset: list-9;
+	}
+
+	ol li.ql-indent-8::before {
+		content: counter( list-8, lower-roman ) '. ';
+	}
+
+	ol li.ql-indent-9 {
+		counter-increment: list-9;
+	}
+
+	ol li.ql-indent-9::before {
+		content: counter( list-9, decimal ) '. ';
+	}
+}
+
 // Row Gap and Column Gap Mixin.
 @mixin srfm-gap-styles {
 	row-gap: var( --srfm-row-gap-between-blocks );
