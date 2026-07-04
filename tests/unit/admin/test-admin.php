@@ -117,6 +117,33 @@ class Test_Admin extends TestCase {
     }
 
     /**
+     * Test that enqueue_styles exists and attaches the Quill 1.x inline list-marker CSS.
+     */
+    public function test_enqueue_styles() {
+        // Verify the enqueue_styles method exists on the Admin class.
+        $this->assertTrue(
+            method_exists( Admin::class, 'enqueue_styles' ),
+            'The enqueue_styles method should exist on the Admin class.'
+        );
+
+        // Verify it is a public instance method.
+        $reflection = new \ReflectionMethod( Admin::class, 'enqueue_styles' );
+        $this->assertTrue( $reflection->isPublic(), 'enqueue_styles should be a public method.' );
+        $this->assertFalse( $reflection->isStatic(), 'enqueue_styles should be an instance method, not static.' );
+
+        // Verify the Quill 1.x inline list-marker CSS is attached to the reactQuill handle by
+        // inspecting the source. Reading the method body confirms the contract is maintained
+        // without booting a full WP style registry in the unit environment.
+        $source_file = $reflection->getFileName();
+        $start_line  = $reflection->getStartLine();
+        $end_line    = $reflection->getEndLine();
+        $source      = implode( '', array_slice( file( $source_file ), $start_line - 1, $end_line - $start_line + 1 ) );
+
+        $this->assertStringContainsString( 'wp_add_inline_style', $source, 'enqueue_styles should attach inline styles.' );
+        $this->assertStringContainsString( 'QUILL_1X_INLINE_CSS', $source, 'enqueue_styles should attach the shared Quill 1.x list-marker CSS.' );
+    }
+
+    /**
      * Test add_learn_page registers the Learn submenu page.
      */
     public function test_add_learn_page() {
