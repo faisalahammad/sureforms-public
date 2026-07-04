@@ -437,6 +437,14 @@ function showSuccessMessage(
 		}, 500 );
 	} else if ( afterSubmission === 'reset form' ) {
 		form.reset();
+		// Dispatch event so custom field implementations (TomSelect dropdowns,
+		// date/time pickers, signature pads, etc.) can reset their own state,
+		// since the native form.reset() only resets standard HTML elements.
+		document.dispatchEvent(
+			new CustomEvent( 'srfm_form_reset', {
+				detail: { form },
+			} )
+		);
 	}
 	element.innerHTML = message;
 	container.classList.add( 'srfm-active' );
