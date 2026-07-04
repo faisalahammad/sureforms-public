@@ -41,6 +41,17 @@ class Admin {
 	public const RATING_NOTICE_THRESHOLD = 3;
 
 	/**
+	 * Inline CSS for Quill 1.x (react-quill) list markers.
+	 *
+	 * Quill 1.x renders bullet/numbered list markers via CSS ::before pseudo-elements,
+	 * whereas the vendor quill.snow.css targets .ql-ui child elements (Quill 2.x approach).
+	 * This constant is shared by enqueue_styles() and enqueue_scripts() to prevent drift.
+	 *
+	 * @since 2.5.2
+	 */
+	public const QUILL_1X_INLINE_CSS = '.ql-editor ul,.ql-editor ol{padding-left:1.5em}.ql-editor ul>li,.ql-editor ol>li{list-style-type:none}.ql-editor ol li:not(.ql-direction-rtl),.ql-editor ul li:not(.ql-direction-rtl){padding-left:1.5em}.ql-editor ol li.ql-direction-rtl,.ql-editor ul li.ql-direction-rtl{padding-right:1.5em}.ql-editor ul>li::before{content:"\2022"}.ql-editor li::before{display:inline-block;white-space:nowrap;width:1.2em}.ql-editor li:not(.ql-direction-rtl)::before{margin-left:-1.5em;margin-right:.3em;text-align:right}.ql-editor li.ql-direction-rtl::before{margin-left:.3em;margin-right:-1.5em}.ql-editor ol li{counter-reset:list-1 list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9;counter-increment:list-0}.ql-editor ol li::before{content:counter(list-0,decimal) ". "}.ql-editor ol li.ql-indent-1{counter-increment:list-1;counter-reset:list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-1::before{content:counter(list-1,lower-alpha) ". "}.ql-editor ol li.ql-indent-2{counter-increment:list-2;counter-reset:list-3 list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-2::before{content:counter(list-2,lower-roman) ". "}.ql-editor ol li.ql-indent-3{counter-increment:list-3;counter-reset:list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-3::before{content:counter(list-3,decimal) ". "}.ql-editor ol li.ql-indent-4{counter-increment:list-4;counter-reset:list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-4::before{content:counter(list-4,lower-alpha) ". "}.ql-editor ol li.ql-indent-5{counter-increment:list-5;counter-reset:list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-5::before{content:counter(list-5,lower-roman) ". "}.ql-editor ol li.ql-indent-6{counter-increment:list-6;counter-reset:list-7 list-8 list-9}.ql-editor ol li.ql-indent-6::before{content:counter(list-6,decimal) ". "}.ql-editor ol li.ql-indent-7{counter-increment:list-7;counter-reset:list-8 list-9}.ql-editor ol li.ql-indent-7::before{content:counter(list-7,lower-alpha) ". "}.ql-editor ol li.ql-indent-8{counter-increment:list-8;counter-reset:list-9}.ql-editor ol li.ql-indent-8::before{content:counter(list-8,lower-roman) ". "}.ql-editor ol li.ql-indent-9{counter-increment:list-9}.ql-editor ol li.ql-indent-9::before{content:counter(list-9,decimal) ". "}';
+
+	/**
 	 * Dashboard widget entries data.
 	 *
 	 * @var array
@@ -898,6 +909,7 @@ class Admin {
 			wp_enqueue_style( SRFM_SLUG . '-intl', $vendor_css_uri . 'intl/intlTelInput-backend.min.css', [], SRFM_VER );
 			wp_enqueue_style( SRFM_SLUG . '-common', $css_uri . 'common' . $file_prefix . '.css', [], SRFM_VER );
 			wp_enqueue_style( SRFM_SLUG . '-reactQuill', $vendor_css_uri . 'quill/quill.snow.css', [], SRFM_VER );
+			wp_add_inline_style( SRFM_SLUG . '-reactQuill', self::QUILL_1X_INLINE_CSS );
 			wp_enqueue_style( SRFM_SLUG . '-single-form-modal', $css_uri . 'single-form-setting' . $file_prefix . '.css', [], SRFM_VER );
 
 			// if version is equal to or lower than 6.6.2 then add compatibility css.
@@ -1338,6 +1350,7 @@ class Admin {
 			// Enqueue Tailwind and Quill editor styles for the settings page.
 			wp_enqueue_style( SRFM_SLUG . '-settings-build', SRFM_URL . 'assets/build/settings.css', [], SRFM_VER, 'all' );
 			wp_enqueue_style( SRFM_SLUG . '-reactQuill', SRFM_URL . 'assets/css/minified/deps/quill/quill.snow.css', [], SRFM_VER );
+			wp_add_inline_style( SRFM_SLUG . '-reactQuill', self::QUILL_1X_INLINE_CSS );
 
 			$script_translations_handlers[] = SRFM_SLUG . '-settings';
 		}
