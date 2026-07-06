@@ -117,6 +117,33 @@ class Test_Admin extends TestCase {
     }
 
     /**
+     * Test that enqueue_styles exists and attaches the Quill 1.x inline list-marker CSS.
+     */
+    public function test_enqueue_styles() {
+        // Verify the enqueue_styles method exists on the Admin class.
+        $this->assertTrue(
+            method_exists( Admin::class, 'enqueue_styles' ),
+            'The enqueue_styles method should exist on the Admin class.'
+        );
+
+        // Verify it is a public instance method.
+        $reflection = new \ReflectionMethod( Admin::class, 'enqueue_styles' );
+        $this->assertTrue( $reflection->isPublic(), 'enqueue_styles should be a public method.' );
+        $this->assertFalse( $reflection->isStatic(), 'enqueue_styles should be an instance method, not static.' );
+
+        // Verify the Quill 1.x inline list-marker CSS is attached to the reactQuill handle by
+        // inspecting the source. Reading the method body confirms the contract is maintained
+        // without booting a full WP style registry in the unit environment.
+        $source_file = $reflection->getFileName();
+        $start_line  = $reflection->getStartLine();
+        $end_line    = $reflection->getEndLine();
+        $source      = implode( '', array_slice( file( $source_file ), $start_line - 1, $end_line - $start_line + 1 ) );
+
+        $this->assertStringContainsString( 'wp_add_inline_style', $source, 'enqueue_styles should attach inline styles.' );
+        $this->assertStringContainsString( 'QUILL_1X_INLINE_CSS', $source, 'enqueue_styles should attach the shared Quill 1.x list-marker CSS.' );
+    }
+
+    /**
      * Test add_learn_page registers the Learn submenu page.
      */
     public function test_add_learn_page() {
@@ -291,6 +318,200 @@ class Test_Admin extends TestCase {
 		$this->assertStringContainsString( 'srfm-dashboard-widget', $output );
 		$this->assertStringContainsString( 'Recent Entries', $output );
 		$this->assertStringContainsString( 'Contact Form', $output );
+	}
+
+	/**
+	 * Test maybe_register_dashboard_widget wires the AI quick draft widget onto wp_dashboard_setup.
+	 *
+	 * For a capable user it always hooks register_ai_dashboard_widget; with no logged-in user the
+	 * capability check short-circuits and nothing is wired (the early-return path).
+	 *
+	 * @since x.x.x
+	 */
+	public function test_maybe_register_dashboard_widget() {
+		$admin = Admin::get_instance();
+
+		// Capable user: the AI widget hook is wired onto wp_dashboard_setup.
+		$user_id = wp_insert_user(
+			[
+				'user_login' => 'srfm_admin_' . uniqid(),
+				'user_pass'  => 'password',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( $user_id );
+
+		remove_action( 'wp_dashboard_setup', [ $admin, 'register_ai_dashboard_widget' ] );
+		$this->assertNull( $admin->maybe_register_dashboard_widget() );
+		$this->assertNotFalse(
+			has_action( 'wp_dashboard_setup', [ $admin, 'register_ai_dashboard_widget' ] ),
+			'AI quick draft widget should hook onto wp_dashboard_setup for capable users.'
+		);
+
+		// No user: the capability gate short-circuits and nothing is wired.
+		wp_set_current_user( 0 );
+		remove_action( 'wp_dashboard_setup', [ $admin, 'register_ai_dashboard_widget' ] );
+		$this->assertNull( $admin->maybe_register_dashboard_widget() );
+		$this->assertFalse(
+			has_action( 'wp_dashboard_setup', [ $admin, 'register_ai_dashboard_widget' ] ),
+			'No widget should be wired when the capability check fails.'
+		);
+	}
+
+	/**
+	 * Test register_dashboard_widget registers the recent-entries widget into $wp_meta_boxes.
+	 *
+	 * @since x.x.x
+	 */
+	public function test_register_dashboard_widget() {
+		require_once ABSPATH . 'wp-admin/includes/template.php';
+		require_once ABSPATH . 'wp-admin/includes/dashboard.php';
+
+		$admin = Admin::get_instance();
+		set_current_screen( 'dashboard' );
+
+		$admin->register_dashboard_widget();
+
+		global $wp_meta_boxes;
+		$this->assertArrayHasKey(
+			'sureforms_recent_entries',
+			$wp_meta_boxes['dashboard']['normal']['high'],
+			'Recent entries widget should be registered with the sureforms_recent_entries id.'
+		);
+	}
+
+	/**
+	 * Test register_ai_dashboard_widget registers the AI quick draft widget into $wp_meta_boxes.
+	 *
+	 * @since x.x.x
+	 */
+	public function test_register_ai_dashboard_widget() {
+		require_once ABSPATH . 'wp-admin/includes/template.php';
+		require_once ABSPATH . 'wp-admin/includes/dashboard.php';
+
+		$admin = Admin::get_instance();
+		set_current_screen( 'dashboard' );
+
+		$admin->register_ai_dashboard_widget();
+
+		global $wp_meta_boxes;
+		$this->assertArrayHasKey(
+			'sureforms_ai_quick_draft',
+			$wp_meta_boxes['dashboard']['normal']['high'],
+			'AI dashboard widget should be registered with the sureforms_ai_quick_draft id.'
+		);
+	}
+
+	/**
+	 * Test render_ai_dashboard_widget outputs the AI quick draft widget markup.
+	 *
+	 * @since x.x.x
+	 */
+	public function test_render_ai_dashboard_widget() {
+		$admin = Admin::get_instance();
+
+		ob_start();
+		$admin->render_ai_dashboard_widget();
+		$output = ob_get_clean();
+
+		$this->assertStringContainsString( 'srfm-ai-dashboard-widget', $output, 'Widget should render its wrapper.' );
+		$this->assertStringContainsString( 'srfm-ai-dashboard-prompt', $output, 'Widget should render the prompt field.' );
+		$this->assertStringContainsString( 'srfm-ai-dashboard-generate', $output, 'Widget should render the generate button.' );
+	}
+
+	/**
+	 * Test enqueue_ai_dashboard_widget_assets enqueues the widget script only on the dashboard.
+	 *
+	 * Asserts the gate (no enqueue outside index.php) and that, on the dashboard for a capable user,
+	 * the script is enqueued with its localized config — instead of grepping the method source.
+	 *
+	 * @since x.x.x
+	 */
+	public function test_enqueue_ai_dashboard_widget_assets() {
+		$admin = Admin::get_instance();
+
+		$user_id = wp_insert_user(
+			[
+				'user_login' => 'srfm_admin_' . uniqid(),
+				'user_pass'  => 'password',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( $user_id );
+
+		// Not the dashboard: nothing should be enqueued.
+		wp_dequeue_script( 'srfm-ai-dashboard-widget' );
+		wp_deregister_script( 'srfm-ai-dashboard-widget' );
+		$admin->enqueue_ai_dashboard_widget_assets( 'edit.php' );
+		$this->assertFalse(
+			wp_script_is( 'srfm-ai-dashboard-widget', 'enqueued' ),
+			'Widget script should not load outside the dashboard.'
+		);
+
+		// Dashboard + capable user: the script is enqueued with its localized config.
+		$admin->enqueue_ai_dashboard_widget_assets( 'index.php' );
+		$this->assertTrue(
+			wp_script_is( 'srfm-ai-dashboard-widget', 'enqueued' ),
+			'Widget script should be enqueued on the dashboard for capable users.'
+		);
+		$data = wp_scripts()->get_data( 'srfm-ai-dashboard-widget', 'data' );
+		$this->assertStringContainsString(
+			'srfmAiDashboardWidget',
+			(string) $data,
+			'Localized config object should be attached to the widget script.'
+		);
+	}
+
+	/**
+	 * Test track_ai_widget_usage increments the usage counter for a valid, capable request.
+	 *
+	 * The handler ends in wp_send_json_success() (which calls wp_die), so the wp_die handlers are
+	 * filtered to throw WPDieException — letting the runner survive while we assert the side effect
+	 * (the incremented counter) rather than grepping the method source.
+	 *
+	 * @since x.x.x
+	 */
+	public function test_track_ai_widget_usage() {
+		$admin = Admin::get_instance();
+
+		$user_id = wp_insert_user(
+			[
+				'user_login' => 'srfm_admin_' . uniqid(),
+				'user_pass'  => 'password',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( $user_id );
+
+		$_POST['nonce']    = wp_create_nonce( 'srfm_ai_widget_usage' );
+		$_REQUEST['nonce'] = $_POST['nonce'];
+
+		$before = (int) Helper::get_srfm_option( 'ai_dashboard_widget_uses', 0 );
+
+		// wp_send_json_success() terminates via wp_die(); make the handlers throw so the test runner
+		// survives and we can assert behavior after the call.
+		$throw_handler = static function () {
+			return static function () {
+				throw new \WPDieException( 'srfm_test_die' );
+			};
+		};
+		add_filter( 'wp_die_ajax_handler', $throw_handler );
+		add_filter( 'wp_die_handler', $throw_handler );
+
+		ob_start();
+		try {
+			$admin->track_ai_widget_usage();
+		} catch ( \WPDieException $e ) {
+			// Expected — the handler exits via wp_send_json_success().
+		} finally {
+			ob_end_clean();
+			remove_filter( 'wp_die_ajax_handler', $throw_handler );
+			remove_filter( 'wp_die_handler', $throw_handler );
+			unset( $_POST['nonce'], $_REQUEST['nonce'] );
+		}
+
+		$after = (int) Helper::get_srfm_option( 'ai_dashboard_widget_uses', 0 );
+		$this->assertSame( $before + 1, $after, 'Usage tracking must increment the ai_dashboard_widget_uses counter.' );
 	}
 }
 

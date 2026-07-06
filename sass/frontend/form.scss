@@ -219,6 +219,126 @@
 			display: flex;
 			flex-direction: column;
 			gap: 8px;
+
+			// The confirmation message is stored as plain HTML from the Quill 1.x
+			// editor and rendered outside .ql-editor, so we reproduce the necessary
+			// formatting rules here (matching quill.snow.css behaviour).
+
+			// Headings.
+			h1 { font-size: 2em; font-weight: bold; }
+			h2 { font-size: 1.5em; font-weight: bold; }
+			h3 { font-size: 1.17em; font-weight: bold; }
+			h4 { font-size: 1em; font-weight: bold; }
+			h5 { font-size: 0.83em; font-weight: bold; }
+			h6 { font-size: 0.67em; font-weight: bold; }
+
+			// Links.
+			a { text-decoration: underline; }
+
+			// Blockquote.
+			blockquote {
+				border-left: 4px solid #ccc;
+				margin-top: 5px;
+				margin-bottom: 5px;
+				padding-left: 16px;
+			}
+
+			// Code / pre.
+			code,
+			pre {
+				background-color: #f0f0f0;
+				border-radius: 3px;
+			}
+
+			pre {
+				white-space: pre-wrap;
+				margin-top: 5px;
+				margin-bottom: 5px;
+				padding: 5px 10px;
+			}
+
+			code {
+				font-size: 85%;
+				padding: 2px 4px;
+			}
+
+			pre.ql-syntax {
+				background-color: #23241f;
+				color: #f8f8f2;
+				overflow: visible;
+			}
+
+			// Images.
+			img { max-width: 100%; }
+
+			// Lists — restore markers stripped by theme / Tailwind reset.
+			// Use Quill 1.x ::before pseudo-element approach (not list-style-type)
+			// so markers stay inline with the text and respect text-align (e.g. center).
+			ul,
+			ol {
+				padding-left: 1.5em;
+			}
+
+			ul > li,
+			ol > li {
+				list-style-type: none;
+			}
+
+			@include srfm-quill-1x-list-markers;
+
+			// Font sizes.
+			.ql-size-small { font-size: 0.75em; }
+			.ql-size-large { font-size: 1.5em; }
+			.ql-size-huge { font-size: 2.5em; }
+
+			// Font families.
+			.ql-font-serif { font-family: Georgia, 'Times New Roman', serif; }
+			.ql-font-monospace { font-family: Monaco, 'Courier New', monospace; }
+
+			// RTL.
+			.ql-direction-rtl { direction: rtl; text-align: inherit; }
+
+			// LTR indentation (3 em per level; list items add 1.5 em for the marker gutter).
+			.ql-indent-1:not( .ql-direction-rtl ) { padding-left: 3em; }
+			li.ql-indent-1:not( .ql-direction-rtl ) { padding-left: 4.5em; }
+			.ql-indent-2:not( .ql-direction-rtl ) { padding-left: 6em; }
+			li.ql-indent-2:not( .ql-direction-rtl ) { padding-left: 7.5em; }
+			.ql-indent-3:not( .ql-direction-rtl ) { padding-left: 9em; }
+			li.ql-indent-3:not( .ql-direction-rtl ) { padding-left: 10.5em; }
+			.ql-indent-4:not( .ql-direction-rtl ) { padding-left: 12em; }
+			li.ql-indent-4:not( .ql-direction-rtl ) { padding-left: 13.5em; }
+			.ql-indent-5:not( .ql-direction-rtl ) { padding-left: 15em; }
+			li.ql-indent-5:not( .ql-direction-rtl ) { padding-left: 16.5em; }
+			.ql-indent-6:not( .ql-direction-rtl ) { padding-left: 18em; }
+			li.ql-indent-6:not( .ql-direction-rtl ) { padding-left: 19.5em; }
+			.ql-indent-7:not( .ql-direction-rtl ) { padding-left: 21em; }
+			li.ql-indent-7:not( .ql-direction-rtl ) { padding-left: 22.5em; }
+			.ql-indent-8:not( .ql-direction-rtl ) { padding-left: 24em; }
+			li.ql-indent-8:not( .ql-direction-rtl ) { padding-left: 25.5em; }
+			.ql-indent-9:not( .ql-direction-rtl ) { padding-left: 27em; }
+			li.ql-indent-9:not( .ql-direction-rtl ) { padding-left: 28.5em; }
+
+			// RTL indentation — canonical Quill 1.3.7 mirror of the LTR rules above.
+			// Required here because the confirmation message renders outside .ql-editor
+			// and has no vendor-stylesheet fallback.
+			.ql-indent-1.ql-direction-rtl.ql-align-right { padding-right: 3em; }
+			li.ql-indent-1.ql-direction-rtl.ql-align-right { padding-right: 4.5em; }
+			.ql-indent-2.ql-direction-rtl.ql-align-right { padding-right: 6em; }
+			li.ql-indent-2.ql-direction-rtl.ql-align-right { padding-right: 7.5em; }
+			.ql-indent-3.ql-direction-rtl.ql-align-right { padding-right: 9em; }
+			li.ql-indent-3.ql-direction-rtl.ql-align-right { padding-right: 10.5em; }
+			.ql-indent-4.ql-direction-rtl.ql-align-right { padding-right: 12em; }
+			li.ql-indent-4.ql-direction-rtl.ql-align-right { padding-right: 13.5em; }
+			.ql-indent-5.ql-direction-rtl.ql-align-right { padding-right: 15em; }
+			li.ql-indent-5.ql-direction-rtl.ql-align-right { padding-right: 16.5em; }
+			.ql-indent-6.ql-direction-rtl.ql-align-right { padding-right: 18em; }
+			li.ql-indent-6.ql-direction-rtl.ql-align-right { padding-right: 19.5em; }
+			.ql-indent-7.ql-direction-rtl.ql-align-right { padding-right: 21em; }
+			li.ql-indent-7.ql-direction-rtl.ql-align-right { padding-right: 22.5em; }
+			.ql-indent-8.ql-direction-rtl.ql-align-right { padding-right: 24em; }
+			li.ql-indent-8.ql-direction-rtl.ql-align-right { padding-right: 25.5em; }
+			.ql-indent-9.ql-direction-rtl.ql-align-right { padding-right: 27em; }
+			li.ql-indent-9.ql-direction-rtl.ql-align-right { padding-right: 28.5em; }
 		}
 	}
 
