@@ -52,6 +52,18 @@ class AI_Form_Builder {
 			array_unshift( $messages, $current_message );
 		}
 
+		// Bail if no usable prompt remained after filtering empty messages.
+		if ( empty( $messages ) || empty( $messages[0]['content'] ) ) {
+			wp_send_json_error( [ 'message' => __( 'No prompt was supplied.', 'sureforms' ) ] );
+		}
+
+		// Server-side prompt-length cap. The UI enforces a 2000-char limit via maxlength, but that
+		// is client-side only and can be bypassed by a crafted request, so mirror it here. This is
+		// cost/resource hardening — output is always escaped, so this is not an XSS concern.
+		if ( mb_strlen( (string) $messages[0]['content'] ) > 2000 ) {
+			wp_send_json_error( [ 'message' => __( 'The prompt is too long. Please shorten it and try again.', 'sureforms' ) ] );
+		}
+
 		// Get the response from the endpoint.
 		$response = AI_Helper::get_chat_completions_response(
 			apply_filters(

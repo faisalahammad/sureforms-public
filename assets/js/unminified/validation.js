@@ -1,5 +1,22 @@
 import { applyFilters } from '@wordpress/hooks';
 
+/**
+ * Resolve the RFC 5321 email character limits.
+ *
+ * Reads the server-resolved limits localized into `srfm_submit` (which honor the
+ * `srfm_email_field_char_limits` filter), falling back to the RFC defaults so a site that
+ * raises a limit isn't false-blocked client-side with the wrong number.
+ *
+ * @return {{local: number, domain: number}} Resolved limits (0 disables a check).
+ */
+function getEmailCharLimits() {
+	const limits = window?.srfm_submit?.email_char_limits;
+	return {
+		local: limits?.local ?? 64,
+		domain: limits?.domain ?? 255,
+	};
+}
+
 async function getUniqueValidationData( checkData, formId, ajaxUrl, token ) {
 	let queryString =
 		'action=validation_ajax_action&token=' +
@@ -321,6 +338,54 @@ export async function fieldValidation(
 					validateResult = true;
 				}
 
+				// RFC 5321 length limits — local part <= 64, domain <= 255 (split on the
+				// last @). Mirrors the server-side check (which is authoritative, so a
+				// `srfm_email_field_char_limits` filter override is still enforced there).
+				// Returns the part-specific, value-filled message, or '' when within limits.
+				const emailLengthError = ( val ) => {
+					if ( typeof val !== 'string' || ! val.includes( '@' ) ) {
+						return '';
+					}
+					const { local: localMax, domain: domainMax } =
+						getEmailCharLimits();
+					const at = val.lastIndexOf( '@' );
+					if ( localMax > 0 && val.slice( 0, at ).length > localMax ) {
+						return window?.srfm?.srfmSprintfString(
+							window?.srfm_submit?.messages
+								?.srfm_email_local_max_length,
+							localMax
+						);
+					}
+					if (
+						domainMax > 0 &&
+						val.slice( at + 1 ).length > domainMax
+					) {
+						return window?.srfm?.srfmSprintfString(
+							window?.srfm_submit?.messages
+								?.srfm_email_domain_max_length,
+							domainMax
+						);
+					}
+					return '';
+				};
+
+				const mainLengthError = inputValue
+					? emailLengthError( inputValue )
+					: '';
+				if ( mainLengthError ) {
+					if ( errorMessage ) {
+						errorMessage.textContent = mainLengthError;
+						// The email field's error message is hidden by default and only
+						// revealed via an explicit display:block (same as the format-error
+						// and confirm-mismatch handlers) — without this the red border
+						// shows but the message stays hidden.
+						errorMessage.style.display = 'block';
+					}
+					window?.srfm?.toggleErrorState( parent, true );
+					setFirstErrorInput( inputField, parent );
+					validateResult = true;
+				}
+
 				if ( confirmParent ) {
 					const confirmInput = confirmParent.querySelector(
 						'.srfm-input-email-confirm'
@@ -356,6 +421,21 @@ export async function fieldValidation(
 						validateResult = true;
 					} else {
 						window?.srfm?.toggleErrorState( confirmParent, false );
+					}
+
+					// Length check on the confirm value too (it must match the main
+					// value, but flag it directly so the error surfaces on this input).
+					const confirmLengthError = confirmValue
+						? emailLengthError( confirmValue )
+						: '';
+					if ( confirmLengthError ) {
+						if ( confirmError ) {
+							confirmError.textContent = confirmLengthError;
+							confirmError.style.display = 'block';
+						}
+						window?.srfm?.toggleErrorState( confirmParent, true );
+						setFirstErrorInput( confirmInput, confirmParent );
+						validateResult = true;
 					}
 
 					// remove the error message on input of the email confirm field
@@ -1089,14 +1169,48 @@ function addEmailBlurListener( areaInput, blockClass ) {
 				confirmErrorContainer.style.display = 'none';
 			}
 
+			// RFC 5321 length limits (local <= 64, domain <= 255, split on the last @).
+			// A too-long address can still be a valid format, so flag it here too and
+			// show the length-specific message; otherwise fall back to the format error.
+			const { local: localMax, domain: domainMax } = getEmailCharLimits();
+			const emailValueAt = emailField.value.lastIndexOf( '@' );
+			let lengthErrorMessage = '';
+			if ( emailValueAt !== -1 ) {
+				if (
+					localMax > 0 &&
+					emailField.value.slice( 0, emailValueAt ).length > localMax
+				) {
+					lengthErrorMessage = window?.srfm?.srfmSprintfString(
+						window?.srfm_submit?.messages
+							?.srfm_email_local_max_length,
+						localMax
+					);
+				} else if (
+					domainMax > 0 &&
+					emailField.value.slice( emailValueAt + 1 ).length > domainMax
+				) {
+					lengthErrorMessage = window?.srfm?.srfmSprintfString(
+						window?.srfm_submit?.messages
+							?.srfm_email_domain_max_length,
+						domainMax
+					);
+				}
+			}
+
 			// Handle general email validation
-			if ( '' !== emailField?.value && ! isValidEmail ) {
+			if (
+				'' !== emailField?.value &&
+				( ! isValidEmail || lengthErrorMessage )
+			) {
 				inputBlock.parentElement.classList.add(
 					'srfm-valid-email-error'
 				);
 				errorContainer.style.display = 'block';
-				errorContainer.innerHTML =
-					window?.srfm_submit?.messages?.srfm_valid_email;
+				// Length message wins whenever set (matches the submit path); fall back
+				// to the generic format error only when there's no length error.
+				errorContainer.innerHTML = lengthErrorMessage
+					? lengthErrorMessage
+					: window?.srfm_submit?.messages?.srfm_valid_email;
 				errorContainer.id =
 					errorContainer.getAttribute( 'data-srfm-id' );
 			} else {

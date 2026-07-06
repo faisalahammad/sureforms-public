@@ -412,6 +412,33 @@ export const getWithoutSlugBlocks = () =>
 		'srfm/html',
 	] );
 
+/**
+ * Recursively flatten a block tree into a single list (parents + all descendants).
+ *
+ * Lets consumers enumerate fields nested inside container blocks (e.g. User Registration
+ * `srfm/register`, Address `srfm/address`) instead of just the top-level blocks.
+ *
+ * @param {Array}    blocks                      Block list (each may have an `innerBlocks` array).
+ * @param {Object}   [options]                   Options.
+ * @param {string[]} [options.excludeChildrenOf] Block names whose innerBlocks are NOT descended
+ *                                               into (the parent itself is still included). E.g.
+ *                                               `[ 'srfm/repeater' ]` — repeater children share one
+ *                                               slug class and submit as indexed arrays, so they
+ *                                               can't resolve to a single value.
+ * @return {Array} Flat list of all blocks.
+ */
+export const flattenBlocks = ( blocks, { excludeChildrenOf = [] } = {} ) =>
+	( blocks || [] ).reduce( ( acc, block ) => {
+		acc.push( block );
+		if (
+			! excludeChildrenOf.includes( block?.name ) &&
+			block?.innerBlocks?.length
+		) {
+			acc.push( ...flattenBlocks( block.innerBlocks, { excludeChildrenOf } ) );
+		}
+		return acc;
+	}, [] );
+
 export const setFormSpecificSmartTags = ( updateBlockAttributes ) => {
 	const { getBlocks } = select( editorStore );
 	let savedBlocks = getBlocks();

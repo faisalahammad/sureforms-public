@@ -13,6 +13,7 @@ import InspectorTab, {
 import SRFMAdvancedPanelBody from '@Components/advanced-panel-body';
 import SRFMTextControl from '@Components/text-control';
 import { useGetCurrentFormId } from '../../blocks-attributes/getFormId';
+import { flattenBlocks } from '@Utils/Helpers';
 import { PaymentComponent } from './components/default.js';
 import AddInitialAttr from '@Controls/addInitialAttr';
 import { compose } from '@wordpress/compose';
@@ -82,7 +83,28 @@ const Edit = ( props ) => {
 		}
 
 		try {
-			const blocks = getBlocks();
+			const allBlocks = getBlocks();
+			// Flatten so fields nested inside container blocks (User Registration,
+			// Address, …) are enumerated too, not just top-level blocks. Repeater
+			// children are excluded: every instance shares the same slug class and
+			// values submit as indexed arrays, so they can't resolve to a single
+			// payment customer email/name value.
+			const blocks = flattenBlocks( allBlocks, {
+				excludeChildrenOf: [ 'srfm/repeater' ],
+			} );
+
+			// Address inner inputs (City / State / Line 1) resolve fine but clutter the
+			// Customer Name dropdown, so collect their slugs to skip them from that list.
+			const addressDescendantSlugs = new Set(
+				flattenBlocks( allBlocks )
+					.filter( ( block ) => block?.name === 'srfm/address' )
+					.flatMap( ( addressBlock ) =>
+						flattenBlocks( addressBlock.innerBlocks || [] )
+							.map( ( child ) => child.attributes?.slug )
+							.filter( Boolean )
+					)
+			);
+
 			const emailsFields = [];
 			const nameFields = [];
 			const variableAmountFields = [];
@@ -105,11 +127,14 @@ const Edit = ( props ) => {
 							type: 'email',
 						} );
 					} else if ( blockName === 'srfm/input' ) {
-						nameFields.push( {
-							slug,
-							label: `${ label } (input)`,
-							type: 'input',
-						} );
+						// Skip Address inner inputs — UX noise in the Name dropdown.
+						if ( ! addressDescendantSlugs.has( slug ) ) {
+							nameFields.push( {
+								slug,
+								label: `${ label } (input)`,
+								type: 'input',
+							} );
+						}
 					} else if ( blockName === 'srfm/number' ) {
 						variableAmountFields.push( {
 							slug,
