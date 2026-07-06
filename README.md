@@ -460,11 +460,9 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 ## Changelog ##
 ### 2.12.1 - 6th July 2026 ###
 * New: Added an AI-powered quick draft flow on the dashboard to generate forms faster, with built-in usage tracking.
-* New: Added the ability to manually retry failed webhooks and native integrations, with retry details now surfaced in the logs.
-* Fix: Reset Form now resets the Dropdown field and triggers a reset for Pro fields so every field returns to its default state.
+* Fix: Reset form option not Working for some fields.
 * Fix: Resolved a Stripe one-time payment error that could cause card payments to fail with an HTTP 400 response.
 * Fix: Restored bullet point visibility in the rich text admin editor so formatted lists display correctly.
-* Fix: The Payment block Email and Name field mappers now include child fields from User Registration container blocks.
 ### 2.12.0 - 24th June 2026 ###
 * New: Added action hooks around payment success, cancellation, and refund events so plugins such as SureMembers, LMS, and CRMs can grant or revoke access for both Stripe and PayPal.
 * Fix: Cancel Subscription now routes through the correct payment gateway so PayPal subscriptions cancel properly instead of always calling Stripe.
