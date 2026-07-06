@@ -446,7 +446,7 @@ class Test_Field_Validation extends TestCase {
 	/**
 	 * Test get_email_char_limits returns RFC 5321 defaults and honors the filter override.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.1
 	 */
 	public function test_get_email_char_limits() {
 		// Defaults when no filter is attached.

@@ -1980,7 +1980,7 @@ class Admin {
 	 * Register the AI quick draft dashboard widget.
 	 *
 	 * @return void
-	 * @since x.x.x
+	 * @since 2.12.1
 	 */
 	public function register_ai_dashboard_widget() {
 		wp_add_dashboard_widget(
@@ -1998,7 +1998,7 @@ class Admin {
 	 * Render AI quick draft dashboard widget content.
 	 *
 	 * @return void
-	 * @since x.x.x
+	 * @since 2.12.1
 	 */
 	public function render_ai_dashboard_widget() {
 		?>
@@ -2035,7 +2035,7 @@ class Admin {
 	 *
 	 * @param string $hook_suffix The current admin page hook suffix.
 	 * @return void
-	 * @since x.x.x
+	 * @since 2.12.1
 	 */
 	public function enqueue_ai_dashboard_widget_assets( $hook_suffix ) {
 		// Only on the main dashboard, and only for capable users (matches the widget gate).
@@ -2126,7 +2126,7 @@ JS;
 	 * Track AI dashboard widget usage.
 	 *
 	 * @return void
-	 * @since x.x.x
+	 * @since 2.12.1
 	 */
 	public function track_ai_widget_usage() {
 		if ( ! check_ajax_referer( 'srfm_ai_widget_usage', 'nonce', false ) ) {
