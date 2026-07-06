@@ -460,6 +460,7 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 ## Changelog ##
 ### 2.12.1 - 6th July 2026 ###
 * New: Added an AI-powered quick draft flow on the dashboard to generate forms faster, with built-in usage tracking.
+* Improvement: Email fields now enforce standard RFC 5321 length limits (a 64-character local part and 255-character domain) to prevent oversized submissions, with a filter to customize the limits.
 * Fix: Reset form option not working for some fields.
 * Fix: Resolved a Stripe one-time payment error that could cause card payments to fail with an HTTP 400 response.
 * Fix: Restored bullet point visibility in the rich text admin editor so formatted lists display correctly.
