@@ -4,7 +4,7 @@ Tags: forms, contact form, form builder, survey, payment form
 Requires at least: 6.4
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 2.12.0
+Stable tag: 2.12.1
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -458,6 +458,12 @@ Yes. SureForms Business includes fully functional user registration forms and lo
 You can report security issues through our [Bug Bounty Program](https://brainstormforce.com/bug-bounty-program/). We collaborate with Patchstack to provide opportunities for researchers to report vulnerabilities. The Patchstack team will help validate, triage, and handle any reported security issues.
 
 == Changelog ==
+= 2.12.1 - 6th July 2026 =
+* New: Added an AI-powered quick draft flow on the dashboard to generate forms faster, with built-in usage tracking.
+* Improvement: Email fields now enforce standard RFC 5321 length limits (a 64-character local part and 255-character domain) to prevent oversized submissions, with a filter to customize the limits.
+* Fix: Reset form option not working for some fields.
+* Fix: Resolved a Stripe one-time payment error that could cause card payments to fail with an HTTP 400 response.
+* Fix: Restored bullet point visibility in the rich text admin editor so formatted lists display correctly.
 = 2.12.0 - 24th June 2026 =
 * New: Added action hooks around payment success, cancellation, and refund events so plugins such as SureMembers, LMS, and CRMs can grant or revoke access for both Stripe and PayPal.
 * Fix: Cancel Subscription now routes through the correct payment gateway so PayPal subscriptions cancel properly instead of always calling Stripe.
@@ -468,9 +474,6 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 * Fix: Phone field auto country detection always resolved to the United States.
 * Fix: Corrected the Cloudflare Turnstile "Get Keys" link.
 * Fix: This update addressed a security bug. Props to Yaswanth Reddy Sunkara for reporting it responsibly to our team.
-= 2.11.0 - 10th June 2026 =
-* New: Added a Form Migrator to import forms from Contact Form 7, WPForms, Gravity Forms, and Ninja Forms in a single click.
-* New: Added native WPML support to translate each form individually using String Packages.
 The full changelog is available [here](https://sureforms.com/whats-new/?utm_source=wordpress.org&utm_medium=whats_new).
 
 == Upgrade Notice ==

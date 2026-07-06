@@ -326,7 +326,7 @@ class Test_Admin extends TestCase {
 	 * For a capable user it always hooks register_ai_dashboard_widget; with no logged-in user the
 	 * capability check short-circuits and nothing is wired (the early-return path).
 	 *
-	 * @since x.x.x
+	 * @since 2.12.1
 	 */
 	public function test_maybe_register_dashboard_widget() {
 		$admin = Admin::get_instance();
@@ -361,7 +361,7 @@ class Test_Admin extends TestCase {
 	/**
 	 * Test register_dashboard_widget registers the recent-entries widget into $wp_meta_boxes.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.1
 	 */
 	public function test_register_dashboard_widget() {
 		require_once ABSPATH . 'wp-admin/includes/template.php';
@@ -383,7 +383,7 @@ class Test_Admin extends TestCase {
 	/**
 	 * Test register_ai_dashboard_widget registers the AI quick draft widget into $wp_meta_boxes.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.1
 	 */
 	public function test_register_ai_dashboard_widget() {
 		require_once ABSPATH . 'wp-admin/includes/template.php';
@@ -405,7 +405,7 @@ class Test_Admin extends TestCase {
 	/**
 	 * Test render_ai_dashboard_widget outputs the AI quick draft widget markup.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.1
 	 */
 	public function test_render_ai_dashboard_widget() {
 		$admin = Admin::get_instance();
@@ -425,7 +425,7 @@ class Test_Admin extends TestCase {
 	 * Asserts the gate (no enqueue outside index.php) and that, on the dashboard for a capable user,
 	 * the script is enqueued with its localized config — instead of grepping the method source.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.1
 	 */
 	public function test_enqueue_ai_dashboard_widget_assets() {
 		$admin = Admin::get_instance();
@@ -469,7 +469,7 @@ class Test_Admin extends TestCase {
 	 * filtered to throw WPDieException — letting the runner survive while we assert the side effect
 	 * (the incremented counter) rather than grepping the method source.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.1
 	 */
 	public function test_track_ai_widget_usage() {
 		$admin = Admin::get_instance();
