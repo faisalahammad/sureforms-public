@@ -17,11 +17,13 @@ Edit this list when the leak surface changes — there is no other place to upda
 .claude
 .scripts/git-hooks
 internal-docs
-CLAUDE.md
+docs
+CLAUDE.md            # ALL CLAUDE.md at ANY depth (root + nested, e.g. inc/abilities/, tests/play/specs/) — stripped via `git ls-files '*CLAUDE.md'` (matches the root file too), NOT just the root path
 ARCHITECTURE.md
 COMPREHENSIVE_ANALYSIS.md
 PRODUCT_ANALYSIS.md
 TECHNICAL_OVERVIEW.md
+tests/play/specs/TODO.md
 .github/workflows/push-to-deploy.yml
 .github/workflows/push-asset-readme-update.yml
 .github/workflows/release-tag-draft.yml
@@ -32,7 +34,9 @@ bin/checkout-and-build
 bin/i18n.sh
 ```
 
-These paths must NOT appear on the public mirror. They legitimately exist on private `master` and stay there (internal release CI, AI tooling, internal team wiki).
+These paths must NOT appear on the public mirror. They legitimately exist on private `master` and stay there (internal release CI, AI tooling, internal team wiki, internal dev docs under `docs/`).
+
+> **README.md is the ONLY markdown doc that should appear in the public PR diff.** After stripping, sanity-check with `git ls-files '*.md'` — anything beyond `README.md`, third-party `inc/lib/**` readmes, `modules/gutenberg/readme.md`, and `tests/play/README.md` is a likely leak. (A prior sync leaked `inc/abilities/CLAUDE.md`, `tests/play/specs/CLAUDE.md`, and the whole `docs/` tree because the strip matched only the root `CLAUDE.md`.)
 
 ## Preconditions
 
@@ -119,11 +123,12 @@ for p in \
   .claude \
   .scripts/git-hooks \
   internal-docs \
-  CLAUDE.md \
+  docs \
   ARCHITECTURE.md \
   COMPREHENSIVE_ANALYSIS.md \
   PRODUCT_ANALYSIS.md \
   TECHNICAL_OVERVIEW.md \
+  tests/play/specs/TODO.md \
   .github/workflows/push-to-deploy.yml \
   .github/workflows/push-asset-readme-update.yml \
   .github/workflows/release-tag-draft.yml \
@@ -138,11 +143,32 @@ for p in \
   fi
 done
 
+# Strip ALL CLAUDE.md at any depth (root + nested) — NOT just the root path.
+# No pipe-to-while: a subshell would swallow a failing `git rm`. These paths never
+# contain spaces, so word-splitting the list is safe.
+CLAUDE_FILES=$(git ls-files '*CLAUDE.md')
+if [ -n "$CLAUDE_FILES" ]; then
+  git rm --quiet $CLAUDE_FILES
+fi
+
 # Remove now-empty .scripts directory if applicable
 if [ -d .scripts ] && [ -z "$(ls -A .scripts 2>/dev/null)" ]; then
   rmdir .scripts
 fi
+
+# Sanity check (FAIL-CLOSED): README.md must be the ONLY non-third-party markdown
+# doc left. This control already leaked once — a detected anomaly must HALT the
+# sync, not just warn. The check runs in the temp worktree before any push, so
+# aborting here means nothing internal reaches the mirror.
+LEAKS=$(git ls-files '*.md' | grep -vE '^(README\.md|inc/lib/.*|modules/gutenberg/readme\.md|tests/play/README\.md|inc/abilities/ABILITIES\.md)$') || true
+if [ -n "$LEAKS" ]; then
+  printf 'ABORT: unexpected markdown would be published:\n%s\n' "$LEAKS"
+  exit 1
+fi
+echo "OK: only README.md + known readmes"
 ```
+
+> If the sanity check aborts (`exit 1`), treat it as a failed step: jump to **Error Recovery** to tear down the temp worktree and restore the developer's branch/stash before investigating which path needs adding to the **Stripped paths** list.
 
 ### Step 6: Commit the strip, then bulk re-sign ALL commits
 
