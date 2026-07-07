@@ -136,8 +136,8 @@ class Generate_Form_Markup {
 		$block_count       = count( $form_blocks );
 		$current_post_type = get_post_type();
 
-		// load all the frontend assets.
-		Frontend_Assets::enqueue_scripts_and_styles();
+		// load all the frontend assets. Skips the SureForms stylesheets when the form has default styling disabled.
+		Frontend_Assets::enqueue_scripts_and_styles( Form_Styling::is_default_styling_disabled( $id ) );
 
 		ob_start();
 		if ( '' !== $id && 0 !== $block_count ) {
@@ -154,6 +154,10 @@ class Generate_Form_Markup {
 			if ( Form_Styling::has_custom_styling( $block_attrs ) ) {
 				$form_styling = Form_Styling::map_block_attrs_to_styling( $form_styling, $block_attrs );
 			}
+
+			// When enabled, the form renders without the SureForms inline CSS variables so
+			// the site's own CSS fully controls its appearance. Per-form Custom CSS still applies.
+			$disable_default_styles = ! empty( $form_styling['disable_default_styles'] );
 			// Background Settings.
 			$bg_type                   = $form_styling['bg_type'] ?? 'color';
 			$bg_color                  = $form_styling['bg_color'] ?? '';
@@ -241,6 +245,7 @@ class Generate_Form_Markup {
 				! empty( $block_id_suffix ) ? $container_id : '', // Unique class for CSS scoping when blockId exists.
 				$sf_classname,
 				'Neve' === $theme_name ? $neve_theme_margin_class_name : '', // compatibility with Neve theme for margin between main content and footer.
+				$disable_default_styles ? 'srfm-styling-none' : '', // Marker class when default styling is disabled, so custom CSS can target the state.
 				$background_classes,
 			];
 
@@ -360,6 +365,7 @@ class Generate_Form_Markup {
 			<style>
 				/* Need to check and remove the input variables related to the Style Tab. */
 				<?php echo esc_html( ".{$container_id}" ); ?> {
+					<?php if ( ! $disable_default_styles ) { ?>
 					/* New test variables */
 					--srfm-color-scheme-primary: <?php echo esc_html( $primary_color_var ); ?>;
 					--srfm-color-scheme-text-on-primary: <?php echo esc_html( $label_text_color_var ); ?>;
@@ -398,7 +404,7 @@ class Generate_Form_Markup {
 					--srfm-dropdown-icon-disabled: hsl( from <?php echo esc_html( $help_color_var ); ?> h s l / 0.25 );
 
 					/* Background Control Variables */
-					<?php
+						<?php
 						// Form Styles.
 						$styling_vars = [
 							// Instant Form Padding.
@@ -474,25 +480,25 @@ class Generate_Form_Markup {
 							echo esc_html( Helper::get_string_value( $key ) ) . ': ' . esc_html( Helper::get_string_value( $value ) ) . ';';
 						}
 						?>
-					<?php
-					// Echo the CSS variables for the form according to the field spacing selected.
-					foreach ( $selected_size as $variable => $value ) {
-						echo esc_html( Helper::get_string_value( $variable ) ) . ': ' . esc_html( Helper::get_string_value( $value ) ) . ';';
-					}
-					do_action(
-						'srfm_form_css_variables',
-						[
-							'id'            => $id,
-							'primary_color' => $primary_color_var,
-							'help_color'    => $help_color_var,
-							'form_styling'  => $form_styling,
-							'block_attrs'   => $block_attrs,
-						]
-					);
-					// echo custom css on page/post.
-					if ( 'sureforms_form' !== $current_post_type ) {
-						echo wp_kses_post( $custom_css );
-					}
+						<?php
+						// Echo the CSS variables for the form according to the field spacing selected.
+						foreach ( $selected_size as $variable => $value ) {
+							echo esc_html( Helper::get_string_value( $variable ) ) . ': ' . esc_html( Helper::get_string_value( $value ) ) . ';';
+						}
+						do_action(
+							'srfm_form_css_variables',
+							[
+								'id'            => $id,
+								'primary_color' => $primary_color_var,
+								'help_color'    => $help_color_var,
+								'form_styling'  => $form_styling,
+								'block_attrs'   => $block_attrs,
+							]
+						);
+					} // End if default styling is not disabled.
+					// Echo the per-form Custom CSS wherever the form renders — embedded on a
+					// page/post as well as on its own single/instant form view.
+					echo wp_kses_post( $custom_css );
 					?>
 				}
 			</style>

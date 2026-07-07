@@ -3,6 +3,7 @@ import { useSelect, useDispatch } from '@wordpress/data';
 import { useState, useEffect } from '@wordpress/element';
 import { store as editorStore } from '@wordpress/editor';
 import { applyFilters } from '@wordpress/hooks';
+import { ToggleControl } from '@wordpress/components';
 import AdvancedPopColorControl from '@Components/color-control/advanced-pop-color-control.js';
 import SRFMAdvancedPanelBody from '@Components/advanced-panel-body';
 import SRFMTextControl from '@Components/text-control';
@@ -1173,6 +1174,32 @@ function StyleSettings( props ) {
 	];
 
 	const advanced = [
+		{
+			id: 'disable_default_styles',
+			component: (
+				<>
+					<ToggleControl
+						label={ __(
+							'Disable SureForms Styling',
+							'sureforms'
+						) }
+						checked={ !! formStyling?.disable_default_styles }
+						onChange={ ( value ) => {
+							updateFormStyling(
+								'disable_default_styles',
+								!! value
+							);
+						} }
+					/>
+					<p className="components-base-control__help">
+						{ __(
+							'Render this form without the SureForms default styles, so your own CSS (theme styles or the Custom CSS panel) fully controls its appearance. Essential styles for advanced fields like Dropdown and Phone are still loaded. This setting takes effect only on the live page, not in the editor preview.',
+							'sureforms'
+						) }
+					</p>
+				</>
+			),
+		},
 		{
 			id: 'additional_css_classes',
 			component: (

@@ -149,6 +149,114 @@ class Form_Styling {
 	}
 
 	/**
+	 * Check if the form has default SureForms styling disabled.
+	 *
+	 * When enabled from the Style tab, the form is rendered without the
+	 * SureForms frontend stylesheets and inline CSS variables so the site's
+	 * own CSS fully controls the form's appearance.
+	 *
+	 * @param int|string $form_id Form post ID.
+	 * @return bool True when default styling is disabled for the form.
+	 * @since x.x.x
+	 */
+	public static function is_default_styling_disabled( $form_id ) {
+		$form_id = absint( $form_id );
+		if ( ! $form_id ) {
+			return false;
+		}
+
+		$form_styling = get_post_meta( $form_id, '_srfm_forms_styling', true );
+
+		return is_array( $form_styling ) && ! empty( $form_styling['disable_default_styles'] );
+	}
+
+	/**
+	 * Check whether the SureForms frontend stylesheets can be skipped for a post.
+	 *
+	 * Returns true only when every SureForms form found on the post has default
+	 * styling disabled. When the forms on the post cannot be determined, the
+	 * stylesheets are kept as the safe default.
+	 *
+	 * @param \WP_Post $post Post being rendered.
+	 * @return bool True when the frontend stylesheets can be skipped.
+	 * @since x.x.x
+	 */
+	public static function should_skip_frontend_styles( $post ) {
+		if ( SRFM_FORMS_POST_TYPE === $post->post_type ) {
+			$form_ids = [ $post->ID ];
+		} else {
+			$form_ids = self::get_form_ids_from_content( $post->post_content );
+		}
+
+		if ( empty( $form_ids ) ) {
+			return false;
+		}
+
+		foreach ( $form_ids as $form_id ) {
+			if ( ! self::is_default_styling_disabled( $form_id ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Extract SureForms form IDs from post content.
+	 *
+	 * Looks for srfm/form blocks (including nested ones) and [sureforms]
+	 * shortcodes.
+	 *
+	 * @param string $content Post content.
+	 * @return array<int> Unique form IDs found in the content.
+	 * @since x.x.x
+	 */
+	public static function get_form_ids_from_content( $content ) {
+		$form_ids = [];
+
+		if ( has_block( 'srfm/form', $content ) ) {
+			$form_ids = self::collect_form_block_ids( parse_blocks( $content ) );
+		}
+
+		if ( has_shortcode( $content, 'sureforms' ) && preg_match_all( '/' . get_shortcode_regex( [ 'sureforms' ] ) . '/', $content, $matches ) ) {
+			foreach ( $matches[3] as $atts_string ) {
+				$atts = shortcode_parse_atts( $atts_string );
+				if ( is_array( $atts ) && ! empty( $atts['id'] ) ) {
+					$form_ids[] = absint( $atts['id'] );
+				}
+			}
+		}
+
+		return array_values( array_unique( array_filter( $form_ids ) ) );
+	}
+
+	/**
+	 * Recursively collect form IDs from parsed srfm/form blocks.
+	 *
+	 * @param array<mixed> $blocks Parsed blocks from parse_blocks().
+	 * @return array<int> Form IDs found in srfm/form blocks.
+	 * @since x.x.x
+	 */
+	private static function collect_form_block_ids( $blocks ) {
+		$form_ids = [];
+
+		foreach ( $blocks as $block ) {
+			if ( ! is_array( $block ) ) {
+				continue;
+			}
+			$attrs = isset( $block['attrs'] ) && is_array( $block['attrs'] ) ? $block['attrs'] : [];
+			if ( isset( $block['blockName'] ) && 'srfm/form' === $block['blockName'] && ! empty( $attrs['id'] ) && is_scalar( $attrs['id'] ) ) {
+				$form_ids[] = absint( $attrs['id'] );
+			}
+			if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
+				$form_ids = array_merge( $form_ids, self::collect_form_block_ids( $block['innerBlocks'] ) );
+			}
+		}
+
+		return $form_ids;
+	}
+
+	/**
 	 * Map dimension block attributes (Top/Right/Bottom/Left/Unit) to form styling.
 	 *
 	 * @param array<string,mixed> $form_styling Form styling array.
