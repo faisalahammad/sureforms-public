@@ -458,4 +458,120 @@ class Test_Form_Styling extends TestCase {
 	public function test_has_custom_styling_returns_false_when_not_set() {
 		$this->assertFalse( Form_Styling::has_custom_styling( [] ) );
 	}
+
+	// ─── disable default styling ──────────────────────────────────
+
+	/**
+	 * Test is_default_styling_disabled() reads the form styling meta correctly.
+	 */
+	public function test_is_default_styling_disabled() {
+		// Invalid form IDs are never treated as disabled.
+		$this->assertFalse( Form_Styling::is_default_styling_disabled( 0 ) );
+		$this->assertFalse( Form_Styling::is_default_styling_disabled( '' ) );
+
+		$form_id = wp_insert_post(
+			[
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_status' => 'publish',
+				'post_title'  => 'Styling Test Form',
+			]
+		);
+
+		// Explicitly enabled default styling.
+		update_post_meta( $form_id, '_srfm_forms_styling', [ 'disable_default_styles' => false ] );
+		$this->assertFalse( Form_Styling::is_default_styling_disabled( $form_id ) );
+
+		// Styling meta without the key keeps default styling.
+		update_post_meta( $form_id, '_srfm_forms_styling', [ 'primary_color' => '#000000' ] );
+		$this->assertFalse( Form_Styling::is_default_styling_disabled( $form_id ) );
+
+		update_post_meta( $form_id, '_srfm_forms_styling', [ 'disable_default_styles' => true ] );
+		$this->assertTrue( Form_Styling::is_default_styling_disabled( $form_id ) );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * Test get_form_ids_from_content() finds top-level blocks, nested blocks and shortcodes.
+	 */
+	public function test_get_form_ids_from_content() {
+		if ( ! shortcode_exists( 'sureforms' ) ) {
+			add_shortcode( 'sureforms', '__return_empty_string' );
+		}
+
+		$this->assertSame( [], Form_Styling::get_form_ids_from_content( '' ) );
+		$this->assertSame( [], Form_Styling::get_form_ids_from_content( '<p>No forms here.</p>' ) );
+
+		// Top-level block.
+		$this->assertSame( [ 11 ], Form_Styling::get_form_ids_from_content( '<!-- wp:srfm/form {"id":11} /-->' ) );
+
+		// Nested block, another top-level block, shortcodes and a duplicate ID.
+		$content  = '<!-- wp:group --><div class="wp-block-group"><!-- wp:srfm/form {"id":11} /--></div><!-- /wp:group -->';
+		$content .= '<!-- wp:srfm/form {"id":22} /-->';
+		$content .= '[sureforms id="33"][sureforms id="22"]';
+
+		$form_ids = Form_Styling::get_form_ids_from_content( $content );
+		sort( $form_ids );
+
+		$this->assertSame( [ 11, 22, 33 ], $form_ids );
+	}
+
+	/**
+	 * Test should_skip_frontend_styles() only skips when every form on the post disables styling.
+	 */
+	public function test_should_skip_frontend_styles() {
+		$disabled_form_id = wp_insert_post(
+			[
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_status' => 'publish',
+				'post_title'  => 'Unstyled Form',
+			]
+		);
+		update_post_meta( $disabled_form_id, '_srfm_forms_styling', [ 'disable_default_styles' => true ] );
+
+		$styled_form_id = wp_insert_post(
+			[
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_status' => 'publish',
+				'post_title'  => 'Styled Form',
+			]
+		);
+
+		// Single form views.
+		$this->assertTrue( Form_Styling::should_skip_frontend_styles( get_post( $disabled_form_id ) ), 'Single view of a form with disabled styling should skip the stylesheets.' );
+		$this->assertFalse( Form_Styling::should_skip_frontend_styles( get_post( $styled_form_id ) ), 'Single view of a styled form should keep the stylesheets.' );
+
+		// Page embedding only the unstyled form.
+		$page_id = wp_insert_post(
+			[
+				'post_type'    => 'page',
+				'post_status'  => 'publish',
+				'post_title'   => 'Embeds',
+				'post_content' => '<!-- wp:srfm/form {"id":' . $disabled_form_id . '} /-->',
+			]
+		);
+		$this->assertTrue( Form_Styling::should_skip_frontend_styles( get_post( $page_id ) ), 'A page whose only form has disabled styling should skip the stylesheets.' );
+
+		// Page mixing an unstyled and a styled form keeps the stylesheets.
+		wp_update_post(
+			[
+				'ID'           => $page_id,
+				'post_content' => '<!-- wp:srfm/form {"id":' . $disabled_form_id . '} /--><!-- wp:srfm/form {"id":' . $styled_form_id . '} /-->',
+			]
+		);
+		$this->assertFalse( Form_Styling::should_skip_frontend_styles( get_post( $page_id ) ), 'A page mixing styled and unstyled forms should keep the stylesheets.' );
+
+		// When no forms can be determined, keep the stylesheets as the safe default.
+		wp_update_post(
+			[
+				'ID'           => $page_id,
+				'post_content' => '<p>Nothing detectable.</p>',
+			]
+		);
+		$this->assertFalse( Form_Styling::should_skip_frontend_styles( get_post( $page_id ) ), 'A post without detectable forms should keep the stylesheets.' );
+
+		wp_delete_post( $disabled_form_id, true );
+		wp_delete_post( $styled_form_id, true );
+		wp_delete_post( $page_id, true );
+	}
 }

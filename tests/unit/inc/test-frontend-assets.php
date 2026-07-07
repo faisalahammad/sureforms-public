@@ -129,4 +129,38 @@ class Test_Frontend_Assets extends TestCase {
 		$registered = wp_scripts()->query( SRFM_SLUG . '-form-submit', 'registered' );
 		$this->assertNotFalse( $registered, 'srfm-form-submit script should be registered after register_scripts().' );
 	}
+
+	/**
+	 * Test enqueue_scripts_and_styles() honors the $skip_form_styles flag.
+	 *
+	 * When a form has default styling disabled, the SureForms stylesheets must
+	 * be skipped while external library styles (Tom Select, intl-tel-input)
+	 * and all scripts keep loading.
+	 */
+	public function test_enqueue_scripts_and_styles() {
+		// Register all handles first, then start from an empty queue.
+		$this->frontend_assets->register_scripts();
+		wp_styles()->queue  = [];
+		wp_scripts()->queue = [];
+
+		Frontend_Assets::enqueue_scripts_and_styles( true );
+
+		$this->assertFalse( wp_style_is( SRFM_SLUG . '-common', 'enqueued' ), 'SureForms stylesheets should be skipped when default styling is disabled.' );
+		$this->assertFalse( wp_style_is( SRFM_SLUG . '-frontend-default', 'enqueued' ), 'SureForms stylesheets should be skipped when default styling is disabled.' );
+		$this->assertFalse( wp_style_is( SRFM_SLUG . '-form', 'enqueued' ), 'SureForms stylesheets should be skipped when default styling is disabled.' );
+		$this->assertTrue( wp_style_is( SRFM_SLUG . '-tom-select', 'enqueued' ), 'External library styles should always be enqueued.' );
+		$this->assertTrue( wp_style_is( SRFM_SLUG . '-intl-tel-input', 'enqueued' ), 'External library styles should always be enqueued.' );
+		$this->assertTrue( wp_script_is( SRFM_SLUG . '-frontend', 'enqueued' ), 'Scripts should always be enqueued.' );
+		$this->assertTrue( wp_script_is( SRFM_SLUG . '-form-submit', 'enqueued' ), 'Scripts should always be enqueued.' );
+
+		// Reset the queues and enqueue with default styling enabled.
+		wp_styles()->queue  = [];
+		wp_scripts()->queue = [];
+
+		Frontend_Assets::enqueue_scripts_and_styles();
+
+		$this->assertTrue( wp_style_is( SRFM_SLUG . '-common', 'enqueued' ), 'SureForms stylesheets should be enqueued by default.' );
+		$this->assertTrue( wp_style_is( SRFM_SLUG . '-frontend-default', 'enqueued' ), 'SureForms stylesheets should be enqueued by default.' );
+		$this->assertTrue( wp_style_is( SRFM_SLUG . '-form', 'enqueued' ), 'SureForms stylesheets should be enqueued by default.' );
+	}
 }
