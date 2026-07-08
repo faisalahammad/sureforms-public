@@ -458,7 +458,7 @@ Yes. SureForms Business includes fully functional user registration forms and lo
 You can report security issues through our [Bug Bounty Program](https://brainstormforce.com/bug-bounty-program/). We collaborate with Patchstack to provide opportunities for researchers to report vulnerabilities. The Patchstack team will help validate, triage, and handle any reported security issues.
 
 ## Changelog ##
-### 2.12.1 - 6th July 2026 ###
+### 2.12.1 - 8th July 2026 ###
 * New: Added an AI-powered quick draft flow on the dashboard to generate forms faster, with built-in usage tracking.
 * Improvement: Email fields now enforce standard RFC 5321 length limits (a 64-character local part and 255-character domain) to prevent oversized submissions, with a filter to customize the limits.
 * Fix: Reset form option not working for some fields.
