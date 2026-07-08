@@ -83,9 +83,13 @@ jobs:
           node-version: '24.16.0'
           cache: 'npm'
 
+      # Pin WP-CLI to a fixed release. `wp i18n make-json` stamps
+      # "generator":"WP-CLI/<version>" into every languages/*.json, so
+      # installing "latest" rewrites all JSON files whenever WP-CLI
+      # ships a new version. Bump this pin deliberately.
       - name: Install WP-CLI
         run: |
-          curl -sSfL -o wp-cli.phar https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+          curl -sSfL -o wp-cli.phar https://github.com/wp-cli/wp-cli/releases/download/v2.12.0/wp-cli-2.12.0.phar
           chmod +x wp-cli.phar
           sudo mv wp-cli.phar /usr/local/bin/wp
           wp --info
