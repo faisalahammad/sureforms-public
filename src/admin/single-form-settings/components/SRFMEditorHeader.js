@@ -2,8 +2,7 @@ import { __ } from '@wordpress/i18n';
 import { useEntityProp } from '@wordpress/core-data';
 import { TextControl } from '@wordpress/components';
 import { useSelect } from '@wordpress/data';
-import { createRoot } from 'react-dom/client';
-import { useEffect, useRef } from '@wordpress/element';
+import { useEffect, useRef, createRoot } from '@wordpress/element';
 
 const SRFMEditorHeader = () => {
 	const postId = useSelect( ( select ) => {

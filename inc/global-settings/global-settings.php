@@ -225,6 +225,8 @@ class Global_Settings {
 			'srfm_confirm_email_same',
 			'srfm_valid_email',
 			'srfm_textarea_min_chars',
+			'srfm_email_local_max_length',
+			'srfm_email_domain_max_length',
 			'srfm_input_min_value',
 			'srfm_input_max_value',
 			'srfm_dropdown_min_selections',

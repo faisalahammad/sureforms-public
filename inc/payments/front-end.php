@@ -136,18 +136,19 @@ class Front_End {
 
 			// Create payment intent with confirm: true for immediate processing.
 			$payment_intent_data = [
-				'secret_key'                => $secret_key,
-				'amount'                    => $amount,
-				'currency'                  => strtolower( $currency ),
-				'description'               => $description,
-				'confirm'                   => false, // Will be confirmed by frontend.
-				'receipt_email'             => $customer_email,
-				'license_key'               => $license_key,
-				'automatic_payment_methods' => [
-					'enabled'         => true,
-					'allow_redirects' => 'never',
-				],
-				'metadata'                  => [
+				'secret_key'           => $secret_key,
+				'amount'               => $amount,
+				'currency'             => strtolower( $currency ),
+				'description'          => $description,
+				'confirm'              => false, // Will be confirmed by frontend.
+				'receipt_email'        => $customer_email,
+				'license_key'          => $license_key,
+				// One-time payments use manual capture; methods that don't support it (Bacs, Link, Cash App, BNPL) make
+				// Stripe reject the deferred Elements session in live mode, and an automatic-payment-methods intent can't
+				// be confirmed by the card-scoped client Element. Pin to card so the client Element, this payload, and the
+				// middleware intent all agree (Apple/Google Pay are still surfaced through 'card').
+				'payment_method_types' => [ 'card' ],
+				'metadata'             => [
 					'source'          => 'SureForms',
 					'block_id'        => $block_id,
 					'original_amount' => $amount,

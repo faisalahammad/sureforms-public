@@ -41,6 +41,17 @@ class Admin {
 	public const RATING_NOTICE_THRESHOLD = 3;
 
 	/**
+	 * Inline CSS for Quill 1.x (react-quill) list markers.
+	 *
+	 * Quill 1.x renders bullet/numbered list markers via CSS ::before pseudo-elements,
+	 * whereas the vendor quill.snow.css targets .ql-ui child elements (Quill 2.x approach).
+	 * This constant is shared by enqueue_styles() and enqueue_scripts() to prevent drift.
+	 *
+	 * @since 2.5.2
+	 */
+	public const QUILL_1X_INLINE_CSS = '.ql-editor ul,.ql-editor ol{padding-left:1.5em}.ql-editor ul>li,.ql-editor ol>li{list-style-type:none}.ql-editor ol li:not(.ql-direction-rtl),.ql-editor ul li:not(.ql-direction-rtl){padding-left:1.5em}.ql-editor ol li.ql-direction-rtl,.ql-editor ul li.ql-direction-rtl{padding-right:1.5em}.ql-editor ul>li::before{content:"\2022"}.ql-editor li::before{display:inline-block;white-space:nowrap;width:1.2em}.ql-editor li:not(.ql-direction-rtl)::before{margin-left:-1.5em;margin-right:.3em;text-align:right}.ql-editor li.ql-direction-rtl::before{margin-left:.3em;margin-right:-1.5em}.ql-editor ol li{counter-reset:list-1 list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9;counter-increment:list-0}.ql-editor ol li::before{content:counter(list-0,decimal) ". "}.ql-editor ol li.ql-indent-1{counter-increment:list-1;counter-reset:list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-1::before{content:counter(list-1,lower-alpha) ". "}.ql-editor ol li.ql-indent-2{counter-increment:list-2;counter-reset:list-3 list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-2::before{content:counter(list-2,lower-roman) ". "}.ql-editor ol li.ql-indent-3{counter-increment:list-3;counter-reset:list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-3::before{content:counter(list-3,decimal) ". "}.ql-editor ol li.ql-indent-4{counter-increment:list-4;counter-reset:list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-4::before{content:counter(list-4,lower-alpha) ". "}.ql-editor ol li.ql-indent-5{counter-increment:list-5;counter-reset:list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-5::before{content:counter(list-5,lower-roman) ". "}.ql-editor ol li.ql-indent-6{counter-increment:list-6;counter-reset:list-7 list-8 list-9}.ql-editor ol li.ql-indent-6::before{content:counter(list-6,decimal) ". "}.ql-editor ol li.ql-indent-7{counter-increment:list-7;counter-reset:list-8 list-9}.ql-editor ol li.ql-indent-7::before{content:counter(list-7,lower-alpha) ". "}.ql-editor ol li.ql-indent-8{counter-increment:list-8;counter-reset:list-9}.ql-editor ol li.ql-indent-8::before{content:counter(list-8,lower-roman) ". "}.ql-editor ol li.ql-indent-9{counter-increment:list-9}.ql-editor ol li.ql-indent-9::before{content:counter(list-9,decimal) ". "}';
+
+	/**
 	 * Dashboard widget entries data.
 	 *
 	 * @var array
@@ -120,9 +131,13 @@ class Admin {
 		add_action( 'wp_ajax_sureforms_dismiss_pointer', [ $this, 'pointer_dismissed' ] );
 		add_action( 'wp_ajax_sureforms_accept_cta', [ $this, 'pointer_accepted_cta' ] );
 		add_action( 'wp_ajax_srfm_notice_response', [ $this, 'handle_notice_response' ] );
+		add_action( 'wp_ajax_srfm_ai_widget_usage', [ $this, 'track_ai_widget_usage' ] );
 
 		// Register dashboard widget only if there are recent entries.
 		add_action( 'admin_init', [ $this, 'maybe_register_dashboard_widget' ] );
+
+		// Enqueue the AI quick draft widget script on the dashboard screen.
+		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_ai_dashboard_widget_assets' ] );
 
 		// Save first form creation time stamp.
 		add_action( 'admin_init', [ $this, 'save_first_form_creation_time_stamp' ] );
@@ -894,6 +909,7 @@ class Admin {
 			wp_enqueue_style( SRFM_SLUG . '-intl', $vendor_css_uri . 'intl/intlTelInput-backend.min.css', [], SRFM_VER );
 			wp_enqueue_style( SRFM_SLUG . '-common', $css_uri . 'common' . $file_prefix . '.css', [], SRFM_VER );
 			wp_enqueue_style( SRFM_SLUG . '-reactQuill', $vendor_css_uri . 'quill/quill.snow.css', [], SRFM_VER );
+			wp_add_inline_style( SRFM_SLUG . '-reactQuill', self::QUILL_1X_INLINE_CSS );
 			wp_enqueue_style( SRFM_SLUG . '-single-form-modal', $css_uri . 'single-form-setting' . $file_prefix . '.css', [], SRFM_VER );
 
 			// if version is equal to or lower than 6.6.2 then add compatibility css.
@@ -1334,6 +1350,7 @@ class Admin {
 			// Enqueue Tailwind and Quill editor styles for the settings page.
 			wp_enqueue_style( SRFM_SLUG . '-settings-build', SRFM_URL . 'assets/build/settings.css', [], SRFM_VER, 'all' );
 			wp_enqueue_style( SRFM_SLUG . '-reactQuill', SRFM_URL . 'assets/css/minified/deps/quill/quill.snow.css', [], SRFM_VER );
+			wp_add_inline_style( SRFM_SLUG . '-reactQuill', self::QUILL_1X_INLINE_CSS );
 
 			$script_translations_handlers[] = SRFM_SLUG . '-settings';
 		}
@@ -1921,6 +1938,9 @@ class Admin {
 			return;
 		}
 
+		// Register the AI quick draft widget for capable users (the capability gate above applies); unlike the recent-entries widget below, it is not conditional on having entries.
+		add_action( 'wp_dashboard_setup', [ $this, 'register_ai_dashboard_widget' ] );
+
 		// Quick check if there are any entries in the last 7 days.
 		$seven_days_ago = strtotime( '-7 days' );
 		$total_entries  = Entries::get_entries_count_after( $seven_days_ago );
@@ -1954,6 +1974,178 @@ class Admin {
 			'normal',
 			'high'
 		);
+	}
+
+	/**
+	 * Register the AI quick draft dashboard widget.
+	 *
+	 * @return void
+	 * @since 2.12.1
+	 */
+	public function register_ai_dashboard_widget() {
+		wp_add_dashboard_widget(
+			'sureforms_ai_quick_draft',
+			__( 'SureForms AI Quick Draft', 'sureforms' ),
+			[ $this, 'render_ai_dashboard_widget' ],
+			null,
+			null,
+			'normal',
+			'high'
+		);
+	}
+
+	/**
+	 * Render AI quick draft dashboard widget content.
+	 *
+	 * @return void
+	 * @since 2.12.1
+	 */
+	public function render_ai_dashboard_widget() {
+		?>
+		<div class="srfm-ai-dashboard-widget">
+			<p>
+				<?php esc_html_e( 'Describe the form and let SureForms AI generate it for you.', 'sureforms' ); ?>
+			</p>
+			<label for="srfm-ai-dashboard-prompt" class="screen-reader-text">
+				<?php esc_html_e( 'Describe your form', 'sureforms' ); ?>
+			</label>
+			<textarea
+				id="srfm-ai-dashboard-prompt"
+				class="widefat"
+				rows="5"
+				maxlength="2000"
+				placeholder="<?php esc_attr_e( 'Example: Create a contact form with name, email, phone, and message fields.', 'sureforms' ); ?>"
+			></textarea>
+			<p style="margin-top:10px;margin-bottom:0;display:flex;align-items:center;gap:10px;">
+				<button type="button" class="button button-primary" id="srfm-ai-dashboard-generate" disabled>
+					<?php esc_html_e( 'Create New Form', 'sureforms' ); ?>
+				</button>
+				<span id="srfm-ai-dashboard-char-count" style="color:#646970;">0/2000</span>
+			</p>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Enqueue the AI quick draft dashboard widget script on the dashboard screen.
+	 *
+	 * The widget's behavior lives here (attached via wp_add_inline_script) rather than as an
+	 * inline <script> in the render callback, so it passes Plugin Check and keeps server values
+	 * out of the markup. Server values are passed through wp_localize_script.
+	 *
+	 * @param string $hook_suffix The current admin page hook suffix.
+	 * @return void
+	 * @since 2.12.1
+	 */
+	public function enqueue_ai_dashboard_widget_assets( $hook_suffix ) {
+		// Only on the main dashboard, and only for capable users (matches the widget gate).
+		if ( 'index.php' !== $hook_suffix || ! Helper::current_user_can() ) {
+			return;
+		}
+
+		// Register an inline-only handle (empty src) — the WordPress-core pattern for attaching
+		// localized data plus an inline script without shipping a separate asset file.
+		wp_register_script( 'srfm-ai-dashboard-widget', '', [], SRFM_VER, true );
+		wp_enqueue_script( 'srfm-ai-dashboard-widget' );
+
+		wp_localize_script(
+			'srfm-ai-dashboard-widget',
+			'srfmAiDashboardWidget',
+			[
+				'redirectUrl'    => admin_url( 'admin.php?page=add-new-form' ),
+				'ajaxUrl'        => admin_url( 'admin-ajax.php' ),
+				'nonce'          => wp_create_nonce( 'srfm_ai_widget_usage' ),
+				'redirectingTxt' => __( 'Redirecting...', 'sureforms' ),
+			]
+		);
+
+		$inline_script = <<<'JS'
+( function () {
+	const config = window.srfmAiDashboardWidget || {};
+	const generateButton = document.getElementById( 'srfm-ai-dashboard-generate' );
+	const promptField = document.getElementById( 'srfm-ai-dashboard-prompt' );
+	const charCount = document.getElementById( 'srfm-ai-dashboard-char-count' );
+	if ( ! generateButton || ! promptField ) {
+		return;
+	}
+
+	const updateWidgetState = function () {
+		const promptValue = promptField.value.trim();
+		generateButton.disabled = ! promptValue;
+		if ( charCount ) {
+			charCount.textContent = `${ promptField.value.length }/2000`;
+		}
+	};
+
+	const triggerGeneration = function () {
+		const prompt = promptField.value.trim();
+		if ( ! prompt ) {
+			promptField.focus();
+			return;
+		}
+
+		generateButton.disabled = true;
+		generateButton.textContent = config.redirectingTxt;
+
+		const redirectUrl = new URL( config.redirectUrl, window.location.origin );
+		redirectUrl.searchParams.set( 'srfm_ai_dashboard_prompt', prompt );
+
+		const requestBody = new URLSearchParams();
+		requestBody.append( 'action', 'srfm_ai_widget_usage' );
+		requestBody.append( 'nonce', config.nonce );
+
+		fetch( config.ajaxUrl, {
+			method: 'POST',
+			credentials: 'same-origin',
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+			},
+			body: requestBody.toString(),
+		} ).finally( function () {
+			window.location.href = redirectUrl.toString();
+		} );
+	};
+
+	promptField.addEventListener( 'input', updateWidgetState );
+	generateButton.addEventListener( 'click', triggerGeneration );
+	promptField.addEventListener( 'keydown', function ( event ) {
+		if ( event.key === 'Enter' && ( event.metaKey || event.ctrlKey ) ) {
+			event.preventDefault();
+			triggerGeneration();
+		}
+	} );
+
+	updateWidgetState();
+}() );
+JS;
+
+		wp_add_inline_script( 'srfm-ai-dashboard-widget', $inline_script );
+	}
+
+	/**
+	 * Track AI dashboard widget usage.
+	 *
+	 * @return void
+	 * @since 2.12.1
+	 */
+	public function track_ai_widget_usage() {
+		if ( ! check_ajax_referer( 'srfm_ai_widget_usage', 'nonce', false ) ) {
+			wp_send_json_error( [ 'message' => __( 'Invalid nonce.', 'sureforms' ) ], 403 );
+		}
+
+		if ( ! Helper::current_user_can() ) {
+			wp_send_json_error( [ 'message' => __( 'Unauthorized user.', 'sureforms' ) ], 403 );
+		}
+
+		$current_count = (int) Helper::get_srfm_option( 'ai_dashboard_widget_uses', 0 ) + 1;
+		Helper::update_srfm_option( 'ai_dashboard_widget_uses', $current_count );
+
+		// Emit an analytics event so usage lands in the warehouse via events_record.
+		// $force = true because this is a cumulative counter, not a one-time event —
+		// it must re-send the latest count each cycle (bypasses one-time dedup).
+		Analytics::events()->track( 'ai_dashboard_widget_used', (string) $current_count, [], true );
+
+		wp_send_json_success();
 	}
 
 	/**

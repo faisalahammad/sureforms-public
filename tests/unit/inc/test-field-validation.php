@@ -442,4 +442,41 @@ class Test_Field_Validation extends TestCase {
 		$this->assertEquals( 10.0, $config['pay-default']['fixed_amount'] );
 		$this->assertEquals( 0.0, $config['pay-default']['minimum_amount'] );
 	}
+
+	/**
+	 * Test get_email_char_limits returns RFC 5321 defaults and honors the filter override.
+	 *
+	 * @since 2.12.1
+	 */
+	public function test_get_email_char_limits() {
+		// Defaults when no filter is attached.
+		$this->assertSame(
+			[
+				'local'  => 64,
+				'domain' => 255,
+			],
+			Field_Validation::get_email_char_limits(),
+			'Should return the RFC 5321 defaults (64 local / 255 domain).'
+		);
+
+		// A filter override is reflected and run through absint.
+		$override = static function () {
+			return [
+				'local'  => 128,
+				'domain' => 320,
+			];
+		};
+		add_filter( 'srfm_email_field_char_limits', $override );
+		$limits = Field_Validation::get_email_char_limits();
+		remove_filter( 'srfm_email_field_char_limits', $override );
+
+		$this->assertSame(
+			[
+				'local'  => 128,
+				'domain' => 320,
+			],
+			$limits,
+			'A srfm_email_field_char_limits override should be reflected in the resolved limits.'
+		);
+	}
 }

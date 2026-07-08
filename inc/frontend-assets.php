@@ -142,10 +142,13 @@ class Frontend_Assets {
 			SRFM_SLUG . '-form-submit',
 			SRFM_SLUG . '_submit',
 			[
-				'site_url' => site_url(),
-				'nonce'    => wp_create_nonce( 'wp_rest' ),
-				'messages' => $validation_messages,
-				'is_rtl'   => $is_rtl,
+				'site_url'          => site_url(),
+				'nonce'             => wp_create_nonce( 'wp_rest' ),
+				'messages'          => $validation_messages,
+				'is_rtl'            => $is_rtl,
+				// Resolved RFC 5321 email limits so the client honors the
+				// srfm_email_field_char_limits filter instead of hardcoding 64/255.
+				'email_char_limits' => Field_Validation::get_email_char_limits(),
 			]
 		);
 

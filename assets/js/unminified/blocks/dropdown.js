@@ -437,3 +437,28 @@ document.addEventListener( 'srfm_form_before_submission', ( e ) => {
 // Make dropdown initialization function available globally for repeater fields
 window.srfmInitializeDropdownField = initializeDropdown;
 window.srfmDestroyDropdownField = destroyTomSelect;
+
+// Reset TomSelect dropdowns when the form is reset.
+document.addEventListener( 'srfm_form_reset', ( e ) => {
+	const form = e.detail?.form;
+	if ( ! form ) {
+		return;
+	}
+
+	form.querySelectorAll( '.srfm-dropdown-common' ).forEach( ( dropdown ) => {
+		const inputName = dropdown.getAttribute( 'name' );
+		const instance = window?.srfm?.[ inputName ];
+		if ( instance ) {
+			instance.clear();
+		}
+
+		// Also clear the hidden input that holds the submitted value.
+		const hiddenInput = dropdown
+			.closest( '.srfm-dropdown-block' )
+			?.querySelector( '.srfm-input-dropdown-hidden' );
+		if ( hiddenInput ) {
+			hiddenInput.setAttribute( 'value', '' );
+			hiddenInput.dispatchEvent( new Event( 'change', { bubbles: true } ) );
+		}
+	} );
+} );

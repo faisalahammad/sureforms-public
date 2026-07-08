@@ -295,11 +295,74 @@ class Field_Validation {
 					$not_valid_fields[ $key ] = sprintf( $min_chars_message, $min_length );
 				}
 			}
+
+			// Email field RFC 5321 length limits (local part / domain), overridable via filter.
+			// Only the main email value is in form data (the confirm input has no `name`),
+			// so the server validates that value; the client mirrors this for both inputs.
+			// Split on the LAST @ per RFC 5321 so the local part may contain a quoted @.
+			$at_pos = is_string( $value ) && '' !== $value ? strrpos( $value, '@' ) : false;
+			if ( 'srfm-email' === $get_field_name && is_string( $value ) && false !== $at_pos ) {
+				$email_limits = self::get_email_char_limits();
+				$local_max    = $email_limits['local'];
+				$domain_max   = $email_limits['domain'];
+				$local_len    = mb_strlen( substr( $value, 0, $at_pos ) );
+				$domain_len   = mb_strlen( substr( $value, $at_pos + 1 ) );
+
+				$dynamic_messages = Translatable::dynamic_validation_messages();
+				if ( $local_max > 0 && $local_len > $local_max ) {
+					$local_message = isset( $dynamic_messages['srfm_email_local_max_length'] ) && is_string( $dynamic_messages['srfm_email_local_max_length'] ) && '' !== $dynamic_messages['srfm_email_local_max_length']
+						? $dynamic_messages['srfm_email_local_max_length']
+						/* translators: %s: maximum characters allowed before the @ symbol. */
+						: __( 'The part before @ may not exceed %s characters.', 'sureforms' );
+					$not_valid_fields[ $key ] = sprintf( $local_message, $local_max );
+				} elseif ( $domain_max > 0 && $domain_len > $domain_max ) {
+					$domain_message = isset( $dynamic_messages['srfm_email_domain_max_length'] ) && is_string( $dynamic_messages['srfm_email_domain_max_length'] ) && '' !== $dynamic_messages['srfm_email_domain_max_length']
+						? $dynamic_messages['srfm_email_domain_max_length']
+						/* translators: %s: maximum characters allowed after the @ symbol. */
+						: __( 'The part after @ may not exceed %s characters.', 'sureforms' );
+					$not_valid_fields[ $key ] = sprintf( $domain_message, $domain_max );
+				}
+			}
 		}
 
 		// Return the array of invalid fields and their error messages.
 		// Example: [ 'srfm-email-c867d9d9-lbl-email' => 'This field is required.' ].
 		return $not_valid_fields;
+	}
+
+	/**
+	 * Resolve the Email field character limits (RFC 5321), split on the last @.
+	 *
+	 * Single source of truth shared by the server validation and the limits localized to the
+	 * frontend script, so a filter override applies consistently to both.
+	 *
+	 * @return array{local:int,domain:int} Resolved limits. A value of 0 disables that check.
+	 * @since 2.12.1
+	 */
+	public static function get_email_char_limits() {
+		/**
+		 * Filters the Email field character limits (RFC 5321).
+		 *
+		 * @param array $limits {
+		 *     Character limits for the email value, split on the last @.
+		 *
+		 *     @type int $local  Max characters before the @. 0 disables the check. Default 64.
+		 *     @type int $domain Max characters after the @.  0 disables the check. Default 255.
+		 * }
+		 * @since 2.12.1
+		 */
+		$email_limits = apply_filters(
+			'srfm_email_field_char_limits',
+			[
+				'local'  => 64,
+				'domain' => 255,
+			]
+		);
+
+		return [
+			'local'  => isset( $email_limits['local'] ) ? absint( $email_limits['local'] ) : 64,
+			'domain' => isset( $email_limits['domain'] ) ? absint( $email_limits['domain'] ) : 255,
+		];
 	}
 
 	/**
