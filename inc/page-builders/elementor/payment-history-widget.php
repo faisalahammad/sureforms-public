@@ -22,7 +22,6 @@ if ( ! defined( 'ABSPATH' ) ) {
  * @since x.x.x
  */
 class Payment_History_Widget extends Widget_Base {
-
 	/**
 	 * Get widget name.
 	 *
