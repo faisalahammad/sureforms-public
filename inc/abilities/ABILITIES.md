@@ -95,7 +95,8 @@ Complete reference for all 15 abilities registered with the WordPress Abilities 
 - `emailConfirmation` — `{name, subject, emailBody}`
 - `compliance` — `{enableCompliance, neverStoreEntries, autoDeleteEntries, autoDeleteEntriesDays}`
 - `instantForm` — `{instantForm, showTitle, bannerColor, useBannerColorAsBackground, formBackgroundColor, formWidth, formSlug}`
-- `styling` — `{primaryColor, textColor, textColorOnPrimary, fieldSpacing, submitAlignment}`
+- `styling` — `{submitAlignment}`
+- `formStyling` — `{primaryColor, textColor, textColorOnPrimary, fieldSpacing, disableDefaultStyles}` (`disableDefaultStyles: true` disables SureForms' default frontend styles so the theme styling applies)
 
 **Output:**
 ```json

@@ -38,4 +38,29 @@ class Test_Form_Metadata extends TestCase {
 		$reflection->setAccessible( true );
 		$this->assertTrue( $reflection->isProtected() );
 	}
+
+	/**
+	 * Test formStyling.disableDefaultStyles maps to the _srfm_forms_styling meta flag.
+	 */
+	public function test_form_styling_disable_default_styles_maps_to_meta() {
+		$reflection = new \ReflectionMethod( $this->ability, 'apply_metadata_overrides' );
+		$reflection->setAccessible( true );
+
+		// Enable it, and confirm it merges into existing styling data.
+		$result = $reflection->invoke(
+			$this->ability,
+			[ '_srfm_forms_styling' => [ 'primary_color' => '#111C44' ] ],
+			[ 'formStyling' => [ 'disableDefaultStyles' => true ] ]
+		);
+		$this->assertTrue( $result['_srfm_forms_styling']['disable_default_styles'] );
+		$this->assertSame( '#111C44', $result['_srfm_forms_styling']['primary_color'] );
+
+		// Explicit false is respected (not dropped like empty values).
+		$result = $reflection->invoke(
+			$this->ability,
+			[],
+			[ 'formStyling' => [ 'disableDefaultStyles' => false ] ]
+		);
+		$this->assertFalse( $result['_srfm_forms_styling']['disable_default_styles'] );
+	}
 }
