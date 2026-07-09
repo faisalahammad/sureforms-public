@@ -151,9 +151,10 @@ class Form_Styling {
 	/**
 	 * Check if the form has default SureForms styling disabled.
 	 *
-	 * When enabled from the Style tab, the form is rendered without the
-	 * SureForms frontend stylesheets and inline CSS variables so the site's
-	 * own CSS fully controls the form's appearance.
+	 * When enabled (via the `_srfm_forms_styling` meta set through REST/MCP, or
+	 * the `srfm_disable_default_styles` filter), the form is rendered without the
+	 * SureForms frontend stylesheets and inline CSS variables so the site's own
+	 * CSS fully controls the form's appearance.
 	 *
 	 * @param int|string $form_id Form post ID.
 	 * @return bool True when default styling is disabled for the form.
@@ -166,8 +167,20 @@ class Form_Styling {
 		}
 
 		$form_styling = get_post_meta( $form_id, '_srfm_forms_styling', true );
+		$disabled     = is_array( $form_styling ) && ! empty( $form_styling['disable_default_styles'] );
 
-		return is_array( $form_styling ) && ! empty( $form_styling['disable_default_styles'] );
+		/**
+		 * Filters whether SureForms' default frontend styling is disabled for a form.
+		 *
+		 * Lets themes/plugins toggle the unstyled mode programmatically, overriding the
+		 * stored per-form meta. Return true to render the form without SureForms' default
+		 * stylesheets and inline CSS variables.
+		 *
+		 * @param bool $disabled Whether default styling is disabled (from meta).
+		 * @param int  $form_id  Form post ID.
+		 * @since x.x.x
+		 */
+		return (bool) apply_filters( 'srfm_disable_default_styles', $disabled, $form_id );
 	}
 
 	/**

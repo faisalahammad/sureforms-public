@@ -157,7 +157,9 @@ class Generate_Form_Markup {
 
 			// When enabled, the form renders without the SureForms inline CSS variables so
 			// the site's own CSS fully controls its appearance. Per-form Custom CSS still applies.
-			$disable_default_styles = ! empty( $form_styling['disable_default_styles'] );
+			// Read through the canonical checker so the `srfm_disable_default_styles` filter
+			// governs the marker class and inline CSS guard as well as the enqueue path.
+			$disable_default_styles = Form_Styling::is_default_styling_disabled( $id );
 			// Background Settings.
 			$bg_type                   = $form_styling['bg_type'] ?? 'color';
 			$bg_color                  = $form_styling['bg_color'] ?? '';

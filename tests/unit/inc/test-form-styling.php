@@ -492,6 +492,48 @@ class Test_Form_Styling extends TestCase {
 	}
 
 	/**
+	 * Test the srfm_disable_default_styles filter overrides the stored meta both ways.
+	 */
+	public function test_is_default_styling_disabled_filter_override() {
+		$form_id = wp_insert_post(
+			[
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_status' => 'publish',
+				'post_title'  => 'Styling Filter Form',
+			]
+		);
+
+		// Meta says disabled; a filter returning false re-enables default styling.
+		update_post_meta( $form_id, '_srfm_forms_styling', [ 'disable_default_styles' => true ] );
+		add_filter( 'srfm_disable_default_styles', '__return_false' );
+		$this->assertFalse( Form_Styling::is_default_styling_disabled( $form_id ) );
+		remove_all_filters( 'srfm_disable_default_styles' );
+
+		// Meta says enabled (default); a filter returning true disables default styling.
+		update_post_meta( $form_id, '_srfm_forms_styling', [ 'disable_default_styles' => false ] );
+		add_filter( 'srfm_disable_default_styles', '__return_true' );
+		$this->assertTrue( Form_Styling::is_default_styling_disabled( $form_id ) );
+		remove_all_filters( 'srfm_disable_default_styles' );
+
+		// The filter receives the form ID as the second argument.
+		$received_form_id = 0;
+		add_filter(
+			'srfm_disable_default_styles',
+			static function ( $disabled, $id ) use ( &$received_form_id ) {
+				$received_form_id = $id;
+				return $disabled;
+			},
+			10,
+			2
+		);
+		Form_Styling::is_default_styling_disabled( $form_id );
+		$this->assertSame( $form_id, $received_form_id );
+		remove_all_filters( 'srfm_disable_default_styles' );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
 	 * Test get_form_ids_from_content() finds top-level blocks, nested blocks and shortcodes.
 	 */
 	public function test_get_form_ids_from_content() {
