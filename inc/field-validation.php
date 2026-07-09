@@ -337,7 +337,7 @@ class Field_Validation {
 	 * frontend script, so a filter override applies consistently to both.
 	 *
 	 * @return array{local:int,domain:int} Resolved limits. A value of 0 disables that check.
-	 * @since x.x.x
+	 * @since 2.12.1
 	 */
 	public static function get_email_char_limits() {
 		/**
@@ -349,7 +349,7 @@ class Field_Validation {
 		 *     @type int $local  Max characters before the @. 0 disables the check. Default 64.
 		 *     @type int $domain Max characters after the @.  0 disables the check. Default 255.
 		 * }
-		 * @since x.x.x
+		 * @since 2.12.1
 		 */
 		$email_limits = apply_filters(
 			'srfm_email_field_char_limits',
