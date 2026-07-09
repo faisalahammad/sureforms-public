@@ -61,6 +61,7 @@ export default ( props ) => {
 		showCreditDetailsPopup,
 		setShowCreditDetailsPopup,
 		features,
+		prefilledPrompt,
 	} = props;
 
 	const [ isListening, setIsListening ] = useState( false ); // State to manage voice recording
@@ -302,6 +303,15 @@ export default ( props ) => {
 			return () => clearTimeout( timer );
 		}
 	}, [ showGenerateTip ] );
+
+	// Prefill prompt when coming from WordPress dashboard widget.
+	useEffect( () => {
+		if ( ! prefilledPrompt ) {
+			return;
+		}
+		setText( prefilledPrompt );
+		setCharacterCount( prefilledPrompt.length );
+	}, [ prefilledPrompt ] );
 
 	const formCreationleft = srfm_admin?.srfm_ai_usage_details?.remaining ?? 0;
 

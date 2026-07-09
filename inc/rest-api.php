@@ -953,12 +953,24 @@ class Rest_Api {
 			if ( ! is_array( $log ) ) {
 				continue;
 			}
-			$formatted_logs[] = [
+			$formatted_log = [
 				'id'        => $offset + $index, // Use offset-based ID for consistent deletion.
 				'title'     => $log['title'] ?? '',
 				'timestamp' => $log['timestamp'] ?? time(),
 				'messages'  => $log['messages'] ?? [],
 			];
+
+			// Pass through (sanitized) retry metadata so an integration/webhook log row can
+			// offer a "Retry" action for that specific failed trigger. Set by the Pro
+			// webhook / native-integration dispatchers as [ 'type' => webhook|native, 'id' => <trigger id> ].
+			if ( isset( $log['retry'] ) && is_array( $log['retry'] ) && ! empty( $log['retry']['type'] ) && isset( $log['retry']['id'] ) ) {
+				$formatted_log['retry'] = [
+					'type' => sanitize_text_field( Helper::get_string_value( $log['retry']['type'] ) ),
+					'id'   => sanitize_text_field( Helper::get_string_value( $log['retry']['id'] ) ),
+				];
+			}
+
+			$formatted_logs[] = $formatted_log;
 		}
 
 		$response_data = [
