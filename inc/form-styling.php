@@ -227,8 +227,12 @@ class Form_Styling {
 	public static function get_form_ids_from_content( $content ) {
 		$form_ids = [];
 
-		if ( has_block( 'srfm/form', $content ) ) {
-			$form_ids = self::collect_form_block_ids( parse_blocks( $content ) );
+		// Also parse when the content embeds reusable/synced patterns (core/block
+		// refs) — a form inside a pattern appears as wp:block {"ref":N}, which
+		// has_block( 'srfm/form' ) alone would never see.
+		if ( has_block( 'srfm/form', $content ) || has_block( 'core/block', $content ) ) {
+			$visited_refs = [];
+			$form_ids     = self::collect_form_block_ids( parse_blocks( $content ), $visited_refs );
 		}
 
 		if ( has_shortcode( $content, 'sureforms' ) && preg_match_all( '/' . get_shortcode_regex( [ 'sureforms' ] ) . '/', $content, $matches ) ) {
@@ -244,13 +248,16 @@ class Form_Styling {
 	}
 
 	/**
-	 * Recursively collect form IDs from parsed srfm/form blocks.
+	 * Recursively collect form IDs from parsed srfm/form blocks, following
+	 * reusable/synced pattern references (core/block) into their wp_block posts.
 	 *
-	 * @param array<mixed> $blocks Parsed blocks from parse_blocks().
+	 * @param array<mixed>     $blocks       Parsed blocks from parse_blocks().
+	 * @param array<int, true> $visited_refs Reusable-block post IDs already expanded,
+	 *                                       keyed by ID — guards against reference cycles.
 	 * @return array<int> Form IDs found in srfm/form blocks.
 	 * @since x.x.x
 	 */
-	private static function collect_form_block_ids( $blocks ) {
+	private static function collect_form_block_ids( $blocks, &$visited_refs = [] ) {
 		$form_ids = [];
 
 		foreach ( $blocks as $block ) {
@@ -261,8 +268,20 @@ class Form_Styling {
 			if ( isset( $block['blockName'] ) && 'srfm/form' === $block['blockName'] && ! empty( $attrs['id'] ) && is_scalar( $attrs['id'] ) ) {
 				$form_ids[] = absint( $attrs['id'] );
 			}
+			// Reusable/synced pattern: expand the referenced wp_block post so a
+			// form living inside a pattern is detected like an inline block.
+			if ( isset( $block['blockName'] ) && 'core/block' === $block['blockName'] && ! empty( $attrs['ref'] ) && is_scalar( $attrs['ref'] ) ) {
+				$ref = absint( $attrs['ref'] );
+				if ( $ref && ! isset( $visited_refs[ $ref ] ) ) {
+					$visited_refs[ $ref ] = true;
+					$ref_post             = get_post( $ref );
+					if ( $ref_post instanceof \WP_Post && 'wp_block' === $ref_post->post_type && 'publish' === $ref_post->post_status && '' !== $ref_post->post_content ) {
+						$form_ids = array_merge( $form_ids, self::collect_form_block_ids( parse_blocks( $ref_post->post_content ), $visited_refs ) );
+					}
+				}
+			}
 			if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
-				$form_ids = array_merge( $form_ids, self::collect_form_block_ids( $block['innerBlocks'] ) );
+				$form_ids = array_merge( $form_ids, self::collect_form_block_ids( $block['innerBlocks'], $visited_refs ) );
 			}
 		}
 

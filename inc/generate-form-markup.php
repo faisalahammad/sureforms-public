@@ -136,8 +136,15 @@ class Generate_Form_Markup {
 		$block_count       = count( $form_blocks );
 		$current_post_type = get_post_type();
 
+		// When enabled, the form renders without the SureForms inline CSS variables so
+		// the site's own CSS fully controls its appearance. Per-form Custom CSS still applies.
+		// Read ONCE through the canonical checker so the `srfm_disable_default_styles`
+		// filter runs a single time per render and governs the enqueue path, the
+		// marker class and the inline CSS guard alike.
+		$disable_default_styles = Form_Styling::is_default_styling_disabled( $id );
+
 		// load all the frontend assets. Skips the SureForms stylesheets when the form has default styling disabled.
-		Frontend_Assets::enqueue_scripts_and_styles( Form_Styling::is_default_styling_disabled( $id ) );
+		Frontend_Assets::enqueue_scripts_and_styles( $disable_default_styles );
 
 		ob_start();
 		if ( '' !== $id && 0 !== $block_count ) {
@@ -155,11 +162,6 @@ class Generate_Form_Markup {
 				$form_styling = Form_Styling::map_block_attrs_to_styling( $form_styling, $block_attrs );
 			}
 
-			// When enabled, the form renders without the SureForms inline CSS variables so
-			// the site's own CSS fully controls its appearance. Per-form Custom CSS still applies.
-			// Read through the canonical checker so the `srfm_disable_default_styles` filter
-			// governs the marker class and inline CSS guard as well as the enqueue path.
-			$disable_default_styles = Form_Styling::is_default_styling_disabled( $id );
 			// Background Settings.
 			$bg_type                   = $form_styling['bg_type'] ?? 'color';
 			$bg_color                  = $form_styling['bg_color'] ?? '';
@@ -362,8 +364,13 @@ class Generate_Form_Markup {
 				$form_classes[] = 'srfm-submit-button-hidden';
 			}
 
+			// The scoped Custom CSS below is for embedded views only: on the form's own
+			// single/instant view, templates/single-form.php already outputs the Custom
+			// CSS (unscoped) in <head> — emitting it here too would duplicate it.
+			$embed_custom_css = 'sureforms_form' !== $current_post_type ? $custom_css : '';
 			?>
 			<div class="<?php echo esc_attr( implode( ' ', array_filter( $form_classes ) ) ); ?>">
+			<?php if ( ! $disable_default_styles || '' !== $embed_custom_css ) { // Nothing to print otherwise — avoid an empty style block. ?>
 			<style>
 				/* Need to check and remove the input variables related to the Style Tab. */
 				<?php echo esc_html( ".{$container_id}" ); ?> {
@@ -498,12 +505,11 @@ class Generate_Form_Markup {
 							]
 						);
 					} // End if default styling is not disabled.
-					// Echo the per-form Custom CSS wherever the form renders — embedded on a
-					// page/post as well as on its own single/instant form view.
-					echo wp_kses_post( $custom_css );
+					echo wp_kses_post( $embed_custom_css );
 					?>
 				}
 			</style>
+			<?php } // End if the style block has content. ?>
 			<?php
 			if ( 'sureforms_form' !== $current_post_type && true === $show_title_current_page ) {
 				$title = ! empty( get_the_title( (int) $id ) ) ? get_the_title( (int) $id ) : '';

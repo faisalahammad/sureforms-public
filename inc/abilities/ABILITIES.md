@@ -97,6 +97,7 @@ Complete reference for all 15 abilities registered with the WordPress Abilities 
 - `instantForm` — `{instantForm, showTitle, bannerColor, useBannerColorAsBackground, formBackgroundColor, formWidth, formSlug}`
 - `styling` — `{submitAlignment}`
 - `formStyling` — `{primaryColor, textColor, textColorOnPrimary, fieldSpacing, disableDefaultStyles}` (`disableDefaultStyles: true` disables SureForms' default frontend styles so the theme styling applies)
+  - Note on `disableDefaultStyles`: unstyled mode also drops SureForms' column/grid layout CSS (multi-column layouts collapse until the site's CSS re-provides them). The per-form Custom CSS on embedded views is scoped to the form container, so unscoped selectors like `body { … }` have no effect there. Custom CSS relies on native CSS nesting (2023+ browsers).
 
 **Output:**
 ```json

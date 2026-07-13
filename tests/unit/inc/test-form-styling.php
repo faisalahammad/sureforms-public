@@ -616,4 +616,51 @@ class Test_Form_Styling extends TestCase {
 		wp_delete_post( $styled_form_id, true );
 		wp_delete_post( $page_id, true );
 	}
+
+	/**
+	 * A form embedded only through a reusable/synced pattern (core/block ref)
+	 * is detected by get_form_ids_from_content().
+	 */
+	public function test_get_form_ids_resolves_reusable_block_refs() {
+		$ref_id = wp_insert_post(
+			[
+				'post_title'   => 'Pattern with form',
+				'post_type'    => 'wp_block',
+				'post_status'  => 'publish',
+				'post_content' => '<!-- wp:srfm/form {"id":4242} /-->',
+			]
+		);
+
+		$content = '<!-- wp:srfm/form {"id":111} /--><!-- wp:block {"ref":' . $ref_id . '} /-->';
+		$this->assertSame( [ 111, 4242 ], Form_Styling::get_form_ids_from_content( $content ) );
+
+		// A page with ONLY the pattern (no inline srfm/form) is detected too —
+		// the has_block( 'srfm/form' ) gate alone would have missed it.
+		$this->assertSame( [ 4242 ], Form_Styling::get_form_ids_from_content( '<!-- wp:block {"ref":' . $ref_id . '} /-->' ) );
+
+		wp_delete_post( $ref_id, true );
+	}
+
+	/**
+	 * Self-referencing reusable blocks terminate (cycle guard) instead of recursing forever.
+	 */
+	public function test_get_form_ids_reusable_block_cycle_terminates() {
+		$ref_id = wp_insert_post(
+			[
+				'post_title'  => 'Self-referencing pattern',
+				'post_type'   => 'wp_block',
+				'post_status' => 'publish',
+			]
+		);
+		wp_update_post(
+			[
+				'ID'           => $ref_id,
+				'post_content' => '<!-- wp:block {"ref":' . $ref_id . '} /-->',
+			]
+		);
+
+		$this->assertSame( [], Form_Styling::get_form_ids_from_content( '<!-- wp:block {"ref":' . $ref_id . '} /-->' ) );
+
+		wp_delete_post( $ref_id, true );
+	}
 }

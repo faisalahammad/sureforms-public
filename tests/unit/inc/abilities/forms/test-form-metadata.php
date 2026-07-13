@@ -63,4 +63,29 @@ class Test_Form_Metadata extends TestCase {
 		);
 		$this->assertFalse( $result['_srfm_forms_styling']['disable_default_styles'] );
 	}
+
+	/**
+	 * styling.submitAlignment and the formStyling object map independently in
+	 * one apply_metadata_overrides() call — guards the documented split.
+	 */
+	public function test_styling_and_form_styling_map_independently() {
+		$reflection = new \ReflectionMethod( $this->ability, 'apply_metadata_overrides' );
+		$reflection->setAccessible( true );
+
+		$result = $reflection->invoke(
+			$this->ability,
+			[],
+			[
+				'styling'     => [ 'submitAlignment' => 'center' ],
+				'formStyling' => [
+					'primaryColor'         => '#123456',
+					'disableDefaultStyles' => true,
+				],
+			]
+		);
+
+		$this->assertSame( 'center', $result['_srfm_submit_alignment'] );
+		$this->assertSame( '#123456', $result['_srfm_forms_styling']['primary_color'] );
+		$this->assertTrue( $result['_srfm_forms_styling']['disable_default_styles'] );
+	}
 }
