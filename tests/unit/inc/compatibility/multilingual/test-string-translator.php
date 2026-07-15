@@ -251,6 +251,10 @@ class Test_String_Translator extends TestCase {
 		$this->assertSame( '', $result );
 	}
 
+	public function test_title_name() {
+		$this->assertSame( 'form_title', String_Translator::title_name() );
+	}
+
 	public function test_translate_form_title_uses_correct_name() {
 		$result = String_Translator::get_instance()->translate_form_title( 42, 'Contact Us' );
 

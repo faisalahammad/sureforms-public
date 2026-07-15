@@ -325,8 +325,8 @@ class WPML_Provider implements Provider {
 			return;
 		}
 
-		$name = isset( $package['name'] ) ? $package['name'] : '';
-		$kind = isset( $package['kind'] ) ? $package['kind'] : '';
+		$name = $package['name'] ?? '';
+		$kind = $package['kind'] ?? '';
 
 		if ( '' === $name || '' === $kind ) {
 			return;
