@@ -311,6 +311,31 @@ class WPML_Provider implements Provider {
 	}
 
 	/**
+	 * {@inheritDoc}
+	 *
+	 * Removes the package and its translations from WPML via the
+	 * `wpml_delete_package` action, keyed by the package name + kind.
+	 *
+	 * @param array<string,string> $package Package descriptor.
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function delete_package( array $package ): void {
+		if ( ! $this->supports_packages() ) {
+			return;
+		}
+
+		$name = isset( $package['name'] ) ? $package['name'] : '';
+		$kind = isset( $package['kind'] ) ? $package['kind'] : '';
+
+		if ( '' === $name || '' === $kind ) {
+			return;
+		}
+
+		do_action( 'wpml_delete_package', $name, $kind );
+	}
+
+	/**
 	 * Build the active-language list from the most reliable WPML surface available.
 	 *
 	 * Tries `apply_filters( 'wpml_active_languages', ... )` first (the documented

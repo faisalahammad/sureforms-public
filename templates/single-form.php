@@ -5,6 +5,7 @@
  * @package SureForms
  */
 
+use SRFM\Inc\Compatibility\Multilingual\String_Translator;
 use SRFM\Inc\Generate_Form_Markup;
 use SRFM\Inc\Helper;
 
@@ -156,8 +157,9 @@ if ( $use_banner_as_page_background ) {
 						}
 
 						if ( ! empty( $single_page_form_title ) ) {
+							$srfm_banner_title = String_Translator::get_instance()->translate_form_title( (int) get_the_ID(), Helper::get_string_value( get_the_title() ) );
 							?>
-							<h1 class="srfm-single-banner-title"><?php echo esc_html( get_the_title() ); ?></h1>
+							<h1 class="srfm-single-banner-title"><?php echo esc_html( $srfm_banner_title ); ?></h1>
 							<?php
 						}
 						?>

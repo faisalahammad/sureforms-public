@@ -174,4 +174,15 @@ class Null_Provider implements Provider {
 		unset( $package, $name );
 		return $value;
 	}
+
+	/**
+	 * Delete a string package. No-op for the Null provider.
+	 *
+	 * @param array<string,string> $package Package descriptor.
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function delete_package( array $package ): void {
+		unset( $package );
+	}
 }

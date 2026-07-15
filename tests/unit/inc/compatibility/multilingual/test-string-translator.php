@@ -97,6 +97,10 @@ class Srfm_String_Translator_Stub_Provider implements \SRFM\Inc\Compatibility\Mu
 		$this->package_calls[] = compact( 'package', 'name', 'value' );
 		return '' !== $this->translate_returns ? $this->translate_returns : $value;
 	}
+
+	public function delete_package( array $package ): void {
+		unset( $package );
+	}
 }
 
 /**
@@ -158,6 +162,10 @@ class Srfm_String_Translator_Translating_Stub implements \SRFM\Inc\Compatibility
 	public function translate_package_string( array $package, string $name, string $value ): string {
 		unset( $package, $name );
 		return 'DE:' . $value;
+	}
+
+	public function delete_package( array $package ): void {
+		unset( $package );
 	}
 }
 
@@ -241,6 +249,31 @@ class Test_String_Translator extends TestCase {
 
 		$this->assertCount( 0, $this->stub->calls );
 		$this->assertSame( '', $result );
+	}
+
+	public function test_translate_form_title_uses_correct_name() {
+		$result = String_Translator::get_instance()->translate_form_title( 42, 'Contact Us' );
+
+		$this->assertCount( 1, $this->stub->calls );
+		$this->assertSame( 'form_42_form_title', $this->stub->calls[0]['name'] );
+		$this->assertSame( 'Contact Us', $this->stub->calls[0]['value'] );
+		$this->assertSame( 'Contact Us', $result );
+	}
+
+	public function test_translate_form_title_returns_original_when_empty() {
+		$result = String_Translator::get_instance()->translate_form_title( 42, '' );
+
+		$this->assertCount( 0, $this->stub->calls );
+		$this->assertSame( '', $result );
+	}
+
+	public function test_form_package_includes_post_id_for_ate_detection() {
+		$package = String_Translator::form_package( 42 );
+
+		$this->assertSame( '42', $package['name'] );
+		$this->assertSame( String_Translator::PACKAGE_KIND, $package['kind'] );
+		$this->assertArrayHasKey( 'post_id', $package );
+		$this->assertSame( '42', $package['post_id'] );
 	}
 
 	public function test_translate_confirmation_message_includes_index() {

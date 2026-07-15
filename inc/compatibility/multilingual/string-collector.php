@@ -71,6 +71,11 @@ class String_Collector {
 	public function __construct() {
 		add_action( 'save_post_' . SRFM_FORMS_POST_TYPE, [ $this, 'on_form_save' ], 20, 1 );
 
+		// Prune the form's String Package when the form is permanently deleted so
+		// orphaned packages and their translations don't linger. Fires only on
+		// permanent delete, not on trash (a trashed form may be restored).
+		add_action( 'before_delete_post', [ $this, 'on_form_delete' ], 10, 1 );
+
 		// Register the GLOBAL built-in validation strings once per admin request
 		// (no-op when no multilingual provider is active). These strings are not
 		// per-form, so they belong on an admin/authoring hook rather than on every
@@ -111,6 +116,31 @@ class String_Collector {
 	}
 
 	/**
+	 * Delete the form's String Package when the form is permanently deleted.
+	 *
+	 * Hooked to before_delete_post (not trash) so a package is only removed when
+	 * its form is gone for good. Bails for other post types and when no provider
+	 * is active.
+	 *
+	 * @param int $form_id The post ID being deleted.
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function on_form_delete( int $form_id ): void {
+		if ( SRFM_FORMS_POST_TYPE !== get_post_type( $form_id ) ) {
+			return;
+		}
+
+		$provider = Multilingual_Manager::get_instance()->provider();
+
+		if ( ! $provider->is_active() ) {
+			return;
+		}
+
+		$provider->delete_package( String_Translator::form_package( $form_id ) );
+	}
+
+	/**
 	 * Walk the form and register every translatable string with the provider.
 	 *
 	 * Public so unit tests can exercise the collection logic directly without
@@ -138,6 +168,16 @@ class String_Collector {
 		if ( $this->packages_supported ) {
 			$provider->start_package( $package );
 		}
+
+		// Form title (post title) — shown as a heading on the form and as the
+		// instant-form banner, so it is translatable like any other string.
+		$this->register_form_string(
+			$form_id,
+			String_Translator::title_name(),
+			Helper::get_string_value( get_the_title( $form_id ) ),
+			// "Group: Leaf" — WPML splits on ': ' to nest this under a Settings group.
+			__( 'Settings', 'sureforms' ) . ': ' . __( 'Form title', 'sureforms' )
+		);
 
 		// Submit button text.
 		$this->register_form_string(
