@@ -3,7 +3,7 @@
  * Bricks SureForms Payment History element.
  *
  * @package sureforms.
- * @since x.x.x
+ * @since 2.12.2
  */
 
 namespace SRFM\Inc\Page_Builders\Bricks\Elements;
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * SureForms Bricks element that displays the Payment History (parity with the srfm/payment-history block).
  *
- * @since x.x.x
+ * @since 2.12.2
  */
 class Payment_History_Widget extends \Bricks\Element {
 	/**
@@ -44,7 +44,7 @@ class Payment_History_Widget extends \Bricks\Element {
 	/**
 	 * Get element label.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.2
 	 * @return string element label.
 	 */
 	public function get_label() {
@@ -54,7 +54,7 @@ class Payment_History_Widget extends \Bricks\Element {
 	/**
 	 * Get element keywords.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.2
 	 * @return array<string> element keywords.
 	 */
 	public function get_keywords() {
@@ -69,7 +69,7 @@ class Payment_History_Widget extends \Bricks\Element {
 	/**
 	 * Set element controls.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.2
 	 * @return void
 	 */
 	public function set_controls() {
@@ -94,7 +94,7 @@ class Payment_History_Widget extends \Bricks\Element {
 	 *
 	 * Delegates to the Payment_History_Shortcode, mirroring the Gutenberg block.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.2
 	 * @return void
 	 */
 	public function render() {

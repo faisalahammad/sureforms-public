@@ -3,7 +3,7 @@
  * Elementor SureForms Payment History widget.
  *
  * @package sureforms.
- * @since x.x.x
+ * @since 2.12.2
  */
 
 namespace SRFM\Inc\Page_Builders\Elementor;
@@ -19,13 +19,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * SureForms Elementor widget that displays the Payment History (parity with the srfm/payment-history block).
  *
- * @since x.x.x
+ * @since 2.12.2
  */
 class Payment_History_Widget extends Widget_Base {
 	/**
 	 * Get widget name.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.2
 	 * @return string Widget name.
 	 */
 	public function get_name() {
@@ -35,7 +35,7 @@ class Payment_History_Widget extends Widget_Base {
 	/**
 	 * Get widget title.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.2
 	 * @return string Widget title.
 	 */
 	public function get_title() {
@@ -45,7 +45,7 @@ class Payment_History_Widget extends Widget_Base {
 	/**
 	 * Get widget icon.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.2
 	 * @return string Widget icon.
 	 */
 	public function get_icon() {
@@ -55,7 +55,7 @@ class Payment_History_Widget extends Widget_Base {
 	/**
 	 * Get widget categories.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.2
 	 * @return array<string> Widget categories.
 	 */
 	public function get_categories() {
@@ -65,7 +65,7 @@ class Payment_History_Widget extends Widget_Base {
 	/**
 	 * Get widget keywords.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.2
 	 * @return array<string> Widget keywords.
 	 */
 	public function get_keywords() {
@@ -81,7 +81,7 @@ class Payment_History_Widget extends Widget_Base {
 	/**
 	 * Register widget controls.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.2
 	 * @return void
 	 */
 	protected function register_controls() {
@@ -122,7 +122,7 @@ class Payment_History_Widget extends Widget_Base {
 	 *
 	 * Delegates to the Payment_History_Shortcode, mirroring the Gutenberg block.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.2
 	 * @return void
 	 */
 	protected function render() {
