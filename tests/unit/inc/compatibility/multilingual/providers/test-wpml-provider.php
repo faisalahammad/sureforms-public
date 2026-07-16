@@ -422,8 +422,10 @@ class Test_Wpml_Provider extends TestCase {
 			]
 		);
 
-		// A descriptor missing name/kind must not fire the action.
+		// A descriptor missing name must not fire the action.
 		$provider->delete_package( [ 'kind' => 'SureForms Form' ] );
+		// A descriptor missing kind must not fire the action either.
+		$provider->delete_package( [ 'name' => '7' ] );
 
 		remove_action( 'wpml_delete_package', $spy, 10 );
 		remove_action( 'wpml_register_string', $noop );

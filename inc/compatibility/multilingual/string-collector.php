@@ -137,7 +137,15 @@ class String_Collector {
 			return;
 		}
 
-		$provider->delete_package( String_Translator::form_package( $form_id ) );
+		// Deletion only needs the package identity (name + kind); build it directly
+		// rather than String_Translator::form_package(), which also runs
+		// get_the_title() / get_edit_post_link() the delete path doesn't use.
+		$provider->delete_package(
+			[
+				'name' => (string) $form_id,
+				'kind' => String_Translator::PACKAGE_KIND,
+			]
+		);
 	}
 
 	/**

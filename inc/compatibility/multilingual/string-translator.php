@@ -189,7 +189,7 @@ class String_Translator {
 	 *
 	 * @param int $form_id Form post ID.
 	 * @since 2.11.0
-	 * @return array<string,string> { kind, name, title, edit_link }.
+	 * @return array<string,string> { kind, name, title, edit_link, post_id }.
 	 */
 	public static function form_package( int $form_id ): array {
 		$title = get_the_title( $form_id );
@@ -207,6 +207,9 @@ class String_Translator {
 			'edit_link' => is_string( $edit_link ) ? $edit_link : '',
 			// Associate the package with its form post so WPML's "Translate
 			// Everything Automatically" queues the package alongside the post.
+			// NOTE: pending live-WPML confirmation of the exact key WPML reads
+			// for post association — `cms_id` is the documented fallback if
+			// `post_id` isn't consumed. Tracked in issue #2942.
 			'post_id'   => (string) $form_id,
 		];
 	}

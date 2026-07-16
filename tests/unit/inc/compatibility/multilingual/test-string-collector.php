@@ -320,6 +320,66 @@ class Test_String_Collector extends TestCase {
 		$this->assertSame( String_Translator::PACKAGE_KIND, $stub->deleted_packages[0]['kind'] );
 	}
 
+	public function test_permanent_delete_triggers_package_deletion_via_hook() {
+		$stub    = $this->install_stub_provider();
+		$form_id = $this->make_form();
+
+		// Exercise the real before_delete_post wiring (not a direct on_form_delete call).
+		$stub->deleted_packages = [];
+		wp_delete_post( $form_id, true );
+
+		$this->assertCount( 1, $stub->deleted_packages, 'Permanent delete should delete the package.' );
+		$this->assertSame( (string) $form_id, $stub->deleted_packages[0]['name'] );
+		$this->assertSame( String_Translator::PACKAGE_KIND, $stub->deleted_packages[0]['kind'] );
+	}
+
+	public function test_trashing_a_form_does_not_delete_package() {
+		$stub    = $this->install_stub_provider();
+		$form_id = $this->make_form();
+
+		$stub->deleted_packages = [];
+		wp_trash_post( $form_id );
+
+		// Trash is reversible → before_delete_post does not fire → no deletion.
+		$this->assertSame( [], $stub->deleted_packages, 'Trashing must not delete the package.' );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	public function test_on_form_delete_bails_when_provider_inactive() {
+		if ( defined( 'ICL_SITEPRESS_VERSION' ) && class_exists( '\SitePress' ) ) {
+			$this->markTestSkipped( 'WPML appears to be loaded in the test environment.' );
+		}
+
+		// No stub installed → provider inactive. Must be a no-op (no fatal).
+		$form_id = $this->make_form();
+
+		$before = did_action( 'wpml_delete_package' );
+		String_Collector::get_instance()->on_form_delete( $form_id );
+
+		$this->assertSame( $before, did_action( 'wpml_delete_package' ) );
+	}
+
+	public function test_collect_skips_empty_title() {
+		$stub    = $this->install_stub_provider();
+		$form_id = $this->make_form();
+
+		// Force an empty title directly so no default is re-applied, then isolate
+		// from make_form()'s save_post→collect().
+		wp_update_post(
+			[
+				'ID'         => $form_id,
+				'post_title' => '',
+			]
+		);
+		clean_post_cache( $form_id );
+		$stub->registered = [];
+
+		String_Collector::get_instance()->collect( $form_id );
+
+		$this->assertNotContains( 'form_' . $form_id . '_form_title', array_column( $stub->registered, 'name' ), 'An empty form title must not be registered.' );
+	}
+
 	public function test_on_form_delete_ignores_other_post_types() {
 		$stub    = $this->install_stub_provider();
 		$post_id = wp_insert_post(
