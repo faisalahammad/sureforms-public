@@ -459,8 +459,7 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 
 == Changelog ==
 = 2.12.2 - 16th July 2026 =
-* New: Added a Payment History widget for Elementor and Bricks, bringing the same subscriptions and transaction view already available in the block editor to both page builders.
-* New: Added a per-form "Disable SureForms Styling" option so you can turn off the plugin's default field styling and match your page design without fighting CSS.
+* New: Added a Payment History widget for Elementor and Bricks.
 * Fix: Custom CSS now applies correctly on the single form view.
 * Fix: The SureForms Description panel now opens by default in the form editor so field descriptions are easier to find.
 = 2.12.1 - 8th July 2026 =
