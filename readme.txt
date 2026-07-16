@@ -2,9 +2,9 @@
 Contributors: brainstormforce
 Tags: forms, contact form, form builder, survey, payment form
 Requires at least: 6.4
-Tested up to: 7.0
+Tested up to: 7.0.1
 Requires PHP: 7.4
-Stable tag: 2.12.1
+Stable tag: 2.12.2
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -458,6 +458,11 @@ Yes. SureForms Business includes fully functional user registration forms and lo
 You can report security issues through our [Bug Bounty Program](https://brainstormforce.com/bug-bounty-program/). We collaborate with Patchstack to provide opportunities for researchers to report vulnerabilities. The Patchstack team will help validate, triage, and handle any reported security issues.
 
 == Changelog ==
+= 2.12.2 - 16th July 2026 =
+* New: Added a Payment History widget for Elementor and Bricks, bringing the same subscriptions and transaction view already available in the block editor to both page builders.
+* New: Added a per-form "Disable SureForms Styling" option so you can turn off the plugin's default field styling and match your page design without fighting CSS.
+* Fix: Custom CSS now applies correctly on the single form view.
+* Fix: The SureForms Description panel now opens by default in the form editor so field descriptions are easier to find.
 = 2.12.1 - 8th July 2026 =
 * New: Added an AI-powered quick draft flow on the dashboard to generate forms faster, with built-in usage tracking.
 * Improvement: Email fields now enforce standard RFC 5321 length limits (a 64-character local part and 255-character domain) to prevent oversized submissions, with a filter to customize the limits.
@@ -470,10 +475,6 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 * Fix: Forms with multiple Cloudflare Turnstile widgets now submit correctly instead of silently failing with a generic error.
 * Fix: Resolved an issue where the Stripe Payment Element failed to render on live accounts that have Bacs Direct Debit, Link, Cash App, or BNPL enabled.
 * Fix: Restored the form editor on WordPress 6.x sites running plugins that register older-style blocks such as ThirstyAffiliates, Ninja Forms, and Gravity Forms.
-= 2.11.1 - 16th June 2026 =
-* Fix: Phone field auto country detection always resolved to the United States.
-* Fix: Corrected the Cloudflare Turnstile "Get Keys" link.
-* Fix: This update addressed a security bug. Props to Yaswanth Reddy Sunkara for reporting it responsibly to our team.
 The full changelog is available [here](https://sureforms.com/whats-new/?utm_source=wordpress.org&utm_medium=whats_new).
 
 == Upgrade Notice ==

@@ -158,7 +158,7 @@ class Form_Styling {
 	 *
 	 * @param int|string $form_id Form post ID.
 	 * @return bool True when default styling is disabled for the form.
-	 * @since x.x.x
+	 * @since 2.12.2
 	 */
 	public static function is_default_styling_disabled( $form_id ) {
 		$form_id = absint( $form_id );
@@ -178,7 +178,7 @@ class Form_Styling {
 		 *
 		 * @param bool $disabled Whether default styling is disabled (from meta).
 		 * @param int  $form_id  Form post ID.
-		 * @since x.x.x
+		 * @since 2.12.2
 		 */
 		return (bool) apply_filters( 'srfm_disable_default_styles', $disabled, $form_id );
 	}
@@ -192,7 +192,7 @@ class Form_Styling {
 	 *
 	 * @param \WP_Post $post Post being rendered.
 	 * @return bool True when the frontend stylesheets can be skipped.
-	 * @since x.x.x
+	 * @since 2.12.2
 	 */
 	public static function should_skip_frontend_styles( $post ) {
 		if ( SRFM_FORMS_POST_TYPE === $post->post_type ) {
@@ -222,7 +222,7 @@ class Form_Styling {
 	 *
 	 * @param string $content Post content.
 	 * @return array<int> Unique form IDs found in the content.
-	 * @since x.x.x
+	 * @since 2.12.2
 	 */
 	public static function get_form_ids_from_content( $content ) {
 		$form_ids = [];
@@ -255,7 +255,7 @@ class Form_Styling {
 	 * @param array<int, true> $visited_refs Reusable-block post IDs already expanded,
 	 *                                       keyed by ID — guards against reference cycles.
 	 * @return array<int> Form IDs found in srfm/form blocks.
-	 * @since x.x.x
+	 * @since 2.12.2
 	 */
 	private static function collect_form_block_ids( $blocks, &$visited_refs = [] ) {
 		$form_ids = [];
