@@ -320,6 +320,38 @@ class Test_String_Collector extends TestCase {
 		$this->assertSame( String_Translator::PACKAGE_KIND, $stub->deleted_packages[0]['kind'] );
 	}
 
+	public function test_declare_package_kind_declares_sureforms_kind_on_the_wpml_filter() {
+		// Constructing the collector registers the wpml_active_string_package_kinds filter.
+		String_Collector::get_instance();
+
+		$kinds = apply_filters( 'wpml_active_string_package_kinds', [] );
+
+		$this->assertIsArray( $kinds );
+		$this->assertArrayHasKey( 'sureforms-form', $kinds, 'The SureForms package kind must be declared for WPML TEA.' );
+		$this->assertSame(
+			[
+				'title'  => 'SureForms Form',
+				'slug'   => 'sureforms-form',
+				'plural' => 'SureForms Forms',
+			],
+			$kinds['sureforms-form']
+		);
+		// Slug must equal what WPML derives from the package kind.
+		$this->assertSame( sanitize_title( String_Translator::PACKAGE_KIND ), array_key_first( $kinds ) );
+	}
+
+	public function test_declare_package_kind_preserves_existing_and_ignores_non_array() {
+		$collector = String_Collector::get_instance();
+
+		$existing = [ 'other-kind' => [ 'title' => 'Other', 'slug' => 'other-kind', 'plural' => 'Others' ] ];
+		$result   = $collector->declare_package_kind( $existing );
+		$this->assertArrayHasKey( 'other-kind', $result, 'Existing kinds must be preserved.' );
+		$this->assertArrayHasKey( 'sureforms-form', $result );
+
+		// Non-array input is returned unchanged (defensive against other filter callbacks).
+		$this->assertSame( 'not-an-array', $collector->declare_package_kind( 'not-an-array' ) );
+	}
+
 	public function test_permanent_delete_triggers_package_deletion_via_hook() {
 		$stub    = $this->install_stub_provider();
 		$form_id = $this->make_form();

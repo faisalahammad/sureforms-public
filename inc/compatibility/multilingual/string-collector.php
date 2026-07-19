@@ -85,6 +85,43 @@ class String_Collector {
 		if ( is_admin() ) {
 			add_action( 'admin_init', [ $this, 'collect_validation_messages' ] );
 		}
+
+		// Declare our String Package kind so WPML's "Translate Everything
+		// Automatically" gate — which reads this filter, not just the per-package
+		// post association — queues SureForms form packages for auto-translation.
+		// Registered unconditionally: WPML only fires this filter when active, and
+		// the callback is a pure array append, so it is a no-op otherwise.
+		add_filter( 'wpml_active_string_package_kinds', [ $this, 'declare_package_kind' ] );
+	}
+
+	/**
+	 * Declare the SureForms String Package kind to WPML.
+	 *
+	 * WPML's package-level "Translate Everything Automatically" gate reads this
+	 * filter to decide which string-package kinds to auto-translate. Each form is
+	 * registered as one package with kind {@see String_Translator::PACKAGE_KIND},
+	 * from which WPML derives the kind slug via `sanitize_title()`; computing the
+	 * key the same way here guarantees it matches the slug WPML assigns to our
+	 * packages (no hardcoded slug that could drift from the kind label).
+	 *
+	 * @param mixed $kinds Associative map of kind slug => { title, slug, plural }.
+	 * @since x.x.x
+	 * @return mixed The kinds map with the SureForms Form kind added.
+	 */
+	public function declare_package_kind( $kinds ) {
+		if ( ! is_array( $kinds ) ) {
+			return $kinds;
+		}
+
+		$slug = sanitize_title( String_Translator::PACKAGE_KIND );
+
+		$kinds[ $slug ] = [
+			'title'  => String_Translator::PACKAGE_KIND,
+			'slug'   => $slug,
+			'plural' => __( 'SureForms Forms', 'sureforms' ),
+		];
+
+		return $kinds;
 	}
 
 	/**
