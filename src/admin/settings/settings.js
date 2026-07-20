@@ -136,14 +136,27 @@ export default Settings;
 		}
 	}
 
-	// Footer scripts run synchronously and in dependency order, so pro's
-	// settings bundle runs AFTER this file. If we render immediately, pro's
-	// `addFilter( 'srfm.settings.navigation', ... )` (and other settings-page
-	// filters) hasn't run yet and the License tab — plus any other pro-injected
-	// tab/page-content — is missing from the first paint.
+	// Pro (and third-party) bundles register their settings-page filters
+	// (`addFilter( 'srfm.settings.navigation', ... )`, page content, etc.) at
+	// module-eval time. Those bundles are classic, parser-blocking footer
+	// scripts that load AFTER this one, so we must not render until every one
+	// of them has executed — otherwise pro-injected tabs are missing from the
+	// first (and only) paint.
 	//
-	// Defer one event-loop tick so every dependent script (pro + any third
-	// party) has finished registering its filters before React calls
-	// applyFilters during the first render.
-	setTimeout( renderApp, 0 );
+	// `setTimeout( 0 )` is NOT a safe barrier here: it fires as soon as the
+	// parser yields (e.g. while a later footer script is still downloading),
+	// which can be before those scripts run. That race is why an early bundle
+	// like the License tab always appears while a later one — Login/Registration
+	// — intermittently does not.
+	//
+	// `DOMContentLoaded` fires only after the document is fully parsed and all
+	// parser-blocking scripts have executed, so every dependent filter is
+	// guaranteed to be registered by then. Fall back to `setTimeout( 0 )` if the
+	// document has already finished parsing (defensive; not expected for a
+	// footer script).
+	if ( 'loading' === document.readyState ) {
+		document.addEventListener( 'DOMContentLoaded', renderApp );
+	} else {
+		setTimeout( renderApp, 0 );
+	}
 }() );

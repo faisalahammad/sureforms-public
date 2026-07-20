@@ -73,6 +73,24 @@ export const forcePanel = () => {
 			'srfm-form-specific-settings/srfm-sidebar'
 		);
 	}
+	if (
+		! select( 'core/editor' ).isEditorPanelEnabled(
+			'srfm-form-specific-settings/srfm-description'
+		)
+	) {
+		dispatch( 'core/edit-post' ).toggleEditorPanelEnabled(
+			'srfm-form-specific-settings/srfm-description'
+		);
+	}
+	if (
+		! select( 'core/editor' ).isEditorPanelOpened(
+			'srfm-form-specific-settings/srfm-description'
+		)
+	) {
+		dispatch( 'core/edit-post' ).toggleEditorPanelOpened(
+			'srfm-form-specific-settings/srfm-description'
+		);
+	}
 };
 
 export const validateClassName = ( className ) => {
