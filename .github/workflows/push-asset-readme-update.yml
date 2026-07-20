@@ -13,13 +13,9 @@ jobs:
     environment: production
     steps:
     - uses: actions/checkout@master
-    - name: Setup Node.js
-      uses: actions/setup-node@v6
-      with:
-        node-version: '24.16.0'
     - name: Build
       run: |
-        npm ci
+        npm install --force
         npm run build
     - name: WordPress.org plugin asset/readme update
       uses: 10up/action-wordpress-plugin-asset-update@stable
