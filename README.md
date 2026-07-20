@@ -458,7 +458,7 @@ Yes. SureForms Business includes fully functional user registration forms and lo
 You can report security issues through our [Bug Bounty Program](https://brainstormforce.com/bug-bounty-program/). We collaborate with Patchstack to provide opportunities for researchers to report vulnerabilities. The Patchstack team will help validate, triage, and handle any reported security issues.
 
 ## Changelog ##
-### 2.12.2 - 16th July 2026 ###
+### 2.12.2 - 20th July 2026 ###
 * New: Added a Payment History widget for Elementor and Bricks.
 * Fix: Custom CSS now applies correctly on the single form view.
 * Fix: The SureForms Description panel now opens by default in the form editor so field descriptions are easier to find.
