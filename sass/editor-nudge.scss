@@ -39,6 +39,11 @@ $srfm-nudge-cta-color: #fff;
 		margin: 0 25px 0 0;
 	}
 
+	.components-notice__actions {
+		margin: 0;
+		flex-shrink: 0;
+	}
+
 	.components-notice__dismiss {
 		color: #757575;
 

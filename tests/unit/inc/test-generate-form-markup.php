@@ -356,4 +356,107 @@ class Test_Generate_Form_Markup extends TestCase {
 
 		remove_filter( 'doing_it_wrong_trigger_error', '__return_false' );
 	}
+
+	/**
+	 * Create a published form with optional Custom CSS / disable-styling meta.
+	 *
+	 * @param string $custom_css Custom CSS meta value.
+	 * @param bool   $disable    Whether default styling is disabled.
+	 * @return int Form ID.
+	 */
+	private function make_form_with_styling( $custom_css = '', $disable = false ) {
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$form_id = wp_insert_post(
+			[
+				'post_title'   => 'Styling test form',
+				'post_type'    => SRFM_FORMS_POST_TYPE,
+				'post_status'  => 'publish',
+				'post_content' => 'simple content',
+			]
+		);
+
+		if ( '' !== $custom_css ) {
+			update_post_meta( $form_id, '_srfm_form_custom_css', $custom_css );
+		}
+		if ( $disable ) {
+			update_post_meta( $form_id, '_srfm_forms_styling', [ 'disable_default_styles' => true ] );
+		}
+
+		return $form_id;
+	}
+
+	/**
+	 * Custom CSS appears exactly once on embedded views and is NOT emitted by
+	 * get_form_markup() on the form's own single/instant view — there
+	 * templates/single-form.php owns the (head, unscoped) output, so a second
+	 * copy here would duplicate it.
+	 */
+	public function test_custom_css_once_embedded_and_absent_on_single_view() {
+		$css     = '.srfm-test-marker { color: red; }';
+		$form_id = $this->make_form_with_styling( $css );
+
+		// Embedded context: global post is not the form.
+		$GLOBALS['post'] = null;
+		$markup          = Generate_Form_Markup::get_form_markup( $form_id );
+		$this->assertSame( 1, substr_count( $markup, '.srfm-test-marker' ), 'Embedded markup must contain the Custom CSS exactly once.' );
+
+		// Single/instant view context: the form itself is the queried post.
+		$GLOBALS['post'] = get_post( $form_id );
+		$markup          = Generate_Form_Markup::get_form_markup( $form_id );
+		$this->assertStringNotContainsString( '.srfm-test-marker', $markup, 'On the single view the template outputs the Custom CSS; the markup must not duplicate it.' );
+
+		$GLOBALS['post'] = null;
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * Custom CSS still applies when default styling is disabled, the marker
+	 * class renders, and the inline --srfm-* variable block is skipped.
+	 */
+	public function test_custom_css_and_marker_class_when_styling_disabled() {
+		$css     = '.srfm-test-marker { color: red; }';
+		$form_id = $this->make_form_with_styling( $css, true );
+
+		$GLOBALS['post'] = null;
+		$markup          = Generate_Form_Markup::get_form_markup( $form_id );
+
+		$this->assertStringContainsString( '.srfm-test-marker', $markup );
+		$this->assertStringContainsString( 'srfm-styling-none', $markup );
+		$this->assertStringNotContainsString( '--srfm-color-scheme-primary', $markup );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * With default styling enabled the inline variable block renders and the
+	 * marker class is absent.
+	 */
+	public function test_inline_variables_present_when_styling_enabled() {
+		$form_id = $this->make_form_with_styling();
+
+		$GLOBALS['post'] = null;
+		$markup          = Generate_Form_Markup::get_form_markup( $form_id );
+
+		$this->assertStringContainsString( '--srfm-color-scheme-primary', $markup );
+		$this->assertStringNotContainsString( 'srfm-styling-none', $markup );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * When styling is disabled and there is no Custom CSS, no style tag is
+	 * emitted at all (no empty scoped ruleset).
+	 */
+	public function test_no_style_tag_when_disabled_without_custom_css() {
+		$form_id = $this->make_form_with_styling( '', true );
+
+		$GLOBALS['post'] = null;
+		$markup          = Generate_Form_Markup::get_form_markup( $form_id );
+
+		$this->assertStringNotContainsString( '<style', $markup );
+		$this->assertStringContainsString( 'srfm-styling-none', $markup );
+
+		wp_delete_post( $form_id, true );
+	}
 }
