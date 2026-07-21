@@ -94,7 +94,7 @@ class Entries {
 			$count_cache_key = 'srfm_entries_search_count_' . md5( (string) wp_json_encode( $where_conditions ) );
 			$cached_total    = get_transient( $count_cache_key );
 
-			if ( false !== $cached_total ) {
+			if ( is_numeric( $cached_total ) ) {
 				$total = absint( $cached_total );
 			} else {
 				$total = EntriesTable::get_instance()->get_total_count( $where_conditions );
