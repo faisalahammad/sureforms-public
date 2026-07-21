@@ -40,7 +40,7 @@ class Entries {
 	 *
 	 *     @type int          $form_id     Form ID to filter entries. Default 0 (all forms).
 	 *     @type string       $status      Entry status: 'all', 'read', 'unread', 'trash'. Default 'all'.
-	 *     @type string       $search      Search term to filter entries by entry ID. Default empty.
+	 *     @type string       $search      Search term matching entry ID (numeric terms), form title, or submitted form data (3+ characters). Default empty.
 	 *     @type string       $date_from   Start date for filtering entries (YYYY-MM-DD format). Default empty.
 	 *     @type string       $date_to     End date for filtering entries (YYYY-MM-DD format). Default empty.
 	 *     @type string       $orderby     Column to order by. Default 'created_at'.
