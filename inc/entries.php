@@ -609,8 +609,8 @@ class Entries {
 			// Match submitted form data. The form_data column stores plain JSON
 			// (Helper::encode_json() uses JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
 			// so a LIKE matches submitted values textually — including emails, URLs and
-			// non-ASCII input. The query compiler (Base::get_query_clauses()) wraps the
-			// value in "%...%" itself; esc_like() here neutralizes user-typed wildcard
+			// non-ASCII input. The query compiler (Base::prepare_where_clauses()) wraps
+			// the value in "%...%" itself; esc_like() here neutralizes user-typed wildcard
 			// characters ("%", "_") so they match literally.
 			// Performance guard: the LIKE cannot use an index (full scan of the LONGTEXT
 			// column within the other filters), so require at least 3 characters before
