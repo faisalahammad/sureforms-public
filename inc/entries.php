@@ -612,13 +612,34 @@ class Entries {
 			// non-ASCII input. The query compiler (Base::get_query_clauses()) wraps the
 			// value in "%...%" itself; esc_like() here neutralizes user-typed wildcard
 			// characters ("%", "_") so they match literally.
-			$search_group[] = [
-				'key'     => 'form_data',
-				'compare' => 'LIKE',
-				'value'   => $wpdb->esc_like( $search_term ),
-			];
+			// Performance guard: the LIKE cannot use an index (full scan of the LONGTEXT
+			// column within the other filters), so require at least 3 characters before
+			// matching form data. Shorter terms would match almost every row anyway while
+			// costing the most. Numeric terms are exempt above (exact, indexed ID lookup),
+			// and form-title matching is a cheap separate posts query.
+			if ( mb_strlen( $search_term ) >= 3 ) {
+				$search_group[] = [
+					'key'     => 'form_data',
+					'compare' => 'LIKE',
+					'value'   => $wpdb->esc_like( $search_term ),
+				];
+			}
 
-			$where_conditions[] = $search_group;
+			// Guard: a short non-numeric term that matches no form title produces no
+			// usable condition — force an empty result instead of silently returning
+			// every entry (an OR-group with no conditions would be dropped by the
+			// query compiler).
+			if ( count( $search_group ) > 1 ) {
+				$where_conditions[] = $search_group;
+			} else {
+				$where_conditions[] = [
+					[
+						'key'     => 'ID',
+						'compare' => '=',
+						'value'   => 0,
+					],
+				];
+			}
 		}
 
 		return $where_conditions;

@@ -342,6 +342,78 @@ class Test_Entries extends TestCase {
 	}
 
 	/**
+	 * Test build_where_conditions skips form_data LIKE for short text terms.
+	 *
+	 * The LIKE cannot use an index, so text terms under 3 characters must not trigger
+	 * the form_data scan; with no other usable condition the search must force an
+	 * empty result (never fall through to returning all entries).
+	 */
+	public function test_build_where_conditions_short_text_search_skips_form_data() {
+		$args   = [
+			'form_id'   => 0,
+			'status'    => 'all',
+			'search'    => 'ab',
+			'date_from' => '',
+			'date_to'   => '',
+			'entry_ids' => [],
+		];
+		$result = $this->call_private_method_static( Entries::class, 'build_where_conditions', [ $args ] );
+
+		$found_form_data    = false;
+		$found_forced_empty = false;
+		foreach ( $result as $group ) {
+			foreach ( $group as $condition ) {
+				if ( ! is_array( $condition ) || ! isset( $condition['key'] ) ) {
+					continue;
+				}
+				if ( 'form_data' === $condition['key'] ) {
+					$found_form_data = true;
+				}
+				if ( 'ID' === $condition['key'] && '=' === $condition['compare'] && 0 === $condition['value'] ) {
+					$found_forced_empty = true;
+				}
+			}
+		}
+
+		$this->assertFalse( $found_form_data, 'Terms under 3 characters must not scan form_data.' );
+		$this->assertTrue( $found_forced_empty, 'A short term with no other match must force an empty result.' );
+	}
+
+	/**
+	 * Test build_where_conditions short numeric term still searches by entry ID.
+	 */
+	public function test_build_where_conditions_short_numeric_search_keeps_id_match() {
+		$args   = [
+			'form_id'   => 0,
+			'status'    => 'all',
+			'search'    => '55',
+			'date_from' => '',
+			'date_to'   => '',
+			'entry_ids' => [],
+		];
+		$result = $this->call_private_method_static( Entries::class, 'build_where_conditions', [ $args ] );
+
+		$found_id_match  = false;
+		$found_form_data = false;
+		foreach ( $result as $group ) {
+			foreach ( $group as $condition ) {
+				if ( ! is_array( $condition ) || ! isset( $condition['key'] ) ) {
+					continue;
+				}
+				if ( 'ID' === $condition['key'] && '=' === $condition['compare'] && 55 === $condition['value'] ) {
+					$found_id_match = true;
+				}
+				if ( 'form_data' === $condition['key'] ) {
+					$found_form_data = true;
+				}
+			}
+		}
+
+		$this->assertTrue( $found_id_match, 'Short numeric terms must still match the entry ID.' );
+		$this->assertFalse( $found_form_data, 'Short numeric terms must not scan form_data.' );
+	}
+
+	/**
 	 * Test build_where_conditions escapes LIKE wildcards in the search term.
 	 *
 	 * The query compiler wraps the value in "%...%" itself; user-typed "%" and "_"
