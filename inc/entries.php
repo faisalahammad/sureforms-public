@@ -580,8 +580,10 @@ class Entries {
 			}
 		}
 
-		// Filter by search (entry ID + form title).
+		// Filter by search (entry ID + form title + submitted form data).
 		if ( ! empty( $args['search'] ) && is_string( $args['search'] ) ) {
+			global $wpdb;
+
 			$search_term  = sanitize_text_field( $args['search'] );
 			$search_group = [ 'RELATION' => 'OR' ];
 
@@ -604,18 +606,19 @@ class Entries {
 				];
 			}
 
-			// Only add if we have search conditions, otherwise force empty result.
-			if ( count( $search_group ) > 1 ) {
-				$where_conditions[] = $search_group;
-			} else {
-				$where_conditions[] = [
-					[
-						'key'     => 'ID',
-						'compare' => '=',
-						'value'   => 0,
-					],
-				];
-			}
+			// Match submitted form data. The form_data column stores plain JSON
+			// (Helper::encode_json() uses JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+			// so a LIKE matches submitted values textually — including emails, URLs and
+			// non-ASCII input. The query compiler (Base::get_query_clauses()) wraps the
+			// value in "%...%" itself; esc_like() here neutralizes user-typed wildcard
+			// characters ("%", "_") so they match literally.
+			$search_group[] = [
+				'key'     => 'form_data',
+				'compare' => 'LIKE',
+				'value'   => $wpdb->esc_like( $search_term ),
+			];
+
+			$where_conditions[] = $search_group;
 		}
 
 		return $where_conditions;
