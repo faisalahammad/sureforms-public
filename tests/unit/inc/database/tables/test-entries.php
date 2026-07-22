@@ -313,10 +313,12 @@ class Test_Entries_Table extends TestCase {
 
 	/**
 	 * Test get_new_columns_definition includes the upgrade columns added across
-	 * SureForms versions, including the `language` column added for the WPML
-	 * compatibility work.
+	 * SureForms versions.
 	 *
-	 * @since 2.11.0
+	 * The `language` column is intentionally NOT part of the schema: its combined
+	 * "ADD COLUMN language + ADD INDEX idx_form_id_language" ALTER failed on some
+	 * database engines (the index referenced the column being added in the same
+	 * statement), so the column was removed from the entries schema entirely.
 	 */
 	public function test_get_new_columns_definition() {
 		$new_columns = $this->entries_table->get_new_columns_definition();
@@ -328,14 +330,9 @@ class Test_Entries_Table extends TestCase {
 		$this->assertStringContainsString( 'type VARCHAR(20)', $blob );
 		$this->assertStringContainsString( 'extras LONGTEXT', $blob );
 		$this->assertStringContainsString( 'user_id BIGINT(20) UNSIGNED', $blob );
-		// Language column + composite index added by the multilingual feature.
-		$this->assertStringContainsString( 'language VARCHAR(20)', $blob );
-		$this->assertStringContainsString( 'INDEX idx_form_id_language (form_id, language)', $blob );
-		// The language column must NOT carry an `AFTER extras` clause: on a pre-0.0.13
-		// install upgrading straight to this version, `extras` is added in the SAME
-		// combined ALTER, and MySQL resolves `AFTER extras` against the pre-ALTER schema,
-		// failing the whole atomic ALTER with "Unknown column 'extras'".
-		$this->assertStringNotContainsString( 'language VARCHAR(20) AFTER', $blob );
+		// The language column and its index must NOT be part of the migration anymore.
+		$this->assertStringNotContainsString( 'language', $blob );
+		$this->assertStringNotContainsString( 'idx_form_id_language', $blob );
 	}
 
 	/**
