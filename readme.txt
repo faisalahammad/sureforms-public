@@ -2,7 +2,7 @@
 Contributors: brainstormforce
 Tags: forms, ai forms, contact form, form builder, payment form
 Requires at least: 6.4
-Tested up to: 7.0.1
+Tested up to: 7.0.2
 Requires PHP: 7.4
 Stable tag: 2.12.2
 License: GPLv2 or later
