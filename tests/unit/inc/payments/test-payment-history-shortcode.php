@@ -93,10 +93,9 @@ class Test_Payment_History_Shortcode extends TestCase {
 		$GLOBALS['post'] = null;
 		$user_id         = $this->login_as_admin();
 
-		// Directly calling enqueue_assets() outside the wp_enqueue_scripts action
-		// simulates the render()-time fallback path (page builder / FSE compat) where the
-		// presence gate is skipped. JS loads because the user is logged in.
-		$this->shortcode->enqueue_assets();
+		// enqueue_assets( true ) is the render()-time fallback path (page builder / FSE
+		// compat) where the presence gate is skipped. JS loads because the user is logged in.
+		$this->shortcode->enqueue_assets( true );
 		$this->assertTrue( wp_style_is( 'srfm-payment-history', 'enqueued' ) );
 		$this->assertTrue( wp_script_is( 'srfm-payment-history', 'enqueued' ) );
 
@@ -113,7 +112,7 @@ class Test_Payment_History_Shortcode extends TestCase {
 
 		// Render-time fallback for a logged-out visitor: the CSS still loads (the login
 		// message must be styled) but the JS + nonce are withheld.
-		$this->shortcode->enqueue_assets();
+		$this->shortcode->enqueue_assets( true );
 		$this->assertTrue( wp_style_is( 'srfm-payment-history', 'enqueued' ), 'CSS must load so the login message is styled.' );
 		$this->assertFalse( wp_script_is( 'srfm-payment-history', 'enqueued' ), 'JS + nonce must not load for logged-out visitors.' );
 
@@ -130,7 +129,7 @@ class Test_Payment_History_Shortcode extends TestCase {
 		$user_id         = $this->login_as_admin();
 
 		// Direct call simulates the render()-time fallback (page builder path).
-		$this->shortcode->enqueue_assets();
+		$this->shortcode->enqueue_assets( true );
 		$this->assertTrue( wp_script_is( 'srfm-payment-history', 'enqueued' ) );
 
 		// Cleanup.
@@ -144,11 +143,11 @@ class Test_Payment_History_Shortcode extends TestCase {
 		$user_id = $this->login_as_admin();
 
 		// First call enqueues.
-		$this->shortcode->enqueue_assets();
+		$this->shortcode->enqueue_assets( true );
 		$this->assertTrue( wp_script_is( 'srfm-payment-history', 'enqueued' ) );
 
 		// Second call is a no-op (guard check).
-		$this->shortcode->enqueue_assets();
+		$this->shortcode->enqueue_assets( true );
 		$this->assertTrue( wp_script_is( 'srfm-payment-history', 'enqueued' ) );
 
 		wp_dequeue_style( 'srfm-payment-history' );
@@ -157,21 +156,32 @@ class Test_Payment_History_Shortcode extends TestCase {
 	}
 
 	/**
-	 * Helper: run enqueue_assets() as if inside the wp_enqueue_scripts hook so the
-	 * presence gate (has_block/has_shortcode) is exercised, then restore filter state.
-	 * The pop is in a finally so a throw cannot leave 'wp_enqueue_scripts' on the global
-	 * filter stack and corrupt the gate path for every subsequent test.
+	 * Helper: invoke enqueue_assets() exactly as the wp_enqueue_scripts hook does — with
+	 * no argument, so `$from_render` defaults to false and the presence gate
+	 * (has_block/has_shortcode against the global $post) is exercised.
 	 */
 	private function enqueue_assets_on_hook() {
-		if ( ! isset( $GLOBALS['wp_current_filter'] ) || ! is_array( $GLOBALS['wp_current_filter'] ) ) {
-			$GLOBALS['wp_current_filter'] = [];
-		}
-		$GLOBALS['wp_current_filter'][] = 'wp_enqueue_scripts';
-		try {
-			$this->shortcode->enqueue_assets();
-		} finally {
-			array_pop( $GLOBALS['wp_current_filter'] );
-		}
+		$this->shortcode->enqueue_assets();
+	}
+
+	public function test_register_assets() {
+		// register_assets() must register (not enqueue) both handles so page-builder
+		// widgets can pull the stylesheet into the <head> by handle — the fix for the
+		// Elementor/Bricks FOUC regression.
+		wp_deregister_style( 'srfm-payment-history' );
+		wp_deregister_script( 'srfm-payment-history' );
+
+		$this->shortcode->register_assets();
+
+		$this->assertTrue( wp_style_is( 'srfm-payment-history', 'registered' ), 'Stylesheet handle must be registered for builder head-enqueue.' );
+		$this->assertTrue( wp_script_is( 'srfm-payment-history', 'registered' ), 'Script handle must be registered.' );
+		// Registration alone must not enqueue anything.
+		$this->assertFalse( wp_style_is( 'srfm-payment-history', 'enqueued' ), 'Registering must not enqueue on unrelated pages.' );
+
+		// A builder enqueuing by handle (get_style_depends/enqueue_scripts) then loads it.
+		wp_enqueue_style( 'srfm-payment-history' );
+		$this->assertTrue( wp_style_is( 'srfm-payment-history', 'enqueued' ) );
+		wp_dequeue_style( 'srfm-payment-history' );
 	}
 
 	public function test_enqueue_assets_gate_skips_when_block_absent() {

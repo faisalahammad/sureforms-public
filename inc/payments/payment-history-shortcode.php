@@ -38,6 +38,12 @@ class Payment_History_Shortcode {
 	 */
 	public function __construct() {
 		add_shortcode( self::SHORTCODE_TAG, [ $this, 'render' ] );
+		// Register the handles early (priority 1) — before Elementor/Bricks enqueue
+		// their widget assets on wp_enqueue_scripts — so the page-builder widgets can
+		// enqueue the stylesheet by handle in the <head> via get_style_depends() /
+		// enqueue_scripts(). Registration is unconditional and cheap; the actual
+		// enqueue below stays gated on the block/shortcode being present.
+		add_action( 'wp_enqueue_scripts', [ $this, 'register_assets' ], 1 );
 		add_action( 'wp_enqueue_scripts', [ $this, 'enqueue_assets' ] );
 
 		// Frontend AJAX handlers.
@@ -45,12 +51,51 @@ class Payment_History_Shortcode {
 	}
 
 	/**
+	 * Register the payment-history stylesheet and script handles unconditionally so
+	 * they can later be enqueued by handle. This exists for the Elementor
+	 * (get_style_depends()) and Bricks (enqueue_scripts()) payment-history widgets,
+	 * whose content lives in postmeta and so isn't caught by the has_block() /
+	 * has_shortcode() gate in enqueue_assets(); declaring the style as a widget
+	 * dependency lets those builders load it in the <head> and avoid a FOUC.
+	 *
+	 * Registering (not enqueuing) keeps the assets off pages that don't use the
+	 * feature — nothing is printed until something enqueues the handle.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function register_assets() {
+		$file_prefix = defined( 'SRFM_DEBUG' ) && SRFM_DEBUG ? '' : '.min';
+		$dir_name    = defined( 'SRFM_DEBUG' ) && SRFM_DEBUG ? 'unminified' : 'minified';
+
+		if ( ! wp_style_is( 'srfm-payment-history', 'registered' ) ) {
+			wp_register_style(
+				'srfm-payment-history',
+				SRFM_URL . 'assets/css/' . $dir_name . '/payment-history' . $file_prefix . '.css',
+				[],
+				SRFM_VER
+			);
+		}
+
+		if ( ! wp_script_is( 'srfm-payment-history', 'registered' ) ) {
+			wp_register_script(
+				'srfm-payment-history',
+				SRFM_URL . 'assets/js/payment-history.js',
+				[],
+				SRFM_VER,
+				true
+			);
+		}
+	}
+
+	/**
 	 * Conditionally enqueue assets only when the payment history block/shortcode is present.
 	 *
 	 * Runs on wp_enqueue_scripts (where the global $post is available for detection) and
-	 * again at render time (shortcode/block callback) to support FSE themes and page
-	 * builders such as Elementor and Bricks, which store content in postmeta rather than
-	 * post_content and are therefore not detected by has_block()/has_shortcode().
+	 * again at render time (shortcode/block callback). Elementor and Bricks store their
+	 * content in postmeta rather than post_content, so has_block()/has_shortcode() can't
+	 * detect them here — those widgets instead declare the (pre-registered) stylesheet as
+	 * a dependency so it loads in the <head> (see register_assets() + the widget classes).
 	 *
 	 * Both the stylesheet and the script are gated on the block/shortcode actually being
 	 * present, so the CSS is no longer loaded on every frontend page. When enqueued from
@@ -64,12 +109,18 @@ class Payment_History_Shortcode {
 	 *
 	 * @since 2.8.0
 	 * @since x.x.x Enqueue the stylesheet only when the block/shortcode is present instead of on every frontend page; withhold the script + nonce from logged-out visitors.
+	 * @param bool $from_render Whether this is the render()-time fallback call. When
+	 *                          true the block/shortcode presence gate is skipped
+	 *                          because render() only runs when the widget is on the
+	 *                          page. Passed explicitly rather than sniffed via
+	 *                          doing_action(), which would also match a nested
+	 *                          do_shortcode() invoked inside a wp_enqueue_scripts callback.
 	 * @return void
 	 */
-	public function enqueue_assets() {
-		// When called from the wp_enqueue_scripts hook, confirm the shortcode/block is present
-		// on the current page. When called from render(), we already know it is needed.
-		if ( doing_action( 'wp_enqueue_scripts' ) ) {
+	public function enqueue_assets( $from_render = false ) {
+		// On the wp_enqueue_scripts hook, confirm the shortcode/block is present on the
+		// current page. From render() we already know it is needed.
+		if ( ! $from_render ) {
 			global $post;
 
 			if ( ! $post instanceof \WP_Post ) {
@@ -84,17 +135,15 @@ class Payment_History_Shortcode {
 			}
 		}
 
-		$file_prefix = defined( 'SRFM_DEBUG' ) && SRFM_DEBUG ? '' : '.min';
-		$dir_name    = defined( 'SRFM_DEBUG' ) && SRFM_DEBUG ? 'unminified' : 'minified';
+		// Handles are normally registered on wp_enqueue_scripts (priority 1); guarantee
+		// they exist for the render()-time path, which can run before that fires.
+		if ( ! wp_style_is( 'srfm-payment-history', 'registered' ) ) {
+			$this->register_assets();
+		}
 
 		// Enqueue the stylesheet only for pages that actually use payment history.
 		if ( ! wp_style_is( 'srfm-payment-history', 'enqueued' ) ) {
-			wp_enqueue_style(
-				'srfm-payment-history',
-				SRFM_URL . 'assets/css/' . $dir_name . '/payment-history' . $file_prefix . '.css',
-				[],
-				SRFM_VER
-			);
+			wp_enqueue_style( 'srfm-payment-history' );
 		}
 
 		// JS + localized data are only useful to logged-in users: the cancel handler
@@ -110,13 +159,7 @@ class Payment_History_Shortcode {
 			return;
 		}
 
-		wp_enqueue_script(
-			'srfm-payment-history',
-			SRFM_URL . 'assets/js/payment-history.js',
-			[],
-			SRFM_VER,
-			true
-		);
+		wp_enqueue_script( 'srfm-payment-history' );
 
 		wp_localize_script(
 			'srfm-payment-history',
@@ -151,10 +194,13 @@ class Payment_History_Shortcode {
 			$per_page = 10;
 		}
 
-		// Enqueue assets at render time — handles FSE themes, Elementor, and
-		// other page builders where global $post is unavailable during wp_enqueue_scripts.
-		// Done before the logged-out early return so the login message is styled too.
-		$this->enqueue_assets();
+		// Enqueue assets at render time — the last-resort fallback for FSE template
+		// parts / block widgets where $post can't be detected on wp_enqueue_scripts and
+		// there is no builder style-dependency API. Elementor/Bricks widgets enqueue the
+		// stylesheet in the <head> via their own dependency hooks, so this mainly serves
+		// the genuinely rare FSE case (footer-loaded CSS, acceptable there). Runs before
+		// the logged-out early return so the login message is styled too.
+		$this->enqueue_assets( true );
 
 		if ( ! is_user_logged_in() ) {
 			return $this->get_login_message();

@@ -79,6 +79,21 @@ class Payment_History_Widget extends Widget_Base {
 	}
 
 	/**
+	 * Declare the payment-history stylesheet as a widget style dependency so Elementor
+	 * enqueues it in the <head>. This widget's content lives in postmeta, so the
+	 * shortcode's has_block()/has_shortcode() gate on wp_enqueue_scripts can't detect
+	 * it; without this the CSS would only load at render() time (footer) and the
+	 * dashboard would flash unstyled (FOUC). The handle is registered by
+	 * Payment_History_Shortcode::register_assets() on wp_enqueue_scripts (priority 1).
+	 *
+	 * @since x.x.x
+	 * @return array<string> Style handles this widget depends on.
+	 */
+	public function get_style_depends() {
+		return [ 'srfm-payment-history' ];
+	}
+
+	/**
 	 * Register widget controls.
 	 *
 	 * @since 2.12.2
