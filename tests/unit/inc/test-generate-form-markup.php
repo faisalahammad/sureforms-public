@@ -46,6 +46,78 @@ class Test_Generate_Form_Markup extends TestCase {
 		wp_delete_post( $form_id, true );
 	}
 
+	public function test_add_entries_admin_bar_node() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || ! defined( 'SRFM_ENTRIES' ) ) {
+			$this->markTestSkipped( 'SureForms constants not defined' );
+		}
+
+		// Only users who can view entries (manage_options) get the node.
+		$admin = wp_insert_user(
+			[
+				'user_login' => 'srfm_entries_admin_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_entries_admin_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $admin ) ? 0 : (int) $admin );
+		add_filter( 'show_admin_bar', '__return_true' );
+
+		// Reset the rendered-form registry so only this test's form is present
+		// (single-form path → the node links straight to the filtered entries).
+		$registry = new \ReflectionProperty( Generate_Form_Markup::class, 'rendered_form_ids' );
+		$registry->setAccessible( true );
+		$registry->setValue( null, [] );
+
+		remove_all_actions( 'wp_insert_post_data' );
+		$form_id = wp_insert_post(
+			[
+				'post_title'  => 'Admin Bar Entries Form',
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_status' => 'publish',
+			]
+		);
+
+		// Rendering the form records it as present on the request.
+		Generate_Form_Markup::get_form_markup( $form_id );
+
+		require_once ABSPATH . 'wp-includes/class-wp-admin-bar.php';
+		$bar = new WP_Admin_Bar();
+		$this->generate_form_markup->add_entries_admin_bar_node( $bar );
+
+		$node = $bar->get_node( 'srfm-entries' );
+		$this->assertNotNull( $node, 'Entries node should be added when a form is on the page.' );
+		$this->assertStringContainsString( 'page=' . SRFM_ENTRIES, $node->href );
+		$this->assertStringContainsString( 'form=' . $form_id, $node->href );
+
+		// A subscriber (no manage_options) must not get the node.
+		$registry->setValue( null, [ $form_id => true ] );
+		$subscriber = wp_insert_user(
+			[
+				'user_login' => 'srfm_entries_sub_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_entries_sub_' . wp_rand() . '@example.com',
+				'role'       => 'subscriber',
+			]
+		);
+		wp_set_current_user( is_wp_error( $subscriber ) ? 0 : (int) $subscriber );
+		$bar_sub = new WP_Admin_Bar();
+		$this->generate_form_markup->add_entries_admin_bar_node( $bar_sub );
+		$this->assertNull( $bar_sub->get_node( 'srfm-entries' ), 'Users without the entries capability must not see the node.' );
+
+		// Cleanup.
+		$registry->setValue( null, [] );
+		remove_filter( 'show_admin_bar', '__return_true' );
+		wp_delete_post( $form_id, true );
+		wp_set_current_user( 0 );
+		if ( ! is_wp_error( $admin ) ) {
+			wp_delete_user( (int) $admin );
+		}
+		if ( ! is_wp_error( $subscriber ) ) {
+			wp_delete_user( (int) $subscriber );
+		}
+	}
+
 	public function test_register_custom_endpoint() {
 		do_action( 'rest_api_init' );
 		$routes = rest_get_server()->get_routes();

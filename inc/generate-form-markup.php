@@ -34,12 +34,25 @@ class Generate_Form_Markup {
 	private static $current_block_attrs = [];
 
 	/**
+	 * IDs of the forms rendered on the current request, keyed by form ID.
+	 * Populated in get_form_markup() (the single render choke point) and read at
+	 * admin_bar_menu time to build the frontend "Entries" deep-link node.
+	 *
+	 * @var array<int,bool>
+	 * @since x.x.x
+	 */
+	private static $rendered_form_ids = [];
+
+	/**
 	 * Constructor
 	 *
 	 * @since  0.0.1
 	 */
 	public function __construct() {
 		add_action( 'rest_api_init', [ $this, 'register_custom_endpoint' ] );
+		// Frontend admin-bar "Entries" deep-link. Priority 100 mirrors the
+		// existing "Edit Form" node in Post_Types.
+		add_action( 'admin_bar_menu', [ $this, 'add_entries_admin_bar_node' ], 100 );
 	}
 
 	/**
@@ -50,6 +63,94 @@ class Generate_Form_Markup {
 	 */
 	public static function get_current_block_attrs() {
 		return self::$current_block_attrs;
+	}
+
+	/**
+	 * Add an "Entries" node to the frontend admin bar on pages that contain a
+	 * SureForms form, deep-linking to the Entries admin page pre-filtered to that
+	 * form. With multiple forms on the page, a submenu lists one item per form and
+	 * the parent links to the unfiltered Entries page.
+	 *
+	 * Gated to users who can view the Entries page (the same `manage_options`
+	 * capability the admin page and entries REST endpoints use). The form list is
+	 * built from the forms actually rendered this request (see get_form_markup()),
+	 * which is fully populated by the time the admin bar renders on wp_footer.
+	 *
+	 * @param \WP_Admin_Bar $wp_admin_bar The admin bar instance.
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function add_entries_admin_bar_node( $wp_admin_bar ) {
+		// Frontend only, and only when the bar is actually shown for this user.
+		if ( is_admin() || ! is_admin_bar_showing() || ! $wp_admin_bar instanceof \WP_Admin_Bar ) {
+			return;
+		}
+
+		// Match who can view entries (admin page + entries REST capability).
+		if ( ! Helper::current_user_can() ) {
+			return;
+		}
+
+		$form_ids = array_map( 'absint', array_keys( self::$rendered_form_ids ) );
+
+		// Instant Form / single-form template fallback: the singular form is the page.
+		if ( empty( $form_ids ) && is_singular( SRFM_FORMS_POST_TYPE ) ) {
+			$singular_id = absint( get_the_ID() );
+			if ( $singular_id > 0 ) {
+				$form_ids[] = $singular_id;
+			}
+		}
+
+		$form_ids = array_values( array_unique( array_filter( $form_ids ) ) );
+		if ( empty( $form_ids ) ) {
+			return;
+		}
+
+		$entries_base = admin_url( 'admin.php?page=' . SRFM_ENTRIES );
+		$node_id      = 'srfm-entries';
+		$icon         = '<span class="ab-icon dashicons dashicons-list-view" style="line-height:1.2;margin-right:4px;"></span>';
+
+		// Single form — link straight to its filtered entries.
+		if ( 1 === count( $form_ids ) ) {
+			$wp_admin_bar->add_node(
+				[
+					'id'    => $node_id,
+					'title' => $icon . '<span class="ab-label">' . esc_html__( 'Entries', 'sureforms' ) . '</span>',
+					'href'  => esc_url( $entries_base . '#/?form=' . $form_ids[0] ),
+					'meta'  => [ 'title' => esc_attr__( 'View entries for this form', 'sureforms' ) ],
+					'html'  => true,
+				]
+			);
+			return;
+		}
+
+		// Multiple forms — parent links to unfiltered Entries, children per form.
+		$wp_admin_bar->add_node(
+			[
+				'id'    => $node_id,
+				'title' => $icon . '<span class="ab-label">' . esc_html__( 'Entries', 'sureforms' ) . '</span>',
+				'href'  => esc_url( $entries_base ),
+				'meta'  => [ 'title' => esc_attr__( 'View form entries', 'sureforms' ) ],
+				'html'  => true,
+			]
+		);
+
+		foreach ( $form_ids as $form_id ) {
+			$title = get_the_title( $form_id );
+			if ( '' === $title ) {
+				/* translators: %d: form ID. */
+				$title = sprintf( __( 'Form #%d', 'sureforms' ), $form_id );
+			}
+
+			$wp_admin_bar->add_node(
+				[
+					'id'     => $node_id . '-' . $form_id,
+					'parent' => $node_id,
+					'title'  => esc_html( $title ),
+					'href'   => esc_url( $entries_base . '#/?form=' . $form_id ),
+				]
+			);
+		}
 	}
 
 	/**
@@ -93,6 +194,14 @@ class Generate_Form_Markup {
 
 		// Check for any form restrictions.
 		$form_id = Helper::get_integer_value( $id );
+
+		// Record the form as present on this request so the frontend admin-bar
+		// "Entries" node can deep-link to it. Recorded even when restricted below —
+		// the form is still on the page and its owner may want its entries.
+		if ( $form_id > 0 ) {
+			self::$rendered_form_ids[ $form_id ] = true;
+		}
+
 		if ( Form_Restriction::is_form_restricted( $form_id ) ) {
 			return Form_Restriction::display_form_restriction_message( $form_id );
 		}
