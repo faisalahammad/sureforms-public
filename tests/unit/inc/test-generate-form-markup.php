@@ -63,12 +63,6 @@ class Test_Generate_Form_Markup extends TestCase {
 		wp_set_current_user( is_wp_error( $admin ) ? 0 : (int) $admin );
 		add_filter( 'show_admin_bar', '__return_true' );
 
-		// Reset the rendered-form registry so only this test's form is present
-		// (single-form path → the node links straight to the filtered entries).
-		$registry = new \ReflectionProperty( Generate_Form_Markup::class, 'rendered_form_ids' );
-		$registry->setAccessible( true );
-		$registry->setValue( null, [] );
-
 		remove_all_actions( 'wp_insert_post_data' );
 		$form_id = wp_insert_post(
 			[
@@ -78,20 +72,38 @@ class Test_Generate_Form_Markup extends TestCase {
 			]
 		);
 
-		// Rendering the form records it as present on the request.
-		Generate_Form_Markup::get_form_markup( $form_id );
+		// The node shows only on the form's own Instant Form page, so enable
+		// Instant Form and simulate being on that singular form page.
+		update_post_meta( $form_id, '_srfm_instant_form_settings', [ 'enable_instant_form' => true ] );
+
+		global $wp_query, $post;
+		$prev_is_singular    = isset( $wp_query->is_singular ) ? $wp_query->is_singular : false;
+		$prev_queried_object = $wp_query->get_queried_object();
+		$prev_queried_id     = get_queried_object_id();
+		$prev_post           = $post;
+
+		$post                        = get_post( $form_id );
+		$wp_query->is_singular       = true;
+		$wp_query->queried_object    = $post;
+		$wp_query->queried_object_id = $form_id;
 
 		require_once ABSPATH . 'wp-includes/class-wp-admin-bar.php';
 		$bar = new WP_Admin_Bar();
 		$this->generate_form_markup->add_entries_admin_bar_node( $bar );
 
 		$node = $bar->get_node( 'srfm-entries' );
-		$this->assertNotNull( $node, 'Entries node should be added when a form is on the page.' );
+		$this->assertNotNull( $node, 'Entries node should be added on the Instant Form page.' );
 		$this->assertStringContainsString( 'page=' . SRFM_ENTRIES, $node->href );
 		$this->assertStringContainsString( 'form=' . $form_id, $node->href );
 
-		// A subscriber (no manage_options) must not get the node.
-		$registry->setValue( null, [ $form_id => true ] );
+		// With Instant Form disabled, the same singular page shows no node.
+		update_post_meta( $form_id, '_srfm_instant_form_settings', [ 'enable_instant_form' => false ] );
+		$bar_disabled = new WP_Admin_Bar();
+		$this->generate_form_markup->add_entries_admin_bar_node( $bar_disabled );
+		$this->assertNull( $bar_disabled->get_node( 'srfm-entries' ), 'No node when Instant Form is disabled for the form.' );
+
+		// Re-enable, then confirm a subscriber (no manage_options) gets no node.
+		update_post_meta( $form_id, '_srfm_instant_form_settings', [ 'enable_instant_form' => true ] );
 		$subscriber = wp_insert_user(
 			[
 				'user_login' => 'srfm_entries_sub_' . wp_rand(),
@@ -105,8 +117,12 @@ class Test_Generate_Form_Markup extends TestCase {
 		$this->generate_form_markup->add_entries_admin_bar_node( $bar_sub );
 		$this->assertNull( $bar_sub->get_node( 'srfm-entries' ), 'Users without the entries capability must not see the node.' );
 
-		// Cleanup.
-		$registry->setValue( null, [] );
+		// Restore query/post globals and clean up.
+		$wp_query->is_singular       = $prev_is_singular;
+		$wp_query->queried_object    = $prev_queried_object;
+		$wp_query->queried_object_id = $prev_queried_id;
+		$post                        = $prev_post;
+
 		remove_filter( 'show_admin_bar', '__return_true' );
 		wp_delete_post( $form_id, true );
 		wp_set_current_user( 0 );
