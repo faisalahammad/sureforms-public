@@ -63,47 +63,54 @@ class Test_Generate_Form_Markup extends TestCase {
 		wp_set_current_user( is_wp_error( $admin ) ? 0 : (int) $admin );
 		add_filter( 'show_admin_bar', '__return_true' );
 
-		remove_all_actions( 'wp_insert_post_data' );
-		$form_id = wp_insert_post(
+		// Drive the node from the rendered-form registry directly (set via
+		// reflection) — this is what get_form_markup() populates for every embed
+		// path, and avoids mutating query globals.
+		$registry = new ReflectionProperty( Generate_Form_Markup::class, 'rendered_form_ids' );
+		$registry->setAccessible( true );
+		$registry->setValue( null, [] );
+
+		require_once ABSPATH . 'wp-includes/class-wp-admin-bar.php';
+
+		$form_id  = wp_insert_post(
 			[
 				'post_title'  => 'Admin Bar Entries Form',
 				'post_type'   => SRFM_FORMS_POST_TYPE,
 				'post_status' => 'publish',
 			]
 		);
+		$form_id2 = wp_insert_post(
+			[
+				// Author-controlled title with HTML — must be escaped in the node.
+				'post_title'  => '<b>XSS</b> Form',
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_status' => 'publish',
+			]
+		);
 
-		// The node shows only on the form's own Instant Form page, so enable
-		// Instant Form and simulate being on that singular form page.
-		update_post_meta( $form_id, '_srfm_instant_form_settings', [ 'enable_instant_form' => true ] );
-
-		global $wp_query, $post;
-		$prev_is_singular    = isset( $wp_query->is_singular ) ? $wp_query->is_singular : false;
-		$prev_queried_object = $wp_query->get_queried_object();
-		$prev_queried_id     = get_queried_object_id();
-		$prev_post           = $post;
-
-		$post                        = get_post( $form_id );
-		$wp_query->is_singular       = true;
-		$wp_query->queried_object    = $post;
-		$wp_query->queried_object_id = $form_id;
-
-		require_once ABSPATH . 'wp-includes/class-wp-admin-bar.php';
-		$bar = new WP_Admin_Bar();
+		// One form on the page → a single node linking to its filtered entries.
+		$registry->setValue( null, [ $form_id => true ] );
+		$bar  = new WP_Admin_Bar();
 		$this->generate_form_markup->add_entries_admin_bar_node( $bar );
-
 		$node = $bar->get_node( 'srfm-entries' );
-		$this->assertNotNull( $node, 'Entries node should be added on the Instant Form page.' );
+		$this->assertNotNull( $node, 'Entries node should be added when a form is on the page.' );
 		$this->assertStringContainsString( 'page=' . SRFM_ENTRIES, $node->href );
 		$this->assertStringContainsString( 'form=' . $form_id, $node->href );
 
-		// With Instant Form disabled, the same singular page shows no node.
-		update_post_meta( $form_id, '_srfm_instant_form_settings', [ 'enable_instant_form' => false ] );
-		$bar_disabled = new WP_Admin_Bar();
-		$this->generate_form_markup->add_entries_admin_bar_node( $bar_disabled );
-		$this->assertNull( $bar_disabled->get_node( 'srfm-entries' ), 'No node when Instant Form is disabled for the form.' );
+		// Two forms → a submenu: parent unfiltered, one child per form. The child
+		// title is escaped (WP_Admin_Bar does not escape node titles).
+		$registry->setValue( null, [ $form_id => true, $form_id2 => true ] );
+		$bar_multi = new WP_Admin_Bar();
+		$this->generate_form_markup->add_entries_admin_bar_node( $bar_multi );
+		$parent = $bar_multi->get_node( 'srfm-entries' );
+		$this->assertNotNull( $parent );
+		$this->assertStringNotContainsString( 'form=', $parent->href, 'Parent links to unfiltered Entries.' );
+		$child = $bar_multi->get_node( 'srfm-entries-' . $form_id2 );
+		$this->assertNotNull( $child, 'Each form gets a submenu child.' );
+		$this->assertStringContainsString( 'form=' . $form_id2, $child->href );
+		$this->assertStringNotContainsString( '<b>', (string) $child->title, 'Form titles must be escaped in the node.' );
 
-		// Re-enable, then confirm a subscriber (no manage_options) gets no node.
-		update_post_meta( $form_id, '_srfm_instant_form_settings', [ 'enable_instant_form' => true ] );
+		// Subscriber (no manage_options) → no node.
 		$subscriber = wp_insert_user(
 			[
 				'user_login' => 'srfm_entries_sub_' . wp_rand(),
@@ -117,14 +124,11 @@ class Test_Generate_Form_Markup extends TestCase {
 		$this->generate_form_markup->add_entries_admin_bar_node( $bar_sub );
 		$this->assertNull( $bar_sub->get_node( 'srfm-entries' ), 'Users without the entries capability must not see the node.' );
 
-		// Restore query/post globals and clean up.
-		$wp_query->is_singular       = $prev_is_singular;
-		$wp_query->queried_object    = $prev_queried_object;
-		$wp_query->queried_object_id = $prev_queried_id;
-		$post                        = $prev_post;
-
+		// Cleanup.
+		$registry->setValue( null, [] );
 		remove_filter( 'show_admin_bar', '__return_true' );
 		wp_delete_post( $form_id, true );
+		wp_delete_post( $form_id2, true );
 		wp_set_current_user( 0 );
 		if ( ! is_wp_error( $admin ) ) {
 			wp_delete_user( (int) $admin );
