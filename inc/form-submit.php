@@ -601,14 +601,16 @@ class Form_Submit {
 			'device_name'    => $device_name,
 			'submission_url' => $submission_url,
 		];
-		// Prefer the language the visitor saw at form-render time (captured in a
-		// hidden srfm-form-language input), since WPML's language detection on the
-		// REST submit endpoint frequently falls back to the default. The hidden
-		// input is client-supplied, so:
+		// Resolve the language the visitor saw at form-render time (captured in a
+		// hidden srfm-form-language input) so the confirmation message and email
+		// notifications below can be rendered in it — WPML's language detection on
+		// the REST submit endpoint frequently falls back to the default. This value
+		// is used only to switch_language() at submit time; it is not persisted. The
+		// hidden input is client-supplied, so:
 		// 1. Validate shape with a BCP-47 regex.
 		// 2. Cross-check against the active multilingual provider's known
-		// languages (active + default) so a crafted request can't pollute
-		// the column with codes the site doesn't support.
+		// languages (active + default) so a crafted request can't switch rendering
+		// to a code the site doesn't support.
 		// 3. Fall back to the provider's current_language() on either failure.
 		$entry_language     = Multilingual_Manager::get_instance()->provider()->current_language();
 		$submitted_language = isset( $form_data['srfm-form-language'] ) ? sanitize_text_field( Helper::get_string_value( $form_data['srfm-form-language'] ) ) : '';
@@ -620,7 +622,6 @@ class Form_Submit {
 			'form_id'         => $id,
 			'form_data'       => $submission_data,
 			'submission_info' => $submission_info,
-			'language'        => $entry_language,
 			'created_at'      => current_time( 'mysql' ),
 		];
 		if ( is_user_logged_in() ) {
@@ -647,7 +648,7 @@ class Form_Submit {
 			// in the language the visitor saw at submit time. The REST submit
 			// endpoint doesn't carry the ?lang= URL parameter, so without this
 			// switch the provider would return strings in its default language
-			// even though the entry itself is correctly tagged.
+			// even though the visitor filled the form in another language.
 			$provider = Multilingual_Manager::get_instance()->provider();
 			if ( $provider->is_active() && '' !== $entry_language ) {
 				$provider->switch_language( $entry_language );
