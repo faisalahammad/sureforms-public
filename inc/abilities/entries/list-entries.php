@@ -74,7 +74,7 @@ class List_Entries extends Abstract_Ability {
 				],
 				'search'    => [
 					'type'        => 'string',
-					'description' => __( 'Search entries by entry ID.', 'sureforms' ),
+					'description' => __( 'Search entries by entry ID, form title, or submitted form data. Text search requires at least 3 characters; numeric terms match the entry ID exactly.', 'sureforms' ),
 				],
 				'date_from' => [
 					'type'        => 'string',
