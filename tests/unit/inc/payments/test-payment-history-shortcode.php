@@ -22,6 +22,19 @@ class Test_Payment_History_Shortcode extends TestCase {
 		$this->shortcode = Payment_History_Shortcode::get_instance();
 	}
 
+	protected function tearDown(): void {
+		// These tests mutate shared global state (current user, $GLOBALS['post'], $_POST,
+		// and the shared $wp_styles/$wp_scripts registries) and the base polyfill
+		// TestCase restores none of it, so reset here to stop one test's leftovers from
+		// cascading into the next.
+		wp_set_current_user( 0 );
+		$GLOBALS['post'] = null;
+		$_POST           = [];
+		wp_dequeue_style( 'srfm-payment-history' );
+		wp_dequeue_script( 'srfm-payment-history' );
+		parent::tearDown();
+	}
+
 	/**
 	 * Helper method to call private methods for testing.
 	 */
@@ -182,6 +195,70 @@ class Test_Payment_History_Shortcode extends TestCase {
 		wp_enqueue_style( 'srfm-payment-history' );
 		$this->assertTrue( wp_style_is( 'srfm-payment-history', 'enqueued' ) );
 		wp_dequeue_style( 'srfm-payment-history' );
+	}
+
+	public function test_register_assets_is_hooked_on_wp_enqueue_scripts_at_priority_one() {
+		// Priority 1 is the whole mechanism: the Elementor/Bricks widgets enqueue the
+		// handle by name during wp_enqueue_scripts, so it must already be registered. If
+		// this silently became priority 10 both builders would enqueue an unregistered
+		// handle and nothing would print — while every other test here stayed green.
+		$this->assertSame(
+			1,
+			has_action( 'wp_enqueue_scripts', [ $this->shortcode, 'register_assets' ] ),
+			'register_assets() must be hooked on wp_enqueue_scripts at priority 1.'
+		);
+	}
+
+	public function test_enqueue_assets_attaches_nonce_data_for_logged_in_user() {
+		$GLOBALS['post'] = null;
+		$user_id         = $this->login_as_admin();
+
+		$this->shortcode->enqueue_assets( true );
+
+		// The nonce/ajax_url/i18n payload must actually attach to the handle — not merely
+		// "script enqueued". wp_localize_script stores it as the handle's 'data'.
+		$data = wp_scripts()->get_data( 'srfm-payment-history', 'data' );
+		$this->assertNotEmpty( $data, 'Localized data (incl. nonce) must attach for logged-in users.' );
+		$this->assertStringContainsString( 'srfm_payment_history', (string) $data );
+
+		$this->delete_user_safely( $user_id );
+	}
+
+	public function test_enqueue_assets_withholds_nonce_data_for_logged_out_user() {
+		// Now that the handle stays permanently registered, "not enqueued" and "no nonce"
+		// are distinct — assert the nonce data itself never attaches for a logged-out visitor.
+		wp_deregister_script( 'srfm-payment-history' );
+		$GLOBALS['post'] = null;
+		wp_set_current_user( 0 );
+
+		$this->shortcode->enqueue_assets( true );
+
+		$this->assertFalse(
+			wp_scripts()->get_data( 'srfm-payment-history', 'data' ),
+			'No localized nonce data may attach for logged-out visitors.'
+		);
+	}
+
+	public function test_enqueue_assets_registers_script_even_when_only_style_registered() {
+		// Regression guard for the asymmetric-guard bug: if the script handle is missing
+		// (an asset-optimisation plugin deregistered it) while the style is still
+		// registered, enqueue_assets() must still re-register the script so the localize
+		// has a handle to attach the nonce to. Pre-fix this failed because the guard keyed
+		// only on the *style* being registered.
+		$this->shortcode->register_assets();
+		wp_deregister_script( 'srfm-payment-history' );
+		$this->assertTrue( wp_style_is( 'srfm-payment-history', 'registered' ), 'Precondition: style registered.' );
+		$this->assertFalse( wp_script_is( 'srfm-payment-history', 'registered' ), 'Precondition: script deregistered.' );
+
+		$GLOBALS['post'] = null;
+		$user_id         = $this->login_as_admin();
+
+		$this->shortcode->enqueue_assets( true );
+
+		$this->assertTrue( wp_script_is( 'srfm-payment-history', 'registered' ), 'Script must be re-registered before enqueue.' );
+		$this->assertNotEmpty( wp_scripts()->get_data( 'srfm-payment-history', 'data' ), 'Nonce data must attach even if the script handle was missing.' );
+
+		$this->delete_user_safely( $user_id );
 	}
 
 	public function test_enqueue_assets_gate_skips_when_block_absent() {

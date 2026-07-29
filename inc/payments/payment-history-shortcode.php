@@ -44,7 +44,10 @@ class Payment_History_Shortcode {
 		// enqueue_scripts(). Registration is unconditional and cheap; the actual
 		// enqueue below stays gated on the block/shortcode being present.
 		add_action( 'wp_enqueue_scripts', [ $this, 'register_assets' ], 1 );
-		add_action( 'wp_enqueue_scripts', [ $this, 'enqueue_assets' ] );
+		// accepted_args 0: WordPress fires this hook with an empty-string sentinel arg,
+		// which would land in $from_render (falsy, so harmless, but it contradicts the
+		// bool contract). Capping to 0 args means the bool default (false) is used.
+		add_action( 'wp_enqueue_scripts', [ $this, 'enqueue_assets' ], 10, 0 );
 
 		// Frontend AJAX handlers.
 		add_action( 'wp_ajax_srfm_frontend_cancel_subscription', [ $this, 'ajax_cancel_subscription' ] );
@@ -135,11 +138,11 @@ class Payment_History_Shortcode {
 			}
 		}
 
-		// Handles are normally registered on wp_enqueue_scripts (priority 1); guarantee
-		// they exist for the render()-time path, which can run before that fires.
-		if ( ! wp_style_is( 'srfm-payment-history', 'registered' ) ) {
-			$this->register_assets();
-		}
+		// Ensure both handles exist (register_assets() is idempotent). Guarding on only
+		// the style handle would miss a script handle that was separately deregistered
+		// (asset-optimisation plugins do this by handle), leaving wp_localize_script()
+		// below with nothing to attach to and silently dropping the nonce.
+		$this->register_assets();
 
 		// Enqueue the stylesheet only for pages that actually use payment history.
 		if ( ! wp_style_is( 'srfm-payment-history', 'enqueued' ) ) {
@@ -155,21 +158,24 @@ class Payment_History_Shortcode {
 			return;
 		}
 
-		if ( wp_script_is( 'srfm-payment-history', 'enqueued' ) ) {
-			return;
+		if ( ! wp_script_is( 'srfm-payment-history', 'enqueued' ) ) {
+			wp_enqueue_script( 'srfm-payment-history' );
 		}
 
-		wp_enqueue_script( 'srfm-payment-history' );
-
-		wp_localize_script(
-			'srfm-payment-history',
-			'srfm_payment_history',
-			[
-				'ajax_url' => admin_url( 'admin-ajax.php' ),
-				'nonce'    => wp_create_nonce( 'srfm_frontend_payment_nonce' ),
-				'i18n'     => $this->get_i18n_strings(),
-			]
-		);
+		// Gate the localize on whether the data is already attached, not on the enqueued
+		// state: the handle is now registered on every frontend page, so a foreign
+		// enqueue-by-handle before this runs must not cause the nonce to be skipped.
+		if ( ! wp_scripts()->get_data( 'srfm-payment-history', 'data' ) ) {
+			wp_localize_script(
+				'srfm-payment-history',
+				'srfm_payment_history',
+				[
+					'ajax_url' => admin_url( 'admin-ajax.php' ),
+					'nonce'    => wp_create_nonce( 'srfm_frontend_payment_nonce' ),
+					'i18n'     => $this->get_i18n_strings(),
+				]
+			);
+		}
 	}
 
 	/**

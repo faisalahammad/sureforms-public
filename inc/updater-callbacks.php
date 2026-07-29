@@ -103,4 +103,23 @@ class Updater_Callbacks {
 		// update the options.
 		update_option( 'srfm_default_dynamic_block_option', $previous_options );
 	}
+
+	/**
+	 * Clear Elementor's cached per-page asset list so pages built before the Payment
+	 * History widget declared its stylesheet dependency pick up the new head-loaded CSS.
+	 *
+	 * Elementor only recomputes `_elementor_page_assets` on document save, so without
+	 * this a page built with the widget in 2.12.2 keeps loading the CSS at render time
+	 * (footer → FOUC) after the update until it is re-saved in the editor. Dropping the
+	 * meta forces Elementor to regenerate it (including this dependency) on next render.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public static function clear_elementor_page_assets_cache() {
+		if ( ! class_exists( '\Elementor\Plugin' ) ) {
+			return;
+		}
+		delete_post_meta_by_key( '_elementor_page_assets' );
+	}
 }

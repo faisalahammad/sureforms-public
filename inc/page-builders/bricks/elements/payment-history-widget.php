@@ -67,11 +67,13 @@ class Payment_History_Widget extends \Bricks\Element {
 	}
 
 	/**
-	 * Enqueue the payment-history stylesheet in the <head>. Bricks calls this during
-	 * wp_enqueue_scripts when the element is present on the page. The element's content
-	 * lives in postmeta, so the shortcode's has_block()/has_shortcode() gate can't detect
-	 * it and would otherwise only enqueue the CSS at render() time (footer) → FOUC. The
-	 * handle is registered by Payment_History_Shortcode::register_assets() (priority 1).
+	 * Enqueue the payment-history stylesheet. NOTE: Bricks fires this at render time
+	 * (`Frontend::render_element()` → `Element::init()`), which runs after `wp_head`, so
+	 * this alone would print the CSS in the footer → FOUC. The head-load is handled
+	 * separately by `Service_Provider::maybe_enqueue_payment_history_assets()`, which
+	 * detects this element on `wp_enqueue_scripts`; this override stays only as a
+	 * belt-and-braces fallback. The handle is registered by
+	 * `Payment_History_Shortcode::register_assets()` (priority 1).
 	 *
 	 * @since x.x.x
 	 * @return void
