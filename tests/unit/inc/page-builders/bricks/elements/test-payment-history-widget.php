@@ -54,6 +54,22 @@ namespace SRFM\Inc\Page_Builders\Bricks\Elements {
 		}
 
 		/**
+		 * enqueue_scripts() must enqueue the payment-history stylesheet so Bricks loads
+		 * it in the <head> for its postmeta-stored element (FOUC fix).
+		 */
+		public function test_enqueue_scripts() {
+			// The handle is registered at runtime by
+			// Payment_History_Shortcode::register_assets() (wp_enqueue_scripts, priority 1)
+			// before Bricks calls enqueue_scripts(); mirror that so wp_enqueue_style() queues it.
+			\SRFM\Inc\Payments\Payment_History_Shortcode::get_instance()->register_assets();
+			\wp_dequeue_style( 'srfm-payment-history' );
+
+			$this->element()->enqueue_scripts();
+			$this->assertTrue( \wp_style_is( 'srfm-payment-history', 'enqueued' ) );
+			\wp_dequeue_style( 'srfm-payment-history' );
+		}
+
+		/**
 		 * set_controls() is the public Bricks control hook.
 		 */
 		public function test_set_controls() {
