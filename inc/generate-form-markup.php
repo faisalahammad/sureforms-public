@@ -43,7 +43,7 @@ class Generate_Form_Markup {
 	 * alone would be empty when the node is built.
 	 *
 	 * @var array<int,bool>
-	 * @since x.x.x
+	 * @since 2.12.3
 	 */
 	private static $rendered_form_ids = [];
 
@@ -73,7 +73,7 @@ class Generate_Form_Markup {
 	 * shared Form_Styling helper) covers those; get_form_markup() then adds anything
 	 * a static parse can't see (page builders, FSE template parts).
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return void
 	 */
 	public function collect_queried_form_ids() {
@@ -119,7 +119,7 @@ class Generate_Form_Markup {
 	 * `manage_options` capability the admin page and entries REST endpoints use).
 	 *
 	 * @param \WP_Admin_Bar $wp_admin_bar The admin bar instance.
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return void
 	 */
 	public function add_entries_admin_bar_node( $wp_admin_bar ) {
@@ -149,7 +149,7 @@ class Generate_Form_Markup {
 		 * Bricks (_bricks_page_content_*), FSE template parts, or Pro's
 		 * [srfm_show_entries] shortcode.
 		 *
-		 * @since x.x.x
+		 * @since 2.12.3
 		 * @param array<int> $form_ids Form IDs detected on the current request.
 		 */
 		$form_ids = array_map( 'absint', (array) apply_filters( 'srfm_admin_bar_entries_form_ids', $form_ids ) );

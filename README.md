@@ -4,7 +4,7 @@
 **Requires at least:** 6.4  
 **Tested up to:** 7.0.2  
 **Requires PHP:** 7.4  
-**Stable tag:** 2.12.2  
+**Stable tag:** 2.12.3  
 **License:** GPLv2 or later  
 **License URI:** http://www.gnu.org/licenses/gpl-2.0.html  
 
@@ -426,6 +426,15 @@ Visit the [SureForms features page](https://sureforms.com/features/?utm_source=w
 You can report security issues through our [Bug Bounty Program](https://brainstormforce.com/bug-bounty-program/). We collaborate with Patchstack to validate, triage, and handle security reports.
 
 ## Changelog ##
+### 2.12.3 - 30th July 2026 ###
+* New: Added an "Entries" link in the admin bar on pages displaying a form, so you can jump straight to that form's entries.
+* Improvement: Entry search now loads faster on sites with large entry tables by briefly caching the result count.
+* Fix: Cloudflare Turnstile no longer triggers a script-loading notice on WordPress 7.0.
+* Fix: Entry search now matches submitted form data instead of returning no results, and requires at least three characters.
+* Fix: Forms with default styles disabled no longer cause a frontend error.
+* Fix: Number field top spacing now aligns with other fields when the label is used as a placeholder.
+* Fix: Payment History widget styles now load correctly in Elementor and Bricks.
+* Fix: WPML now picks up existing forms for translation, including form titles.
 ### 2.12.2 - 20th July 2026 ###
 * New: Added a Payment History widget for Elementor and Bricks.
 * Fix: Custom CSS now applies correctly on the single form view.
@@ -435,15 +444,9 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 * Fix: Reset form option not working for some fields.
 * Fix: Resolved a Stripe one-time payment error that could cause card payments to fail with an HTTP 400 response.
 * Fix: Restored bullet point visibility in the rich text admin editor so formatted lists display correctly.
-### 2.12.0 - 24th June 2026 ###
-* New: Added action hooks around payment success, cancellation, and refund events so plugins such as SureMembers, LMS, and CRMs can grant or revoke access for both Stripe and PayPal.
-* Fix: Cancel Subscription now routes through the correct payment gateway so PayPal subscriptions cancel properly instead of always calling Stripe.
-* Fix: Forms with multiple Cloudflare Turnstile widgets now submit correctly instead of silently failing with a generic error.
-* Fix: Resolved an issue where the Stripe Payment Element failed to render on live accounts that have Bacs Direct Debit, Link, Cash App, or BNPL enabled.
-* Fix: Restored the form editor on WordPress 6.x sites running plugins that register older-style blocks such as ThirstyAffiliates, Ninja Forms, and Gravity Forms.
 The full changelog is available [here](https://sureforms.com/whats-new/?utm_source=wordpress.org&utm_medium=whats_new).
 
 ## Upgrade Notice ##
 
-### 2.12.2 ###
-Recommended update with Payment History support for Elementor and Bricks, along with form styling fixes.
+### 2.12.3 ###
+Recommended update with a new admin bar Entries link, faster entry search, and fixes for entry search, WPML translations, and Payment History widget styles.

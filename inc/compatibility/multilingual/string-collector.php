@@ -105,7 +105,7 @@ class String_Collector {
 	 * packages (no hardcoded slug that could drift from the kind label).
 	 *
 	 * @param mixed $kinds Associative map of kind slug => { title, slug, plural }.
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return mixed The kinds map with the SureForms Form kind added.
 	 */
 	public function declare_package_kind( $kinds ) {
@@ -160,7 +160,7 @@ class String_Collector {
 	 * is active.
 	 *
 	 * @param int $form_id The post ID being deleted.
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return void
 	 */
 	public function on_form_delete( int $form_id ): void {

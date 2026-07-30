@@ -64,7 +64,7 @@ class Payment_History_Shortcode {
 	 * Registering (not enqueuing) keeps the assets off pages that don't use the
 	 * feature — nothing is printed until something enqueues the handle.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return void
 	 */
 	public function register_assets() {
@@ -111,7 +111,7 @@ class Payment_History_Shortcode {
 	 * `wp_ajax_nopriv_` endpoint — a logged-out visitor would only receive an inert script.
 	 *
 	 * @since 2.8.0
-	 * @since x.x.x Enqueue the stylesheet only when the block/shortcode is present instead of on every frontend page; withhold the script + nonce from logged-out visitors.
+	 * @since 2.12.3 Enqueue the stylesheet only when the block/shortcode is present instead of on every frontend page; withhold the script + nonce from logged-out visitors.
 	 * @param bool $from_render Whether this is the render()-time fallback call. When
 	 *                          true the block/shortcode presence gate is skipped
 	 *                          because render() only runs when the widget is on the

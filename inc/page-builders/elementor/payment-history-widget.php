@@ -86,7 +86,7 @@ class Payment_History_Widget extends Widget_Base {
 	 * dashboard would flash unstyled (FOUC). The handle is registered by
 	 * Payment_History_Shortcode::register_assets() on wp_enqueue_scripts (priority 1).
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return array<string> Style handles this widget depends on.
 	 */
 	public function get_style_depends() {
