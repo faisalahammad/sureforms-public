@@ -34,10 +34,13 @@ class Generate_Form_Markup {
 	private static $current_block_attrs = [];
 
 	/**
-	 * IDs of the forms rendered on the current request, keyed by form ID.
-	 * Populated in get_form_markup() — the single render choke point for the
-	 * srfm/form block, the [sureforms] shortcode, and the Elementor / Bricks
-	 * widgets — and read at admin_bar_menu time to build the "Entries" node.
+	 * IDs of the forms known to be on the current request, keyed by form ID.
+	 *
+	 * Seeded at the `wp` hook (collect_queried_form_ids(), before any output) by
+	 * parsing the queried post, and added to at render time by get_form_markup().
+	 * The seed is load-bearing: on modern themes the admin bar renders at
+	 * wp_body_open (priority 0) — BEFORE the_content — so the render-time registry
+	 * alone would be empty when the node is built.
 	 *
 	 * @var array<int,bool>
 	 * @since x.x.x
@@ -51,9 +54,45 @@ class Generate_Form_Markup {
 	 */
 	public function __construct() {
 		add_action( 'rest_api_init', [ $this, 'register_custom_endpoint' ] );
+		// Seed the form registry from the queried post before any output, so the
+		// admin bar (which renders at wp_body_open, before the_content) has the list.
+		add_action( 'wp', [ $this, 'collect_queried_form_ids' ] );
 		// Frontend admin-bar "Entries" deep-link. Priority 100 mirrors the
 		// existing "Edit Form" node in Post_Types.
 		add_action( 'admin_bar_menu', [ $this, 'add_entries_admin_bar_node' ], 100 );
+	}
+
+	/**
+	 * Seed the rendered-form registry from the queried singular post's content,
+	 * before any output.
+	 *
+	 * The admin bar renders at wp_body_open (priority 0) on modern themes — before
+	 * the_content — so relying on the render-time registry alone would leave the
+	 * node empty on essentially every embed. Parsing the queried post here (srfm/form
+	 * blocks incl. reusable/synced patterns, and [sureforms] shortcodes, via the
+	 * shared Form_Styling helper) covers those; get_form_markup() then adds anything
+	 * a static parse can't see (page builders, FSE template parts).
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function collect_queried_form_ids() {
+		if ( is_admin() || ! is_singular() ) {
+			return;
+		}
+
+		$post_id = absint( get_queried_object_id() );
+		if ( 0 === $post_id ) {
+			return;
+		}
+
+		$content = Helper::get_string_value( get_post_field( 'post_content', $post_id ) );
+		foreach ( Form_Styling::get_form_ids_from_content( $content ) as $form_id ) {
+			$fid = absint( $form_id );
+			if ( $fid > 0 ) {
+				self::$rendered_form_ids[ $fid ] = true;
+			}
+		}
 	}
 
 	/**
@@ -69,13 +108,15 @@ class Generate_Form_Markup {
 	/**
 	 * Add an "Entries" node to the frontend admin bar on any page that contains a
 	 * SureForms form, deep-linking to the Entries admin page pre-filtered to that
-	 * form. Covers every embed path (block, [sureforms] shortcode, Elementor,
-	 * Bricks) plus the form's own Instant Form page, since all render through
-	 * get_form_markup(). With multiple forms on the page the node becomes a submenu
-	 * with one child per form; the parent then links to the unfiltered Entries page.
+	 * form. The form list comes from collect_queried_form_ids() (seeded at `wp`)
+	 * plus the render-time registry — covering the block, [sureforms] shortcode,
+	 * Elementor, Bricks and FSE paths — and a `srfm_admin_bar_entries_form_ids`
+	 * filter lets other sources contribute. With multiple forms the node becomes a
+	 * submenu (one child per form); the parent then links to the unfiltered page.
 	 *
-	 * Gated to users who can view the Entries page (the same `manage_options`
-	 * capability the admin page and entries REST endpoints use).
+	 * Runs on admin_bar_menu, which fires as the bar renders (wp_body_open on modern
+	 * themes). Gated to users who can view the Entries page (the same
+	 * `manage_options` capability the admin page and entries REST endpoints use).
 	 *
 	 * @param \WP_Admin_Bar $wp_admin_bar The admin bar instance.
 	 * @since x.x.x
@@ -92,16 +133,40 @@ class Generate_Form_Markup {
 			return;
 		}
 
-		// Forms on this request: those rendered (all embed paths + FSE templates),
-		// with a fallback to the singular form on a form's own page.
 		$form_ids = array_map( 'absint', array_keys( self::$rendered_form_ids ) );
+
+		// Fallback for a form's own singular page if nothing was recorded.
 		if ( empty( $form_ids ) && is_singular( SRFM_FORMS_POST_TYPE ) ) {
 			$singular_id = absint( get_the_ID() );
 			if ( $singular_id > 0 ) {
 				$form_ids[] = $singular_id;
 			}
 		}
-		$form_ids = array_values( array_unique( array_filter( $form_ids ) ) );
+
+		/**
+		 * Filter the form IDs offered in the admin-bar Entries node. Lets sources a
+		 * content parse / render can't see contribute — Elementor (_elementor_data),
+		 * Bricks (_bricks_page_content_*), FSE template parts, or Pro's
+		 * [srfm_show_entries] shortcode.
+		 *
+		 * @since x.x.x
+		 * @param array<int> $form_ids Form IDs detected on the current request.
+		 */
+		$form_ids = array_map( 'absint', (array) apply_filters( 'srfm_admin_bar_entries_form_ids', $form_ids ) );
+
+		// Keep only real SureForms forms. The [sureforms] shortcode accepts any
+		// published post ID, so esc_html() below must not be the only barrier
+		// against a hostile post title (e.g. authored by an Editor with unfiltered_html).
+		$form_ids = array_values(
+			array_unique(
+				array_filter(
+					$form_ids,
+					static function ( $fid ) {
+						return $fid > 0 && SRFM_FORMS_POST_TYPE === get_post_type( $fid );
+					}
+				)
+			)
+		);
 		if ( empty( $form_ids ) ) {
 			return;
 		}
@@ -117,7 +182,8 @@ class Generate_Form_Markup {
 					'id'    => $node_id,
 					'title' => $icon . '<span class="ab-label">' . esc_html__( 'Entries', 'sureforms' ) . '</span>',
 					'href'  => esc_url( $entries_base . '#/?form=' . $form_ids[0] ),
-					'meta'  => [ 'title' => esc_attr__( 'View entries for this form', 'sureforms' ) ],
+					// Core esc_attr()s meta['title'], so pass it unescaped here.
+					'meta'  => [ 'title' => __( 'View entries for this form', 'sureforms' ) ],
 				]
 			);
 			return;
@@ -129,24 +195,26 @@ class Generate_Form_Markup {
 				'id'    => $node_id,
 				'title' => $icon . '<span class="ab-label">' . esc_html__( 'Entries', 'sureforms' ) . '</span>',
 				'href'  => esc_url( $entries_base ),
-				'meta'  => [ 'title' => esc_attr__( 'View form entries', 'sureforms' ) ],
+				'meta'  => [ 'title' => __( 'View form entries', 'sureforms' ) ],
 			]
 		);
 
-		foreach ( $form_ids as $form_id ) {
+		// Cap the submenu; the parent's unfiltered link covers the overflow so a page
+		// with many forms can't blow past the (non-scrolling) admin bar.
+		foreach ( array_slice( $form_ids, 0, 10 ) as $form_id ) {
 			$title = get_the_title( $form_id );
-			if ( '' === $title ) {
+			// get_the_title() runs the_title filters that may inject markup, and
+			// WP_Admin_Bar does not escape node titles — strip tags and escape here.
+			$title = '' !== $title
+				? esc_html( wp_strip_all_tags( $title ) )
 				/* translators: %d: form ID. */
-				$title = sprintf( __( 'Form #%d', 'sureforms' ), $form_id );
-			}
+				: esc_html( sprintf( __( 'Form #%d', 'sureforms' ), $form_id ) );
 
 			$wp_admin_bar->add_node(
 				[
 					'id'     => $node_id . '-' . $form_id,
 					'parent' => $node_id,
-					// WP_Admin_Bar does NOT escape node titles, so the
-					// author-controlled form title must be escaped before the sink.
-					'title'  => esc_html( $title ),
+					'title'  => $title,
 					'href'   => esc_url( $entries_base . '#/?form=' . $form_id ),
 				]
 			);
@@ -195,10 +263,12 @@ class Generate_Form_Markup {
 		// Check for any form restrictions.
 		$form_id = Helper::get_integer_value( $id );
 
-		// Record the form as present on this request so the frontend admin-bar
-		// "Entries" node can deep-link to it. Every embed path (block, shortcode,
-		// Elementor, Bricks) and FSE template funnels through here; recorded before
-		// the restriction check because a restricted form is still on the page.
+		// Additively record the form for the admin-bar "Entries" node. The registry
+		// is primarily seeded at `wp` (collect_queried_form_ids) because the bar
+		// renders before the_content; this render-time write is what covers paths a
+		// content parse can't see — page builders (Elementor/Bricks) and FSE template
+		// parts. Recorded before the restriction check: a restricted form is still on
+		// the page, and its admin still wants its entries link.
 		if ( $form_id > 0 ) {
 			self::$rendered_form_ids[ $form_id ] = true;
 		}

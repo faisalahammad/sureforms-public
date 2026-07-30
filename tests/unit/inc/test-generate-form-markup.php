@@ -108,6 +108,13 @@ class Test_Generate_Form_Markup extends TestCase {
 		$child = $bar_multi->get_node( 'srfm-entries-' . $form_id2 );
 		$this->assertNotNull( $child, 'Each form gets a submenu child.' );
 		$this->assertStringContainsString( 'form=' . $form_id2, $child->href );
+		// Pin the exact escaping contract: strip tags, then esc_html. Swapping
+		// either step (e.g. for wp_kses_post or strip_tags alone) fails this.
+		$this->assertSame(
+			esc_html( wp_strip_all_tags( get_the_title( $form_id2 ) ) ),
+			(string) $child->title,
+			'Form titles must be tag-stripped and escaped in the node.'
+		);
 		$this->assertStringNotContainsString( '<b>', (string) $child->title, 'Form titles must be escaped in the node.' );
 
 		// Subscriber (no manage_options) → no node.
@@ -136,6 +143,61 @@ class Test_Generate_Form_Markup extends TestCase {
 		if ( ! is_wp_error( $subscriber ) ) {
 			wp_delete_user( (int) $subscriber );
 		}
+	}
+
+	public function test_collect_queried_form_ids() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+
+		$registry = new ReflectionProperty( Generate_Form_Markup::class, 'rendered_form_ids' );
+		$registry->setAccessible( true );
+		$registry->setValue( null, [] );
+
+		$form_id = wp_insert_post(
+			[
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_title'  => 'Collected Form',
+				'post_status' => 'publish',
+			]
+		);
+		// A page embedding the form via the srfm/form block (no shortcode-registration
+		// dependency — has_block() is a content scan).
+		$page_id = wp_insert_post(
+			[
+				'post_type'    => 'page',
+				'post_title'   => 'Has Form',
+				'post_status'  => 'publish',
+				'post_content' => '<!-- wp:srfm/form {"id":' . $form_id . '} /-->',
+			]
+		);
+
+		global $wp_query;
+		$prev_is_singular    = $wp_query->is_singular;
+		$prev_queried_object = $wp_query->get_queried_object();
+		$prev_queried_id     = $wp_query->get_queried_object_id();
+
+		// Simulate being on the page that embeds the form (the `wp`-hook context).
+		$wp_query->is_singular       = true;
+		$wp_query->queried_object    = get_post( $page_id );
+		$wp_query->queried_object_id = $page_id;
+
+		$this->generate_form_markup->collect_queried_form_ids();
+		$this->assertArrayHasKey( $form_id, $registry->getValue(), 'The embedded form ID should be collected from the queried post at `wp`.' );
+
+		// Not a singular view → no-op.
+		$registry->setValue( null, [] );
+		$wp_query->is_singular = false;
+		$this->generate_form_markup->collect_queried_form_ids();
+		$this->assertSame( [], $registry->getValue(), 'Nothing is collected outside a singular view.' );
+
+		// Restore query globals + clean up.
+		$wp_query->is_singular       = $prev_is_singular;
+		$wp_query->queried_object    = $prev_queried_object;
+		$wp_query->queried_object_id = $prev_queried_id;
+		$registry->setValue( null, [] );
+		wp_delete_post( $page_id, true );
+		wp_delete_post( $form_id, true );
 	}
 
 	public function test_register_custom_endpoint() {
@@ -199,6 +261,15 @@ class Test_Generate_Form_Markup extends TestCase {
 
 		$result = Generate_Form_Markup::get_form_markup( $form_id );
 		$this->assertIsString( $result );
+
+		// The render-time path additively records the form ID in the admin-bar
+		// registry (covers page-builder / FSE embeds a content parse can't see).
+		$registry = new ReflectionProperty( Generate_Form_Markup::class, 'rendered_form_ids' );
+		$registry->setAccessible( true );
+		$registry->setValue( null, [] );
+		Generate_Form_Markup::get_form_markup( $form_id );
+		$this->assertArrayHasKey( $form_id, $registry->getValue(), 'get_form_markup() should record the form ID.' );
+		$registry->setValue( null, [] );
 
 		wp_delete_post( $form_id, true );
 	}
