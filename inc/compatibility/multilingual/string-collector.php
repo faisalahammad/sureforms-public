@@ -174,6 +174,14 @@ class String_Collector {
 			return;
 		}
 
+		// delete_package() is intentionally absent from the Provider interface (see the
+		// note there): declaring it would fatal any third-party provider written against
+		// 2.11.0-2.12.2. Feature-detect instead, so a custom provider without it simply
+		// skips cleanup rather than crashing.
+		if ( ! method_exists( $provider, 'delete_package' ) ) {
+			return;
+		}
+
 		// Deletion only needs the package identity (name + kind); build it directly
 		// rather than String_Translator::form_package(), which also runs
 		// get_the_title() / get_edit_post_link() the delete path doesn't use.

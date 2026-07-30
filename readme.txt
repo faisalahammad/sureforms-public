@@ -434,6 +434,8 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 * Fix: The number field no longer looks misaligned when "Use label as placeholder" is on.
 * Fix: Cloudflare Turnstile no longer shows a warning on WordPress 7.0.
 * Fix: Payment History styles load only on required pages.
+* Fix: Forms with default styles disabled no longer break the page — previously this aborted setup of every later form on the same page.
+* Fix: Removed the entries "Language" column. Sorting or filtering entries by language is no longer available, including via the entries API.
 = 2.12.2 - 20th July 2026 =
 * New: Added a Payment History widget for Elementor and Bricks.
 * Fix: Custom CSS now applies correctly on the single form view.

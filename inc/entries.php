@@ -91,8 +91,14 @@ class Entries {
 		// pager total is harmless for an admin screen. Unsearched listings stay uncached so
 		// totals reflect trash/delete/read mutations immediately.
 		if ( ! empty( $args['search'] ) ) {
-			$count_cache_key = 'srfm_entries_search_count_' . md5( (string) wp_json_encode( $where_conditions ) );
-			$cached_total    = get_transient( $count_cache_key );
+			// wp_json_encode() returns false on failure, and (string) false is '' — which
+			// would make every search share md5('') and serve one search's total for all
+			// others. Skip the cache entirely rather than key it ambiguously.
+			$encoded_conditions = wp_json_encode( $where_conditions );
+			$count_cache_key    = is_string( $encoded_conditions )
+				? 'srfm_entries_search_count_' . md5( $encoded_conditions )
+				: '';
+			$cached_total       = '' !== $count_cache_key ? get_transient( $count_cache_key ) : false;
 
 			if ( is_numeric( $cached_total ) ) {
 				$total = absint( $cached_total );
@@ -598,7 +604,10 @@ class Entries {
 		}
 
 		// Filter by search (entry ID + form title + submitted form data).
-		if ( ! empty( $args['search'] ) && is_string( $args['search'] ) ) {
+		// Use an explicit empty-string test rather than ! empty(): empty( '0' ) is true in
+		// PHP, so searching "0" silently dropped the entire search group and returned every
+		// entry while the UI still showed the term.
+		if ( isset( $args['search'] ) && is_string( $args['search'] ) && '' !== $args['search'] ) {
 			global $wpdb;
 
 			$search_term  = sanitize_text_field( $args['search'] );

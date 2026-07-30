@@ -94,11 +94,32 @@ class Test_String_Backfill extends TestCase {
 	 */
 	private $filter_callback = null;
 
+	/**
+	 * Admin user id used to satisfy maybe_schedule()'s privilege gate.
+	 *
+	 * @var int
+	 */
+	private $admin_id = 0;
+
 	protected function set_up(): void {
 		parent::set_up();
 		delete_option( String_Backfill::DONE_OPTION );
 		$GLOBALS['srfm_test_as_calls'] = [];
 		$this->reset_multilingual_manager_singleton();
+
+		// maybe_schedule() now requires a privileged, non-ajax admin request.
+		if ( function_exists( 'wp_set_current_user' ) && function_exists( 'wp_insert_user' ) ) {
+			$this->admin_id = (int) wp_insert_user(
+				[
+					'user_login' => 'srfm_backfill_admin_' . wp_generate_password( 6, false ),
+					'user_pass'  => wp_generate_password( 12, false ),
+					'role'       => 'administrator',
+				]
+			);
+			if ( $this->admin_id > 0 ) {
+				wp_set_current_user( $this->admin_id );
+			}
+		}
 	}
 
 	protected function tear_down(): void {
@@ -109,6 +130,11 @@ class Test_String_Backfill extends TestCase {
 		delete_option( String_Backfill::DONE_OPTION );
 		$GLOBALS['srfm_test_as_calls'] = [];
 		$this->reset_multilingual_manager_singleton();
+		if ( $this->admin_id > 0 && function_exists( 'wp_delete_user' ) ) {
+			wp_set_current_user( 0 );
+			wp_delete_user( $this->admin_id );
+			$this->admin_id = 0;
+		}
 		parent::tear_down();
 	}
 
@@ -198,12 +224,69 @@ class Test_String_Backfill extends TestCase {
 		wp_delete_post( (int) $form_id, true );
 	}
 
-	public function test_maybe_schedule_enqueues_one_job_per_form() {
+	public function test_maybe_schedule_enqueues_a_single_batch_action() {
+		$this->install_active_provider();
+
+		$GLOBALS['srfm_test_as_calls'] = [];
+
+		String_Backfill::get_instance()->maybe_schedule();
+
+		if ( ! defined( 'SRFM_TEST_AS_SHIM' ) ) {
+			$this->markTestSkipped( 'Real Action Scheduler loaded; shim assertions not applicable.' );
+		}
+
+		// REGRESSION: this used to enqueue one action per form with $unique = true.
+		// Action Scheduler's uniqueness check matches on (status, hook, group_id) only —
+		// NOT on args — so the first form inserted and every later form silently wrote
+		// 0 rows, leaving exactly one form backfilled per site. A single paginating batch
+		// action removes the dependence on uniqueness entirely.
+		$this->assertCount( 1, $GLOBALS['srfm_test_as_calls'], 'maybe_schedule() must enqueue exactly one batch action.' );
+
+		$call = $GLOBALS['srfm_test_as_calls'][0];
+		$this->assertSame( String_Backfill::HOOK_BATCH, $call['hook'] );
+		$this->assertSame( 'srfm', $call['group'] );
+		$this->assertSame( [ 'paged' => 1 ], $call['args'] );
+	}
+
+	public function test_maybe_schedule_marks_done_before_enqueuing() {
+		$this->install_active_provider();
+
+		String_Backfill::get_instance()->maybe_schedule();
+
+		// The marker must be written before the enqueue, so N concurrent admin requests
+		// cannot each run the whole pass before any of them closes the gate.
+		$this->assertSame( String_Backfill::SCHEMA_VERSION, get_option( String_Backfill::DONE_OPTION ) );
+	}
+
+	public function test_maybe_schedule_skips_ajax_requests() {
+		$this->install_active_provider();
+
+		// admin_init also fires inside admin-ajax.php, which is reachable
+		// unauthenticated — the pass is state-changing and touches every form.
+		add_filter( 'wp_doing_ajax', '__return_true' );
+		String_Backfill::get_instance()->maybe_schedule();
+		remove_filter( 'wp_doing_ajax', '__return_true' );
+
+		$this->assertFalse( (bool) get_option( String_Backfill::DONE_OPTION ), 'An ajax request must not start the backfill.' );
+		$this->assertSame( [], $GLOBALS['srfm_test_as_calls'] );
+	}
+
+	public function test_maybe_schedule_skips_unprivileged_users() {
+		$this->install_active_provider();
+
+		wp_set_current_user( 0 );
+		String_Backfill::get_instance()->maybe_schedule();
+
+		$this->assertFalse( (bool) get_option( String_Backfill::DONE_OPTION ), 'A logged-out request must not start the backfill.' );
+		$this->assertSame( [], $GLOBALS['srfm_test_as_calls'] );
+	}
+
+	public function test_backfill_batch_collects_every_form() {
 		if ( ! function_exists( 'wp_insert_post' ) ) {
 			$this->markTestSkipped( 'WordPress test bootstrap not available.' );
 		}
 
-		$this->install_active_provider();
+		$stub = $this->install_active_provider();
 
 		$form_ids = [];
 		foreach ( [ 'One', 'Two', 'Three' ] as $suffix ) {
@@ -211,7 +294,7 @@ class Test_String_Backfill extends TestCase {
 				[
 					'post_type'   => 'sureforms_form',
 					'post_status' => 'publish',
-					'post_title'  => 'Enqueue Form ' . $suffix,
+					'post_title'  => 'Batch Form ' . $suffix,
 				]
 			);
 			if ( is_wp_error( $id ) || 0 === (int) $id ) {
@@ -220,40 +303,54 @@ class Test_String_Backfill extends TestCase {
 			$form_ids[] = (int) $id;
 		}
 
-		// Reset so only the maybe_schedule() enqueues are considered.
-		$GLOBALS['srfm_test_as_calls'] = [];
+		// Isolate from the save_post→collect() that wp_insert_post already fired.
+		$stub->registered = [];
 
-		String_Backfill::get_instance()->maybe_schedule();
+		String_Backfill::get_instance()->backfill_batch( 1 );
 
-		// Prefer Action Scheduler's own API (works in CI where real AS is loaded);
-		// fall back to the recording shim when AS isn't present.
-		if ( function_exists( 'as_has_scheduled_action' ) ) {
-			foreach ( $form_ids as $id ) {
-				$this->assertTrue(
-					as_has_scheduled_action( String_Backfill::HOOK, [ 'form_id' => $id ], 'srfm' ),
-					"Form {$id} should have a backfill action scheduled."
-				);
-			}
-		} elseif ( defined( 'SRFM_TEST_AS_SHIM' ) ) {
-			$enqueued_ids = [];
-			foreach ( $GLOBALS['srfm_test_as_calls'] as $call ) {
-				$this->assertSame( String_Backfill::HOOK, $call['hook'] );
-				$this->assertSame( 'srfm', $call['group'] );
-				$this->assertTrue( $call['unique'], 'Enqueue must pass the unique flag to dedupe re-queues.' );
-				$this->assertArrayHasKey( 'form_id', $call['args'] );
-				$this->assertIsInt( $call['args']['form_id'] );
-				$enqueued_ids[] = $call['args']['form_id'];
-			}
-			foreach ( $form_ids as $id ) {
-				$this->assertContains( $id, $enqueued_ids, "Form {$id} should be enqueued." );
-				$this->assertSame( 1, count( array_keys( $enqueued_ids, $id, true ) ), "Form {$id} enqueued more than once." );
-			}
-		} else {
-			$this->markTestSkipped( 'Action Scheduler not available and no recording shim installed.' );
+		// THE assertion adi3890 asked for: N forms must produce N backfills. This is
+		// what the previous per-form-enqueue test could not catch, because the recording
+		// shim ignores $unique and therefore recorded enqueues that real Action Scheduler
+		// would have discarded.
+		foreach ( $form_ids as $id ) {
+			$this->assertContains(
+				'form_' . $id . '_form_title',
+				$stub->registered,
+				"Form {$id} should have been collected by the batch."
+			);
 		}
 
 		foreach ( $form_ids as $id ) {
 			wp_delete_post( $id, true );
 		}
+	}
+
+	public function test_backfill_one_is_idempotent_per_schema_version() {
+		if ( ! function_exists( 'wp_insert_post' ) ) {
+			$this->markTestSkipped( 'WordPress test bootstrap not available.' );
+		}
+
+		$stub = $this->install_active_provider();
+
+		$form_id = (int) wp_insert_post(
+			[
+				'post_type'   => 'sureforms_form',
+				'post_status' => 'publish',
+				'post_title'  => 'Idempotent Form',
+			]
+		);
+		if ( 0 === $form_id ) {
+			$this->markTestSkipped( 'Could not create a form post.' );
+		}
+
+		String_Backfill::get_instance()->backfill_one( $form_id );
+		$this->assertSame( String_Backfill::SCHEMA_VERSION, get_post_meta( $form_id, String_Backfill::FORM_MARKER, true ) );
+
+		// A replayed batch must not re-register packages it already handled.
+		$stub->registered = [];
+		String_Backfill::get_instance()->backfill_one( $form_id );
+		$this->assertSame( [], $stub->registered, 'A already-backfilled form must be skipped on replay.' );
+
+		wp_delete_post( $form_id, true );
 	}
 }
