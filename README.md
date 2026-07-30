@@ -428,13 +428,12 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 ## Changelog ##
 ### 2.12.3 - 30th July 2026 ###
 * New: Added an "Entries" shortcut in the Instant Form admin bar to open a form's entries in one click.
-* Improvement: WPML compatibility. https://wpml.org/plugin/sureforms/
-* Fix: Enhanced entries for the submitted data
+* Improvement: Enhanced WPML compatibility. [https://wpml.org/plugin/sureforms/](https://wpml.org/plugin/sureforms/)
+* Fix: Enhanced entries search - includes submitted data too.
 * Fix: Fixed a failed database update that could stop forms from accepting submissions.
-* Fix: Forms no longer break on the frontend when default styling is turned off.
 * Fix: The number field no longer looks misaligned when "Use label as placeholder" is on.
 * Fix: Cloudflare Turnstile no longer shows a warning on WordPress 7.0.
-* Fix: Payment History styles now load only on pages that use it, instead of every page.
+* Fix: Payment History styles loads only on required pages.
 ### 2.12.2 - 20th July 2026 ###
 * New: Added a Payment History widget for Elementor and Bricks.
 * Fix: Custom CSS now applies correctly on the single form view.
