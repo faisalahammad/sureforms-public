@@ -427,9 +427,9 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 
 == Changelog ==
 = 2.12.3 - 30th July 2026 =
-* New: Added an "Entries" shortcut in the admin bar to open a form's entries in one click.
-* Improvement: WPML now finds your existing forms on its own and lets you translate form titles.
-* Fix: Searching entries now finds the text people actually typed into your forms.
+* New: Added an "Entries" shortcut in the Instant Form admin bar to open a form's entries in one click.
+* Improvement: WPML compatibility. https://wpml.org/plugin/sureforms/
+* Fix: Enhanced entries for the submitted data
 * Fix: Fixed a failed database update that could stop forms from accepting submissions.
 * Fix: Forms no longer break on the frontend when default styling is turned off.
 * Fix: The number field no longer looks misaligned when "Use label as placeholder" is on.
