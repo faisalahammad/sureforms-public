@@ -426,15 +426,15 @@ Visit the [SureForms features page](https://sureforms.com/features/?utm_source=w
 You can report security issues through our [Bug Bounty Program](https://brainstormforce.com/bug-bounty-program/). We collaborate with Patchstack to validate, triage, and handle security reports.
 
 ## Changelog ##
-### 2.12.3 - 30th July 2026 ###
-* New: Added an "Entries" link in the admin bar on pages displaying a form, so you can jump straight to that form's entries.
-* Improvement: Entry search now loads faster on sites with large entry tables by briefly caching the result count.
-* Fix: Cloudflare Turnstile no longer triggers a script-loading notice on WordPress 7.0.
-* Fix: Entry search now matches submitted form data instead of returning no results, and requires at least three characters.
-* Fix: Forms with default styles disabled no longer cause a frontend error.
-* Fix: Number field top spacing now aligns with other fields when the label is used as a placeholder.
-* Fix: Payment History widget styles now load correctly in Elementor and Bricks.
-* Fix: WPML now picks up existing forms for translation, including form titles.
+### 2.12.3 - 2026-07-30 ###
+* New: Forms on the frontend now show an "Entries" shortcut in the admin bar, taking you straight to that form's entries.
+* Improvement: WPML — existing forms are now picked up automatically, form titles can be translated, and translation packages are kept in sync as forms change.
+* Fix: Entries search now matches text that was actually submitted in the form. Previously searching for a submitted value returned nothing.
+* Fix: Resolved a database update that could fail repeatedly and, in some cases, stop forms from accepting submissions.
+* Fix: Forms with default styling turned off no longer break on the frontend.
+* Fix: The number field is no longer misaligned when "Use label as placeholder" is enabled.
+* Fix: Cloudflare Turnstile no longer triggers a "wp_enqueue_script was called incorrectly" notice on WordPress 7.0.
+* Fix: Payment History styles now load only on pages that actually use the block or shortcode, instead of site-wide.
 ### 2.12.2 - 20th July 2026 ###
 * New: Added a Payment History widget for Elementor and Bricks.
 * Fix: Custom CSS now applies correctly on the single form view.
@@ -449,4 +449,4 @@ The full changelog is available [here](https://sureforms.com/whats-new/?utm_sour
 ## Upgrade Notice ##
 
 ### 2.12.3 ###
-Recommended update with a new admin bar Entries link, faster entry search, and fixes for entry search, WPML translations, and Payment History widget styles.
+Recommended update with a new admin bar Entries shortcut, improved WPML support, and fixes for entries search, form submissions, and frontend styling.
