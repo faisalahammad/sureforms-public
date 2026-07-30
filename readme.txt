@@ -426,7 +426,7 @@ Visit the [SureForms features page](https://sureforms.com/features/?utm_source=w
 You can report security issues through our [Bug Bounty Program](https://brainstormforce.com/bug-bounty-program/). We collaborate with Patchstack to validate, triage, and handle security reports.
 
 == Changelog ==
-= 2.12.3 - 2026-07-30 =
+= 2.12.3 - 30th July 2026 =
 * New: Forms on the frontend now show an "Entries" shortcut in the admin bar, taking you straight to that form's entries.
 * Improvement: WPML — existing forms are now picked up automatically, form titles can be translated, and translation packages are kept in sync as forms change.
 * Fix: Entries search now matches text that was actually submitted in the form. Previously searching for a submitted value returned nothing.
@@ -445,3 +445,5 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 * Fix: Resolved a Stripe one-time payment error that could cause card payments to fail with an HTTP 400 response.
 * Fix: Restored bullet point visibility in the rich text admin editor so formatted lists display correctly.
 The full changelog is available [here](https://sureforms.com/whats-new/?utm_source=wordpress.org&utm_medium=whats_new).
+
+== Upgrade Notice ==
