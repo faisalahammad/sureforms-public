@@ -157,4 +157,17 @@ interface Provider {
 	 * @return string Translated value, or the original when no translation exists.
 	 */
 	public function translate_package_string( array $package, string $name, string $value ): string;
+
+	/**
+	 * Delete an entire string package and its translations.
+	 *
+	 * Called when the form the package belongs to is permanently deleted, so
+	 * orphaned packages and their translations don't linger in the multilingual
+	 * plugin's registry.
+	 *
+	 * @param array<string,string> $package Package descriptor.
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function delete_package( array $package ): void;
 }

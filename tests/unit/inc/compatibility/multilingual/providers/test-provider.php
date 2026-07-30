@@ -94,4 +94,8 @@ class Test_Provider extends TestCase {
 	public function test_translate_package_string() {
 		$this->assert_signature( 'translate_package_string', 3, 'string' );
 	}
+
+	public function test_delete_package() {
+		$this->assert_signature( 'delete_package', 1, 'void' );
+	}
 }

@@ -513,6 +513,7 @@ class Generate_Form_Markup {
 			<?php
 			if ( 'sureforms_form' !== $current_post_type && true === $show_title_current_page ) {
 				$title = ! empty( get_the_title( (int) $id ) ) ? get_the_title( (int) $id ) : '';
+				$title = String_Translator::get_instance()->translate_form_title( (int) $id, $title );
 				?>
 				<h2 class="srfm-form-title"><?php echo esc_html( $title ); ?></h2>
 				<?php
