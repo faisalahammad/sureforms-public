@@ -445,8 +445,3 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 * Fix: Resolved a Stripe one-time payment error that could cause card payments to fail with an HTTP 400 response.
 * Fix: Restored bullet point visibility in the rich text admin editor so formatted lists display correctly.
 The full changelog is available [here](https://sureforms.com/whats-new/?utm_source=wordpress.org&utm_medium=whats_new).
-
-## Upgrade Notice ##
-
-### 2.12.3 ###
-Recommended update with a new admin bar Entries shortcut, improved WPML support, and fixes for entries search, form submissions, and frontend styling.
