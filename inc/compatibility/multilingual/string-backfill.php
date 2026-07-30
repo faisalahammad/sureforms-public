@@ -194,34 +194,6 @@ class String_Backfill {
 	}
 
 	/**
-	 * Whether a backfill run is currently in flight for this schema version.
-	 *
-	 * A lock older than self::LOCK_TTL is treated as stale and ignored, which is how an
-	 * interrupted run (worker died before chaining the next page, host restarted, action
-	 * purged) recovers instead of stalling forever. Replaying is cheap because
-	 * self::FORM_MARKER skips forms already done.
-	 *
-	 * @since 2.12.3
-	 * @return bool
-	 */
-	private function is_run_in_flight(): bool {
-		$lock = get_option( self::LOCK_OPTION );
-
-		if ( ! is_array( $lock ) ) {
-			return false;
-		}
-
-		// A lock from an older schema version is irrelevant to this pass.
-		if ( self::SCHEMA_VERSION !== ( $lock['schema'] ?? '' ) ) {
-			return false;
-		}
-
-		$started = isset( $lock['started'] ) && is_numeric( $lock['started'] ) ? (int) $lock['started'] : 0;
-
-		return ( time() - $started ) < self::LOCK_TTL;
-	}
-
-	/**
 	 * Backfill one page of forms, then chain the next page.
 	 *
 	 * Runs String_Collector directly per form (rather than enqueuing a child action
@@ -369,5 +341,32 @@ class String_Backfill {
 		update_post_meta( $form_id, self::FORM_MARKER, self::SCHEMA_VERSION );
 
 		return true;
+	}
+	/**
+	 * Whether a backfill run is currently in flight for this schema version.
+	 *
+	 * A lock older than self::LOCK_TTL is treated as stale and ignored, which is how an
+	 * interrupted run (worker died before chaining the next page, host restarted, action
+	 * purged) recovers instead of stalling forever. Replaying is cheap because
+	 * self::FORM_MARKER skips forms already done.
+	 *
+	 * @since 2.12.3
+	 * @return bool
+	 */
+	private function is_run_in_flight(): bool {
+		$lock = get_option( self::LOCK_OPTION );
+
+		if ( ! is_array( $lock ) ) {
+			return false;
+		}
+
+		// A lock from an older schema version is irrelevant to this pass.
+		if ( self::SCHEMA_VERSION !== ( $lock['schema'] ?? '' ) ) {
+			return false;
+		}
+
+		$started = isset( $lock['started'] ) && is_numeric( $lock['started'] ) ? (int) $lock['started'] : 0;
+
+		return time() - $started < self::LOCK_TTL;
 	}
 }

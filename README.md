@@ -426,7 +426,7 @@ Visit the [SureForms features page](https://sureforms.com/features/?utm_source=w
 You can report security issues through our [Bug Bounty Program](https://brainstormforce.com/bug-bounty-program/). We collaborate with Patchstack to validate, triage, and handle security reports.
 
 ## Changelog ##
-### 2.12.3 - 30th July 2026 ###
+### 2.12.3 - 3rd August 2026 ###
 * New: Added an "Entries" shortcut in the Instant Form admin bar to open a form's entries in one click.
 * Improvement: Enhanced WPML compatibility. [https://wpml.org/plugin/sureforms/](https://wpml.org/plugin/sureforms/)
 * Fix: Enhanced entries search - includes submitted data too.

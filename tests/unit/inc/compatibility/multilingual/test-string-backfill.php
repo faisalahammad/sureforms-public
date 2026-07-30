@@ -441,4 +441,55 @@ class Test_String_Backfill extends TestCase {
 
 		wp_delete_post( $form_id, true );
 	}
+
+	/**
+	 * The action-hook wrapper must accept whatever Action Scheduler hands it and return
+	 * nothing.
+	 *
+	 * `backfill_one()` returns a bool so `backfill_batch()` can count real progress, but an
+	 * action callback must not return a value — hence the wrapper. This also covers the
+	 * drain path for per-form actions queued by the PREVIOUS implementation, which is still
+	 * registered on String_Backfill::HOOK and was otherwise untested.
+	 */
+	public function test_handle_backfill_action() {
+		$backfill = String_Backfill::get_instance();
+
+		// Untyped param: AS args are not type-guaranteed, so a non-numeric value must be
+		// coerced to 0 and bail rather than raising a TypeError (the old typed
+		// `backfill_one( int $form_id )` callback would have thrown).
+		$this->assertNull( $backfill->handle_backfill_action( 'not-a-number' ) );
+		$this->assertNull( $backfill->handle_backfill_action( 0 ) );
+		$this->assertNull( $backfill->handle_backfill_action( -5 ) );
+
+		if ( ! function_exists( 'wp_insert_post' ) ) {
+			$this->markTestSkipped( 'WordPress test bootstrap not available.' );
+		}
+
+		$stub = $this->install_active_provider();
+
+		$form_id = (int) wp_insert_post(
+			[
+				'post_type'   => 'sureforms_form',
+				'post_status' => 'publish',
+				'post_title'  => 'Drain Queue Form',
+			]
+		);
+		if ( 0 === $form_id ) {
+			$this->markTestSkipped( 'Could not create a form post.' );
+		}
+
+		// A numeric STRING is what Action Scheduler actually stores in its args JSON.
+		delete_post_meta( $form_id, String_Backfill::FORM_MARKER );
+		$stub->registered = [];
+
+		$this->assertNull( $backfill->handle_backfill_action( (string) $form_id ) );
+
+		$this->assertSame(
+			String_Backfill::SCHEMA_VERSION,
+			get_post_meta( $form_id, String_Backfill::FORM_MARKER, true ),
+			'The wrapper must route through backfill_one() and mark the form.'
+		);
+
+		wp_delete_post( $form_id, true );
+	}
 }
