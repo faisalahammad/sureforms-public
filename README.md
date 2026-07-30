@@ -427,14 +427,14 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 
 ## Changelog ##
 ### 2.12.3 - 30th July 2026 ###
-* New: Forms on the frontend now show an "Entries" shortcut in the admin bar, taking you straight to that form's entries.
-* Improvement: WPML — existing forms are now picked up automatically, form titles can be translated, and translation packages are kept in sync as forms change.
-* Fix: Entries search now matches text that was actually submitted in the form. Previously searching for a submitted value returned nothing.
-* Fix: Resolved a database update that could fail repeatedly and, in some cases, stop forms from accepting submissions.
-* Fix: Forms with default styling turned off no longer break on the frontend.
-* Fix: The number field is no longer misaligned when "Use label as placeholder" is enabled.
-* Fix: Cloudflare Turnstile no longer triggers a "wp_enqueue_script was called incorrectly" notice on WordPress 7.0.
-* Fix: Payment History styles now load only on pages that actually use the block or shortcode, instead of site-wide.
+* New: Added an "Entries" shortcut in the admin bar to open a form's entries in one click.
+* Improvement: WPML now finds your existing forms on its own and lets you translate form titles.
+* Fix: Searching entries now finds the text people actually typed into your forms.
+* Fix: Fixed a failed database update that could stop forms from accepting submissions.
+* Fix: Forms no longer break on the frontend when default styling is turned off.
+* Fix: The number field no longer looks misaligned when "Use label as placeholder" is on.
+* Fix: Cloudflare Turnstile no longer shows a warning on WordPress 7.0.
+* Fix: Payment History styles now load only on pages that use it, instead of every page.
 ### 2.12.2 - 20th July 2026 ###
 * New: Added a Payment History widget for Elementor and Bricks.
 * Fix: Custom CSS now applies correctly on the single form view.
