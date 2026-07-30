@@ -40,7 +40,7 @@ class Entries {
 	 *
 	 *     @type int          $form_id     Form ID to filter entries. Default 0 (all forms).
 	 *     @type string       $status      Entry status: 'all', 'read', 'unread', 'trash'. Default 'all'.
-	 *     @type string       $search      Search term to filter entries by entry ID. Default empty.
+	 *     @type string       $search      Search term matching entry ID (numeric terms), form title, or submitted form data (3+ characters). Default empty.
 	 *     @type string       $date_from   Start date for filtering entries (YYYY-MM-DD format). Default empty.
 	 *     @type string       $date_to     End date for filtering entries (YYYY-MM-DD format). Default empty.
 	 *     @type string       $orderby     Column to order by. Default 'created_at'.
@@ -84,8 +84,25 @@ class Entries {
 		// Build where conditions.
 		$where_conditions = self::build_where_conditions( $args );
 
-		// Get total count for pagination.
-		$total = EntriesTable::get_instance()->get_total_count( $where_conditions );
+		// Get total count for pagination. When a search term is active the WHERE includes
+		// an unindexed form_data LIKE, so the COUNT is a full scan of the candidate rows —
+		// and it re-runs on every pagination click for an answer that cannot change between
+		// clicks. Cache it briefly (30s) keyed on the exact conditions; ≤30s staleness in a
+		// pager total is harmless for an admin screen. Unsearched listings stay uncached so
+		// totals reflect trash/delete/read mutations immediately.
+		if ( ! empty( $args['search'] ) ) {
+			$count_cache_key = 'srfm_entries_search_count_' . md5( (string) wp_json_encode( $where_conditions ) );
+			$cached_total    = get_transient( $count_cache_key );
+
+			if ( is_numeric( $cached_total ) ) {
+				$total = absint( $cached_total );
+			} else {
+				$total = EntriesTable::get_instance()->get_total_count( $where_conditions );
+				set_transient( $count_cache_key, $total, 30 );
+			}
+		} else {
+			$total = EntriesTable::get_instance()->get_total_count( $where_conditions );
+		}
 
 		// Calculate offset.
 		$offset = ( absint( $args['page'] ) - 1 ) * absint( $args['per_page'] );
@@ -580,8 +597,10 @@ class Entries {
 			}
 		}
 
-		// Filter by search (entry ID + form title).
+		// Filter by search (entry ID + form title + submitted form data).
 		if ( ! empty( $args['search'] ) && is_string( $args['search'] ) ) {
+			global $wpdb;
+
 			$search_term  = sanitize_text_field( $args['search'] );
 			$search_group = [ 'RELATION' => 'OR' ];
 
@@ -604,7 +623,29 @@ class Entries {
 				];
 			}
 
-			// Only add if we have search conditions, otherwise force empty result.
+			// Match submitted form data. The form_data column stores plain JSON
+			// (Helper::encode_json() uses JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+			// so a LIKE matches submitted values textually — including emails, URLs and
+			// non-ASCII input. The query compiler (Base::prepare_where_clauses()) wraps
+			// the value in "%...%" itself; esc_like() here neutralizes user-typed wildcard
+			// characters ("%", "_") so they match literally.
+			// Performance guard: the LIKE cannot use an index (full scan of the LONGTEXT
+			// column within the other filters), so require at least 3 characters before
+			// matching form data. Shorter terms would match almost every row anyway while
+			// costing the most. Numeric terms are exempt above (exact, indexed ID lookup),
+			// and form-title matching is a cheap separate posts query.
+			if ( mb_strlen( $search_term ) >= 3 ) {
+				$search_group[] = [
+					'key'     => 'form_data',
+					'compare' => 'LIKE',
+					'value'   => $wpdb->esc_like( $search_term ),
+				];
+			}
+
+			// Guard: a short non-numeric term that matches no form title produces no
+			// usable condition — force an empty result instead of silently returning
+			// every entry (an OR-group with no conditions would be dropped by the
+			// query compiler).
 			if ( count( $search_group ) > 1 ) {
 				$where_conditions[] = $search_group;
 			} else {

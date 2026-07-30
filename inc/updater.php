@@ -177,15 +177,18 @@ class Updater {
 	 */
 	public function get_updater_callbacks() {
 		return [
-			'1.0.2' => [
+			'1.0.2'  => [
 				'SRFM\Inc\Updater_Callbacks::manage_default_dynamic_options',
 			],
-			'1.0.4' => [
+			'1.0.4'  => [
 				'SRFM\Inc\Updater_Callbacks::manage_empty_default_dynamic_options',
 			],
-			'1.2.1' => [
+			'1.2.1'  => [
 				'SRFM\Inc\Updater_Callbacks::manage_honeypot_option',
 				'SRFM\Inc\Updater_Callbacks::manage_empty_global_dynamic_options',
+			],
+			'2.12.3' => [
+				'SRFM\Inc\Updater_Callbacks::clear_elementor_page_assets_cache',
 			],
 		];
 	}

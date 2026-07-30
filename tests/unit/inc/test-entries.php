@@ -265,6 +265,186 @@ class Test_Entries extends TestCase {
 	}
 
 	/**
+	 * Test build_where_conditions search includes submitted form data (form_data LIKE).
+	 *
+	 * Regression: search previously matched only numeric entry IDs and form titles —
+	 * form_data was never in the WHERE, so text a respondent submitted could never be
+	 * found; a non-numeric term matching no form title even forced an always-empty
+	 * `ID = 0` condition.
+	 */
+	public function test_build_where_conditions_search_includes_form_data() {
+		$args   = [
+			'form_id'   => 0,
+			'status'    => 'all',
+			'search'    => 'jane@example.com',
+			'date_from' => '',
+			'date_to'   => '',
+			'entry_ids' => [],
+		];
+		$result = $this->call_private_method_static( Entries::class, 'build_where_conditions', [ $args ] );
+
+		$found_form_data_like = false;
+		$found_forced_empty   = false;
+		foreach ( $result as $group ) {
+			foreach ( $group as $condition ) {
+				if ( ! is_array( $condition ) || ! isset( $condition['key'] ) ) {
+					continue;
+				}
+				if ( 'form_data' === $condition['key'] && 'LIKE' === $condition['compare'] ) {
+					$found_form_data_like = true;
+					$this->assertSame( 'jane@example.com', $condition['value'] );
+				}
+				if ( 'ID' === $condition['key'] && '=' === $condition['compare'] && 0 === $condition['value'] ) {
+					$found_forced_empty = true;
+				}
+			}
+		}
+
+		$this->assertTrue( $found_form_data_like, 'Search must include a form_data LIKE condition.' );
+		$this->assertFalse( $found_forced_empty, 'Non-numeric search must not force an empty (ID = 0) result.' );
+	}
+
+	/**
+	 * Test build_where_conditions numeric search matches both entry ID and form data.
+	 *
+	 * A numeric term can be submitted data too (phone number, zip code), so it must
+	 * produce the form_data LIKE condition alongside the exact ID match.
+	 */
+	public function test_build_where_conditions_numeric_search_includes_form_data() {
+		$args   = [
+			'form_id'   => 0,
+			'status'    => 'all',
+			'search'    => '9876543210',
+			'date_from' => '',
+			'date_to'   => '',
+			'entry_ids' => [],
+		];
+		$result = $this->call_private_method_static( Entries::class, 'build_where_conditions', [ $args ] );
+
+		$found_id_match  = false;
+		$found_form_data = false;
+		foreach ( $result as $group ) {
+			foreach ( $group as $condition ) {
+				if ( ! is_array( $condition ) || ! isset( $condition['key'] ) ) {
+					continue;
+				}
+				if ( 'ID' === $condition['key'] && '=' === $condition['compare'] ) {
+					$found_id_match = true;
+				}
+				if ( 'form_data' === $condition['key'] && 'LIKE' === $condition['compare'] ) {
+					$found_form_data = true;
+				}
+			}
+		}
+
+		$this->assertTrue( $found_id_match );
+		$this->assertTrue( $found_form_data );
+	}
+
+	/**
+	 * Test build_where_conditions skips form_data LIKE for short text terms.
+	 *
+	 * The LIKE cannot use an index, so text terms under 3 characters must not trigger
+	 * the form_data scan; with no other usable condition the search must force an
+	 * empty result (never fall through to returning all entries).
+	 */
+	public function test_build_where_conditions_short_text_search_skips_form_data() {
+		$args   = [
+			'form_id'   => 0,
+			'status'    => 'all',
+			'search'    => 'ab',
+			'date_from' => '',
+			'date_to'   => '',
+			'entry_ids' => [],
+		];
+		$result = $this->call_private_method_static( Entries::class, 'build_where_conditions', [ $args ] );
+
+		$found_form_data    = false;
+		$found_forced_empty = false;
+		foreach ( $result as $group ) {
+			foreach ( $group as $condition ) {
+				if ( ! is_array( $condition ) || ! isset( $condition['key'] ) ) {
+					continue;
+				}
+				if ( 'form_data' === $condition['key'] ) {
+					$found_form_data = true;
+				}
+				if ( 'ID' === $condition['key'] && '=' === $condition['compare'] && 0 === $condition['value'] ) {
+					$found_forced_empty = true;
+				}
+			}
+		}
+
+		$this->assertFalse( $found_form_data, 'Terms under 3 characters must not scan form_data.' );
+		$this->assertTrue( $found_forced_empty, 'A short term with no other match must force an empty result.' );
+	}
+
+	/**
+	 * Test build_where_conditions short numeric term still searches by entry ID.
+	 */
+	public function test_build_where_conditions_short_numeric_search_keeps_id_match() {
+		$args   = [
+			'form_id'   => 0,
+			'status'    => 'all',
+			'search'    => '55',
+			'date_from' => '',
+			'date_to'   => '',
+			'entry_ids' => [],
+		];
+		$result = $this->call_private_method_static( Entries::class, 'build_where_conditions', [ $args ] );
+
+		$found_id_match  = false;
+		$found_form_data = false;
+		foreach ( $result as $group ) {
+			foreach ( $group as $condition ) {
+				if ( ! is_array( $condition ) || ! isset( $condition['key'] ) ) {
+					continue;
+				}
+				if ( 'ID' === $condition['key'] && '=' === $condition['compare'] && 55 === $condition['value'] ) {
+					$found_id_match = true;
+				}
+				if ( 'form_data' === $condition['key'] ) {
+					$found_form_data = true;
+				}
+			}
+		}
+
+		$this->assertTrue( $found_id_match, 'Short numeric terms must still match the entry ID.' );
+		$this->assertFalse( $found_form_data, 'Short numeric terms must not scan form_data.' );
+	}
+
+	/**
+	 * Test build_where_conditions escapes LIKE wildcards in the search term.
+	 *
+	 * The query compiler wraps the value in "%...%" itself; user-typed "%" and "_"
+	 * must be escaped so they match literally instead of acting as wildcards.
+	 */
+	public function test_build_where_conditions_search_escapes_like_wildcards() {
+		global $wpdb;
+
+		$args   = [
+			'form_id'   => 0,
+			'status'    => 'all',
+			'search'    => '100%_done',
+			'date_from' => '',
+			'date_to'   => '',
+			'entry_ids' => [],
+		];
+		$result = $this->call_private_method_static( Entries::class, 'build_where_conditions', [ $args ] );
+
+		$like_value = null;
+		foreach ( $result as $group ) {
+			foreach ( $group as $condition ) {
+				if ( is_array( $condition ) && isset( $condition['key'] ) && 'form_data' === $condition['key'] ) {
+					$like_value = $condition['value'];
+				}
+			}
+		}
+
+		$this->assertSame( $wpdb->esc_like( '100%_done' ), $like_value );
+	}
+
+	/**
 	 * Helper method to call private static methods for testing.
 	 */
 	private function call_private_method_static( $class, $method_name, $parameters = [] ) {

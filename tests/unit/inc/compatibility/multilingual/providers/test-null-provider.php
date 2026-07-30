@@ -147,4 +147,18 @@ class Test_Null_Provider extends TestCase {
 		$this->assertSame( 'Send', $this->provider->translate_package_string( $package, 'submit_button', 'Send' ) );
 		$this->assertSame( '', $this->provider->translate_package_string( $package, 'submit_button', '' ) );
 	}
+
+	public function test_delete_package() {
+		$package = [
+			'kind' => 'SureForms Form',
+			'name' => '1',
+		];
+
+		$before = did_action( 'wpml_delete_package' );
+
+		// No-op: deleting a package fires no WPML action for the Null provider.
+		$this->provider->delete_package( $package );
+
+		$this->assertSame( $before, did_action( 'wpml_delete_package' ) );
+	}
 }
