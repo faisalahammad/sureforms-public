@@ -128,7 +128,9 @@ class Test_String_Backfill extends TestCase {
 			$this->filter_callback = null;
 		}
 		delete_option( String_Backfill::DONE_OPTION );
+		delete_option( String_Backfill::LOCK_OPTION );
 		$GLOBALS['srfm_test_as_calls'] = [];
+		delete_option( String_Backfill::LOCK_OPTION );
 		$this->reset_multilingual_manager_singleton();
 		if ( $this->admin_id > 0 && function_exists( 'wp_delete_user' ) ) {
 			wp_set_current_user( 0 );
@@ -173,13 +175,23 @@ class Test_String_Backfill extends TestCase {
 		$this->assertFalse( (bool) get_option( String_Backfill::DONE_OPTION ) );
 	}
 
-	public function test_maybe_schedule_marks_done_with_schema_version() {
+	public function test_maybe_schedule_takes_the_lock_but_does_not_mark_done() {
 		$this->install_active_provider();
 
 		String_Backfill::get_instance()->maybe_schedule();
 
-		// Marker is the schema version, NOT SRFM_VER, so ordinary releases don't re-run.
-		$this->assertSame( String_Backfill::SCHEMA_VERSION, get_option( String_Backfill::DONE_OPTION ) );
+		// REGRESSION: DONE_OPTION used to be written here, before anything had run. A failed
+		// enqueue or a worker that died before chaining then left the migration looking
+		// complete forever, with no replay. Completion is now recorded only when the final
+		// page comes back empty; scheduling only takes the run lock.
+		$this->assertFalse(
+			(bool) get_option( String_Backfill::DONE_OPTION ),
+			'Scheduling must not record completion.'
+		);
+
+		$lock = get_option( String_Backfill::LOCK_OPTION );
+		$this->assertIsArray( $lock, 'Scheduling must take the run lock.' );
+		$this->assertSame( String_Backfill::SCHEMA_VERSION, $lock['schema'] ?? '' );
 	}
 
 	public function test_maybe_schedule_is_idempotent_for_current_schema_version() {
@@ -248,14 +260,90 @@ class Test_String_Backfill extends TestCase {
 		$this->assertSame( [ 'paged' => 1 ], $call['args'] );
 	}
 
-	public function test_maybe_schedule_marks_done_before_enqueuing() {
+	public function test_backfill_batch_marks_done_only_on_the_final_empty_page() {
 		$this->install_active_provider();
+
+		// Pretend a run is in flight, then hand the worker a page far past the end.
+		update_option(
+			String_Backfill::LOCK_OPTION,
+			[
+				'schema'  => String_Backfill::SCHEMA_VERSION,
+				'started' => time(),
+			],
+			false
+		);
+
+		String_Backfill::get_instance()->backfill_batch( 99999 );
+
+		// An empty page is the only completion signal, and it releases the lock.
+		$this->assertSame( String_Backfill::SCHEMA_VERSION, get_option( String_Backfill::DONE_OPTION ) );
+		$this->assertFalse( (bool) get_option( String_Backfill::LOCK_OPTION ), 'Completion must release the lock.' );
+	}
+
+	public function test_backfill_batch_aborts_without_marking_done_when_provider_inactive() {
+		// No provider installed → inactive at worker time, which is the case that used to
+		// mark forms and the schema as done while collecting nothing.
+		update_option(
+			String_Backfill::LOCK_OPTION,
+			[
+				'schema'  => String_Backfill::SCHEMA_VERSION,
+				'started' => time(),
+			],
+			false
+		);
+
+		String_Backfill::get_instance()->backfill_batch( 1 );
+
+		$this->assertFalse(
+			(bool) get_option( String_Backfill::DONE_OPTION ),
+			'A run that aborts must not record completion.'
+		);
+		$this->assertFalse(
+			(bool) get_option( String_Backfill::LOCK_OPTION ),
+			'An aborted run must release the lock so a later admin load can retry.'
+		);
+	}
+
+	public function test_maybe_schedule_does_not_start_a_second_run_while_one_is_in_flight() {
+		$this->install_active_provider();
+
+		update_option(
+			String_Backfill::LOCK_OPTION,
+			[
+				'schema'  => String_Backfill::SCHEMA_VERSION,
+				'started' => time(),
+			],
+			false
+		);
+		$GLOBALS['srfm_test_as_calls'] = [];
 
 		String_Backfill::get_instance()->maybe_schedule();
 
-		// The marker must be written before the enqueue, so N concurrent admin requests
-		// cannot each run the whole pass before any of them closes the gate.
-		$this->assertSame( String_Backfill::SCHEMA_VERSION, get_option( String_Backfill::DONE_OPTION ) );
+		$this->assertSame( [], $GLOBALS['srfm_test_as_calls'], 'A run already in flight must not be duplicated.' );
+	}
+
+	public function test_maybe_schedule_reclaims_a_stale_lock() {
+		$this->install_active_provider();
+
+		// A worker that died without chaining leaves a lock behind. Past the TTL it must be
+		// reclaimed, otherwise the migration stalls permanently.
+		update_option(
+			String_Backfill::LOCK_OPTION,
+			[
+				'schema'  => String_Backfill::SCHEMA_VERSION,
+				'started' => time() - ( String_Backfill::LOCK_TTL + 60 ),
+			],
+			false
+		);
+		$GLOBALS['srfm_test_as_calls'] = [];
+
+		String_Backfill::get_instance()->maybe_schedule();
+
+		if ( ! defined( 'SRFM_TEST_AS_SHIM' ) ) {
+			$this->markTestSkipped( 'Real Action Scheduler loaded; shim assertions not applicable.' );
+		}
+
+		$this->assertCount( 1, $GLOBALS['srfm_test_as_calls'], 'A stale lock must be reclaimed and the pass restarted.' );
 	}
 
 	public function test_maybe_schedule_skips_ajax_requests() {

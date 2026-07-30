@@ -202,13 +202,17 @@ class String_Collector {
 	 *
 	 * @param int $form_id The form post ID.
 	 * @since 2.11.0
-	 * @return void
+	 * @since 2.12.3 Returns whether collection actually ran, so callers (notably the
+	 *               backfill) can distinguish "collected" from "silently skipped because
+	 *               the provider went inactive" and avoid recording false progress.
+	 * @return bool True when the form's strings were registered, false when the provider
+	 *              was unavailable and nothing was done.
 	 */
-	public function collect( int $form_id ): void {
+	public function collect( int $form_id ): bool {
 		$provider = Multilingual_Manager::get_instance()->provider();
 
 		if ( ! $provider->is_active() ) {
-			return;
+			return false;
 		}
 
 		// Group every per-form string into a single WPML String Package so they
@@ -319,6 +323,8 @@ class String_Collector {
 			$provider->finish_package( $package );
 		}
 		$this->active_package = null;
+
+		return true;
 	}
 
 	/**

@@ -48,7 +48,28 @@ class String_Backfill {
 	 *
 	 * @since 2.12.3
 	 */
-	public const SCHEMA_VERSION = '1';
+	public const SCHEMA_VERSION = '2';
+
+	/**
+	 * Option holding the in-progress run lock: [ 'schema' => string, 'started' => int ].
+	 *
+	 * Separate from DONE_OPTION on purpose. DONE_OPTION means "the whole pass finished";
+	 * this means "a pass is currently running". Conflating them meant a run that died
+	 * mid-way looked complete forever.
+	 *
+	 * @since 2.12.3
+	 */
+	public const LOCK_OPTION = 'srfm_wpml_backfill_lock';
+
+	/**
+	 * How long a run lock is honoured before it is treated as stale and reclaimed.
+	 *
+	 * Bounds the failure mode where a worker dies without chaining: the next admin load
+	 * after this window restarts the pass, and the per-form markers make the replay cheap.
+	 *
+	 * @since 2.12.3
+	 */
+	public const LOCK_TTL = 3600;
 
 	/**
 	 * Action Scheduler hook that backfills a single form.
@@ -89,7 +110,10 @@ class String_Backfill {
 	public function __construct() {
 		add_action( 'admin_init', [ $this, 'maybe_schedule' ] );
 		add_action( self::HOOK_BATCH, [ $this, 'backfill_batch' ], 10, 1 );
-		add_action( self::HOOK, [ $this, 'backfill_one' ], 10, 1 );
+		// Void wrapper: backfill_one() returns a bool for the batch's progress accounting,
+		// and an action callback must not return a value. HOOK stays registered so any
+		// per-form actions still pending from the previous implementation drain cleanly.
+		add_action( self::HOOK, [ $this, 'handle_backfill_action' ], 10, 1 );
 	}
 
 	/**
@@ -130,13 +154,71 @@ class String_Backfill {
 			return;
 		}
 
-		// Close the concurrency window BEFORE enqueuing. Writing the marker after the
-		// enqueue let N concurrent admin requests each run the whole pass before any
-		// of them recorded completion. autoload=false: this admin-only marker never
-		// needs to load on the front end.
-		update_option( self::DONE_OPTION, self::SCHEMA_VERSION, false );
+		// A run already in flight — don't start a second chain. Reclaimed once the lock
+		// goes stale, which is what recovers a worker that died without chaining.
+		if ( $this->is_run_in_flight() ) {
+			return;
+		}
 
-		as_enqueue_async_action( self::HOOK_BATCH, [ 'paged' => 1 ], 'srfm' );
+		// Take the lock BEFORE enqueuing so concurrent admin requests don't both start a
+		// chain, but do NOT record completion here — that only happens when the final page
+		// comes back empty. autoload=false: these admin-only markers never need to load on
+		// the front end.
+		update_option(
+			self::LOCK_OPTION,
+			[
+				'schema'  => self::SCHEMA_VERSION,
+				'started' => time(),
+			],
+			false
+		);
+
+		// Verify the action actually got queued. as_enqueue_async_action() returns 0 when
+		// the insert wrote no rows, silently and without raising — so an unchecked call
+		// could leave the pass never started with the lock held.
+		$action_id = as_enqueue_async_action( self::HOOK_BATCH, [ 'paged' => 1 ], 'srfm' );
+
+		if ( empty( $action_id ) ) {
+			// Release immediately so the next admin load retries rather than waiting out
+			// the whole lock TTL.
+			delete_option( self::LOCK_OPTION );
+
+			/**
+			 * Fires when the backfill's first batch action could not be queued.
+			 *
+			 * @since 2.12.3
+			 * @param string $schema_version The schema version being backfilled.
+			 */
+			do_action( 'srfm_wpml_backfill_enqueue_failed', self::SCHEMA_VERSION );
+		}
+	}
+
+	/**
+	 * Whether a backfill run is currently in flight for this schema version.
+	 *
+	 * A lock older than self::LOCK_TTL is treated as stale and ignored, which is how an
+	 * interrupted run (worker died before chaining the next page, host restarted, action
+	 * purged) recovers instead of stalling forever. Replaying is cheap because
+	 * self::FORM_MARKER skips forms already done.
+	 *
+	 * @since 2.12.3
+	 * @return bool
+	 */
+	private function is_run_in_flight(): bool {
+		$lock = get_option( self::LOCK_OPTION );
+
+		if ( ! is_array( $lock ) ) {
+			return false;
+		}
+
+		// A lock from an older schema version is irrelevant to this pass.
+		if ( self::SCHEMA_VERSION !== ( $lock['schema'] ?? '' ) ) {
+			return false;
+		}
+
+		$started = isset( $lock['started'] ) && is_numeric( $lock['started'] ) ? (int) $lock['started'] : 0;
+
+		return ( time() - $started ) < self::LOCK_TTL;
 	}
 
 	/**
@@ -155,6 +237,32 @@ class String_Backfill {
 		// Args arrive from Action Scheduler, so the type is not guaranteed.
 		$paged = is_numeric( $paged ) ? max( 1, (int) $paged ) : 1;
 
+		// The provider can be deactivated between scheduling and execution. Abandon the
+		// run and release the lock WITHOUT recording completion, so a later admin load
+		// restarts the pass once a provider is active again.
+		if ( ! Multilingual_Manager::get_instance()->provider()->is_active() ) {
+			delete_option( self::LOCK_OPTION );
+
+			/**
+			 * Fires when a backfill batch aborts because no multilingual provider is active.
+			 *
+			 * @since 2.12.3
+			 * @param int $paged The page the run stopped on.
+			 */
+			do_action( 'srfm_wpml_backfill_aborted', $paged );
+			return;
+		}
+
+		// Refresh the lock so a long multi-page run isn't reclaimed as stale mid-flight.
+		update_option(
+			self::LOCK_OPTION,
+			[
+				'schema'  => self::SCHEMA_VERSION,
+				'started' => time(),
+			],
+			false
+		);
+
 		$form_ids = get_posts(
 			[
 				'post_type'      => SRFM_FORMS_POST_TYPE,
@@ -167,20 +275,67 @@ class String_Backfill {
 			]
 		);
 
+		// An empty page means every form has been walked — THIS is the only place the pass
+		// is recorded as complete, and only after all pages actually finished.
 		if ( empty( $form_ids ) || ! is_array( $form_ids ) ) {
+			update_option( self::DONE_OPTION, self::SCHEMA_VERSION, false );
+			delete_option( self::LOCK_OPTION );
+
+			/**
+			 * Fires when the multilingual string backfill has completed every page.
+			 *
+			 * @since 2.12.3
+			 * @param string $schema_version The schema version that completed.
+			 */
+			do_action( 'srfm_wpml_backfill_completed', self::SCHEMA_VERSION );
 			return;
 		}
 
+		$collected = 0;
 		foreach ( $form_ids as $form_id ) {
-			$this->backfill_one( (int) $form_id );
+			if ( $this->backfill_one( (int) $form_id ) ) {
+				$collected++;
+			}
+		}
+
+		// Nothing on a non-empty page could be collected — the provider went away
+		// mid-page. Stop and release rather than chaining and marking progress.
+		if ( 0 === $collected ) {
+			delete_option( self::LOCK_OPTION );
+			do_action( 'srfm_wpml_backfill_aborted', $paged );
+			return;
 		}
 
 		if ( ! function_exists( 'as_enqueue_async_action' ) ) {
+			// Cannot chain — release the lock so the next admin load resumes. Already-marked
+			// forms are skipped, so the replay only redoes the unfinished tail.
+			delete_option( self::LOCK_OPTION );
 			return;
 		}
 
 		// One pending action at a time, so $unique is unnecessary here.
-		as_enqueue_async_action( self::HOOK_BATCH, [ 'paged' => $paged + 1 ], 'srfm' );
+		$next_id = as_enqueue_async_action( self::HOOK_BATCH, [ 'paged' => $paged + 1 ], 'srfm' );
+
+		if ( empty( $next_id ) ) {
+			// The chain broke. Release so a later admin load restarts; FORM_MARKER means it
+			// resumes rather than starting over.
+			delete_option( self::LOCK_OPTION );
+			do_action( 'srfm_wpml_backfill_enqueue_failed', self::SCHEMA_VERSION );
+		}
+	}
+
+	/**
+	 * Action-hook entry point for a single-form backfill.
+	 *
+	 * Exists so backfill_one() can report success to the batch loop while the hook
+	 * callback itself returns nothing.
+	 *
+	 * @param mixed $form_id The form post ID to backfill.
+	 * @since 2.12.3
+	 * @return void
+	 */
+	public function handle_backfill_action( $form_id ): void {
+		$this->backfill_one( is_numeric( $form_id ) ? (int) $form_id : 0 );
 	}
 
 	/**
@@ -188,21 +343,31 @@ class String_Backfill {
 	 *
 	 * @param int $form_id The form post ID to backfill.
 	 * @since 2.12.3
-	 * @return void
+	 * @since 2.12.3 Returns whether the form was (or already had been) collected, and only
+	 *               writes the marker on a confirmed collection.
+	 * @return bool True when this form is backfilled for the current schema version.
 	 */
-	public function backfill_one( int $form_id ): void {
+	public function backfill_one( int $form_id ): bool {
 		if ( $form_id <= 0 ) {
-			return;
+			return false;
 		}
 
 		// Idempotency guard: a replayed batch must not re-register packages for forms
 		// it already processed under this schema version.
 		if ( self::SCHEMA_VERSION === get_post_meta( $form_id, self::FORM_MARKER, true ) ) {
-			return;
+			return true;
 		}
 
-		String_Collector::get_instance()->collect( $form_id );
+		// collect() returns false when the provider is inactive, in which case it did
+		// nothing. Marking the form regardless would permanently skip it — the exact
+		// failure this backfill exists to prevent — so the marker is only written on a
+		// confirmed collection.
+		if ( ! String_Collector::get_instance()->collect( $form_id ) ) {
+			return false;
+		}
 
 		update_post_meta( $form_id, self::FORM_MARKER, self::SCHEMA_VERSION );
+
+		return true;
 	}
 }
