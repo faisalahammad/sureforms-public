@@ -231,7 +231,7 @@ class String_Translator {
 	 * heading on the form (and as the instant-form banner), so it needs to be
 	 * registered and translated like any other user-facing string.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return string
 	 */
 	public static function title_name(): string {
@@ -316,7 +316,7 @@ class String_Translator {
 	 *
 	 * @param int    $form_id Form post ID.
 	 * @param string $value   Original title (used as fallback when no translation exists).
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return string Translated title, or the original when no provider/translation is available.
 	 */
 	public function translate_form_title( int $form_id, string $value ): string {

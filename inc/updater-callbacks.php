@@ -113,7 +113,7 @@ class Updater_Callbacks {
 	 * (footer → FOUC) after the update until it is re-saved in the editor. Dropping the
 	 * meta forces Elementor to regenerate it (including this dependency) on next render.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return void
 	 */
 	public static function clear_elementor_page_assets_cache() {

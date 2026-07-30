@@ -75,7 +75,7 @@ class Payment_History_Widget extends \Bricks\Element {
 	 * belt-and-braces fallback. The handle is registered by
 	 * `Payment_History_Shortcode::register_assets()` (priority 1).
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return void
 	 */
 	public function enqueue_scripts() {

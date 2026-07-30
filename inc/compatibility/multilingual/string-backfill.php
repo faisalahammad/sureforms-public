@@ -8,7 +8,7 @@
  * forms stay invisible to WPML until manually opened and saved again.
  *
  * @package sureforms.
- * @since x.x.x
+ * @since 2.12.3
  */
 
 namespace SRFM\Inc\Compatibility\Multilingual;
@@ -27,7 +27,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * provider is active, so their String Packages are registered without needing a
  * manual re-save.
  *
- * @since x.x.x
+ * @since 2.12.3
  */
 class String_Backfill {
 	use Get_Instance;
@@ -35,7 +35,7 @@ class String_Backfill {
 	/**
 	 * Option that records the schema version the backfill last completed for.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 */
 	public const DONE_OPTION = 'srfm_wpml_backfill_done';
 
@@ -45,21 +45,21 @@ class String_Backfill {
 	 * NOT tied to SRFM_VER, so ordinary plugin releases don't re-enqueue a job
 	 * per form on every update.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 */
 	public const SCHEMA_VERSION = '1';
 
 	/**
 	 * Action Scheduler hook that backfills a single form.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 */
 	public const HOOK = 'srfm_wpml_backfill_form';
 
 	/**
 	 * Constructor. Schedules the backfill on admin load and handles each queued form.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 */
 	public function __construct() {
 		add_action( 'admin_init', [ $this, 'maybe_schedule' ] );
@@ -74,7 +74,7 @@ class String_Backfill {
 	 * is unavailable. Each form is processed in its own async job so a large form
 	 * count never blocks the request.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return void
 	 */
 	public function maybe_schedule(): void {
@@ -116,7 +116,7 @@ class String_Backfill {
 	 * Backfill a single form's String Package.
 	 *
 	 * @param int $form_id The form post ID to backfill.
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return void
 	 */
 	public function backfill_one( int $form_id ): void {
