@@ -13,16 +13,21 @@
  * the media elements and the SVG/MathML namespaces the exploit relied on.
  */
 
-import createDOMPurify from 'dompurify';
-import { sanitizeEntryValue } from '../sanitizeEntryValue';
+import domPurify from 'dompurify';
+import {
+	isRichTextField,
+	sanitizeEntryValue,
+	sanitizeFieldValue,
+	sanitizeLogMessage,
+} from '../sanitizeEntryValue';
 import { decodeHTMLEntities } from '../entryHelpers';
 
 const sanitize = sanitizeEntryValue;
 
 // A pristine instance, so "this is what the DEFAULT config does" assertions are
-// genuinely about defaults. The module under test owns a private instance, but
-// importing it must not be able to influence this one either.
-const pristine = createDOMPurify( window );
+// genuinely about defaults and cannot be perturbed by a hook. The default export
+// doubles as the factory, so calling it yields a fresh instance.
+const pristine = domPurify( window );
 
 describe( 'entry value sanitization (CVE-2026-18406)', () => {
 	it( 'strips the foreignObject payload from the published exploit', () => {
@@ -231,10 +236,129 @@ describe( 'entry value sanitization (CVE-2026-18406)', () => {
 
 describe( 'sanitizer instance isolation', () => {
 	it( 'does not install its CSS hook on the shared DOMPurify singleton', () => {
-		// addHook() at module scope would mutate the process-wide instance and
-		// silently change behaviour for any other dompurify consumer.
+		// This MUST assert on the default export, not on another
+		// createDOMPurify() instance: the factory returns a fresh object every
+		// call, so a `pristine` instance is unaffected by addHook() no matter
+		// where it was called, and the test could never fail. sureforms-pro's
+		// EntryEditModal imports this same singleton to seed the Quill editor,
+		// so a leaked hook would strip style attributes during editing.
 		expect(
-			pristine.sanitize( '<p style="position:fixed;top:0">x</p>' )
+			domPurify.sanitize( '<p style="position:fixed;top:0">x</p>' )
 		).toMatch( /position:\s*fixed/ );
+	} );
+} );
+
+describe( 'sanitizeLogMessage', () => {
+	// Renders the sanitized string the way the DOM will, so assertions are about
+	// what the user actually sees rather than about entity spelling.
+	const rendered = ( message ) => {
+		const host = document.createElement( 'div' );
+		host.innerHTML = sanitizeLogMessage( message );
+		return host.textContent;
+	};
+
+	it( 'keeps the change-log markup Pro writes', () => {
+		const out = sanitizeLogMessage(
+			'<strong>Email: </strong> <del>old@a.test</del> &#8594; new@a.test'
+		);
+
+		expect( out ).toMatch( /<strong>/i );
+		expect( out ).toMatch( /<del>/i );
+	} );
+
+	it( 'displays escaped entities correctly without pre-decoding', () => {
+		// The old implementation ran decodeHTMLEntities() first to fix this. It is
+		// unnecessary: innerHTML performs the decode on insertion.
+		expect(
+			rendered( '<strong>Name: </strong> <del>O&#039;Brien</del>' )
+		).toContain( "O'Brien" );
+		expect( rendered( 'a &#8594; b' ) ).toContain( '→' );
+	} );
+
+	it( 'does not blank an escaped old value in the audit trail', () => {
+		// Regression guard: pre-decoding turned `&lt;img src=x&gt;` back into a
+		// live <img>, which the sanitizer then removed, leaving `<del></del>` and
+		// misreporting what changed.
+		const out = sanitizeLogMessage(
+			'<strong>Message: </strong> <del>&lt;img src=x&gt;</del> &#8594; hello'
+		);
+
+		expect( out ).toMatch( /&lt;img src=x&gt;/ );
+		expect( rendered( out ) ).toContain( '<img src=x>' );
+	} );
+
+	it( 'still strips live markup in a log message', () => {
+		expect(
+			sanitizeLogMessage( '<img src=x onerror=alert(1)>' )
+		).not.toMatch( /onerror|<img/i );
+	} );
+
+	it( 'renders nothing for non-string messages', () => {
+		// Previously `null` rendered the literal word "null" and an object
+		// rendered JSON whose `<` characters were parsed as markup.
+		expect( sanitizeLogMessage( null ) ).toBe( '' );
+		expect( sanitizeLogMessage( undefined ) ).toBe( '' );
+		expect( sanitizeLogMessage( { a: '<b>' } ) ).toBe( '' );
+		expect( sanitizeLogMessage( 42 ) ).toBe( '' );
+	} );
+} );
+
+describe( 'server-rendered markup (srfm-payment)', () => {
+	// inc/payments/stripe/payments-settings.php hooks `srfm_entry_value` and
+	// replaces the stored numeric payment ID with this anchor. It is
+	// plugin-authored, not submitter input, so it keeps `class` and `target`.
+	const anchor =
+		'<a type="button" href="http://example.test/wp-admin/admin.php?page=sureforms_payments#/payment/323"' +
+		' class="text-link-primary no-underline hover:underline" target="_blank">View Payment</a>';
+
+	it( 'renders the payment link as a working anchor', () => {
+		const out = sanitizeFieldValue( {
+			block_name: 'srfm-payment',
+			value: anchor,
+		} );
+
+		expect( out ).toMatch( /<a\s/i );
+		expect( out ).toMatch( /page=sureforms_payments/ );
+		expect( out ).toMatch( /View Payment/ );
+	} );
+
+	it( 'applies the SAME strict policy to payment as to submitter content', () => {
+		// `block_name` comes from the submitted POST key and is not a trust
+		// boundary: process_form_fields() accepts any key containing `-lbl-`, and
+		// the payment filter leaves non-numeric values alone, so a submitter can
+		// get their own payload labelled `srfm-payment`. A relaxed policy for this
+		// label would hand them `class` — the Tailwind overlay vector.
+		const out = sanitizeFieldValue( {
+			block_name: 'srfm-payment',
+			value: '<div class="fixed inset-0 z-[99999999]">gotcha</div>',
+		} );
+
+		expect( out ).not.toMatch( /class=/i );
+	} );
+
+	it( 'takes the markup branch so it is never shown as literal tags', () => {
+		expect(
+			isRichTextField( { block_name: 'srfm-payment', value: anchor } )
+		).toBe( true );
+	} );
+
+	it( 'still refuses class on submitter-authored rich text', () => {
+		// The relaxed policy must not leak to the textarea path — `class` is the
+		// Tailwind overlay vector.
+		expect(
+			sanitizeFieldValue( {
+				block_name: 'srfm-textarea',
+				value: '<div class="fixed inset-0 z-[99999999]">x</div>',
+			} )
+		).not.toMatch( /class=/i );
+	} );
+
+	it( 'still strips scripts and media from the trusted policy', () => {
+		const out = sanitizeFieldValue( {
+			block_name: 'srfm-payment',
+			value: '<a href="javascript:alert(1)" onclick="alert(1)">x</a><img src=y>',
+		} );
+
+		expect( out ).not.toMatch( /javascript:|onclick|<img/i );
 	} );
 } );

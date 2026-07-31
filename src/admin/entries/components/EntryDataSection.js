@@ -5,7 +5,7 @@ import EntryEdit from './EntryEdit';
 import { decodeHTMLEntities } from '../utils/entryHelpers';
 import {
 	isRichTextField,
-	sanitizeEntryValue,
+	sanitizeFieldValue,
 } from '../utils/sanitizeEntryValue';
 
 /**
@@ -15,10 +15,12 @@ import {
  * @return {string} Rendered value
  */
 const formatField = ( field ) => {
-	// Implementations of this filter must return a VALUE (string, array or a
-	// React element) — never a markup string intended to be parsed as HTML.
-	// The only HTML sink on this screen is RenderField's rich-text branch, which
-	// runs its input through sanitizeEntryValue() first.
+	// Implementations of this filter should return a VALUE (string, array or a
+	// React element). If one returns markup, it renders as escaped text unless
+	// its block is listed in SERVER_MARKUP_BLOCKS in sanitizeEntryValue.js — see
+	// the `srfm-payment` anchor from inc/payments/stripe/payments-settings.php.
+	// The only HTML sink in this component is RenderField's markup branch, which
+	// runs its input through sanitizeFieldValue() first.
 	const renderProFields = applyFilters(
 		'srfm-pro.entry-details.render-pro-fields'
 	);
@@ -110,19 +112,20 @@ export const RenderField = ( props ) => {
 						<div className="flex-1">
 							{ isRichTextField( field ) ? (
 							/*
-							 * Rich text must render formatted, so DOMPurify's output is
-							 * inserted DIRECTLY — its supported, mXSS-safe contract.
-							 * Never route it through a second HTML parser; that was the
-							 * CVE-2026-18406 sink. See sanitizeEntryValue().
+							 * Values that legitimately contain markup (rich text, and the
+							 * server-rendered payment link) must render formatted, so
+							 * DOMPurify's output is inserted DIRECTLY — its supported,
+							 * mXSS-safe contract. Never route it through a second HTML
+							 * parser; that was the CVE-2026-18406 sink. The per-block
+							 * policy lives in sanitizeFieldValue().
 							 */
 								<span
 									className="text-sm font-medium text-text-secondary [overflow-wrap:anywhere] whitespace-pre-wrap"
 									// eslint-disable-next-line react/no-danger -- value is DOMPurify-sanitized and inserted directly (no second HTML parse); see CVE-2026-18406.
 									dangerouslySetInnerHTML={ {
 										__html:
-												sanitizeEntryValue(
-													field.value
-												) || '-',
+												sanitizeFieldValue( field ) ||
+												'-',
 									} }
 								/>
 							) : (

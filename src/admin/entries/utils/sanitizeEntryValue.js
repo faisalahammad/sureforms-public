@@ -121,6 +121,8 @@ const ALLOWED_CSS_PROPERTIES = [
  * never by re-parsing the serialized output, which is the mistake that caused
  * CVE-2026-18406 in the first place.
  *
+ * @since x.x.x
+ *
  * @param {Element} node Node being sanitized.
  * @return {void}
  */
@@ -157,25 +159,43 @@ const purifier = createDOMPurify( window );
 purifier.addHook( 'afterSanitizeAttributes', filterStyleAttribute );
 
 /**
- * The only block whose stored value can legitimately contain markup: the
- * textarea field, when its Rich Text editor is enabled.
+ * Blocks whose value can legitimately contain markup.
+ *
+ * `srfm-textarea` holds SUBMITTER-authored rich text (Quill). `srfm-payment`
+ * holds PLUGIN-authored markup: the `srfm_entry_value` filter in
+ * `inc/payments/stripe/payments-settings.php` replaces the stored value — a
+ * numeric payment row ID, `intval()`-gated — with a "View Payment" anchor. The
+ * two are different trust levels and get different policies below.
  */
 const RICH_TEXT_BLOCK = 'srfm-textarea';
+const SERVER_MARKUP_BLOCKS = [ 'srfm-payment' ];
+
+/**
+ * Matches something that plausibly opens an HTML tag, comment or close tag.
+ *
+ * This is a heuristic, NOT a parser: `if a<b then c>d` still matches it, because
+ * distinguishing that from real markup requires actually parsing HTML. It exists
+ * only to keep a plain-text answer typed into a rich-text field off the HTML
+ * path in the common case. The real discriminator is `block_name`.
+ */
+const HTML_TAG_PATTERN = /<[a-z!/][^<>]*>/i;
 
 /**
  * Should this field's value be rendered as HTML rather than as escaped text?
  *
- * The discriminator is the SERVER's `block_name` (set in `inc/rest-api.php`
- * from `Helper::get_block_name_from_field()`), not the shape of the value.
- * Content-sniffing with a loose `/<[^>]+>/` test on an already entity-decoded
- * value silently destroys plain-text answers: `<not a tag>` renders as an empty
- * cell and `if a<b then c>d` renders as `if a` + `d`, because DOMPurify quite
- * correctly removes what looks like an unknown element. Every non-textarea
- * field therefore stays on the escaping text path.
+ * The discriminator is the server's `block_name`, not the shape of the value.
+ * Content-sniffing every value with a loose `/<[^>]+>/` test silently destroys
+ * plain-text answers: `<not a tag>` renders as an empty cell and `x<y>z` as
+ * `xz`, because DOMPurify quite correctly removes what looks like an unknown
+ * element. Restricting the HTML path to the two blocks that can actually hold
+ * markup keeps every other field on the escaping text path.
  *
- * The tag test is kept as a second condition — a plain-text answer typed into a
- * rich-text textarea should not take the HTML path either — but tightened to
- * require a real tag name, so `5 < 10 and 3 > 1` can never select it.
+ * NOTE — `block_name` is a data-integrity discriminator, NOT a trust boundary.
+ * It is derived from the submitted POST key (`inc/helper.php`
+ * `get_block_name_from_field()` takes the first two dash-segments of any key
+ * containing `-lbl-`), so a submitter can choose it. That is fine: everything on
+ * the HTML path is sanitized regardless. Do not relax the sanitizer policy on
+ * the grounds that "only real textareas reach it".
  *
  * @since x.x.x
  *
@@ -183,12 +203,13 @@ const RICH_TEXT_BLOCK = 'srfm-textarea';
  * @return {boolean} True when the value must be sanitized and inserted as HTML.
  */
 export const isRichTextField = ( field ) =>
-	field?.block_name === RICH_TEXT_BLOCK &&
+	( field?.block_name === RICH_TEXT_BLOCK ||
+		SERVER_MARKUP_BLOCKS.includes( field?.block_name ) ) &&
 	typeof field.value === 'string' &&
-	/<[a-z!/][^<>]*>/i.test( field.value );
+	HTML_TAG_PATTERN.test( field.value );
 
 /**
- * Sanitize entry content that may legitimately contain markup.
+ * Sanitize a string that may legitimately contain markup.
  *
  * CVE-2026-18406: the result MUST be inserted directly into the DOM (i.e. via
  * `dangerouslySetInnerHTML`). Never pass it to a second HTML parser such as
@@ -196,8 +217,76 @@ export const isRichTextField = ( field ) =>
  * left inert and resurrects the payload. Sanitizer-straight-to-DOM is
  * DOMPurify's documented, mXSS-safe contract.
  *
- * @param {string} value Raw (entity-decoded) value.
+ * Fails CLOSED: DOMPurify returns its input verbatim when `isSupported` is
+ * false, and that string would otherwise reach `dangerouslySetInnerHTML`
+ * unescaped. An empty cell is the correct degradation.
+ *
+ * @since x.x.x
+ *
+ * @param {string} value  Raw value.
+ * @param {Object} config DOMPurify config. Defaults to the strict policy.
  * @return {string} Sanitized HTML, safe for direct DOM insertion only.
  */
-export const sanitizeEntryValue = ( value ) =>
-	purifier.sanitize( value, RICH_TEXT_SANITIZE_CONFIG );
+export const sanitizeEntryValue = (
+	value,
+	config = RICH_TEXT_SANITIZE_CONFIG
+) => ( purifier.isSupported ? purifier.sanitize( value, config ) : '' );
+
+/**
+ * Sanitize a field value for rendering as HTML.
+ *
+ * There is deliberately ONE policy, applied to every block. It is tempting to
+ * relax it for SERVER_MARKUP_BLOCKS on the grounds that the payment anchor is
+ * plugin-authored — do not. `block_name` is derived from the submitted POST key
+ * and `process_form_fields()` (`inc/form-submit.php`) accepts any key containing
+ * `-lbl-` without checking it against the form's real fields, so an
+ * unauthenticated submitter can post `srfm-payment-1-lbl-x` with an arbitrary
+ * value. The payment filter leaves non-numeric values alone, so that payload
+ * arrives here labelled `srfm-payment`. Keying a weaker policy off the label
+ * would hand a submitter whatever that policy allows.
+ *
+ * The visible cost is that the payment link loses its `class` and `target`, so
+ * it renders as a default-styled link that opens in the same tab. Restoring
+ * those needs the PHP filter to return structured data instead of markup.
+ *
+ * @since x.x.x
+ *
+ * @param {Object} field Field object with `value`.
+ * @return {string} Sanitized HTML, safe for direct DOM insertion only.
+ */
+export const sanitizeFieldValue = ( field ) =>
+	sanitizeEntryValue( field?.value );
+
+/**
+ * Sanitize an entry log message.
+ *
+ * Log messages are NOT plain text. Most are status strings, but the Pro
+ * change-log writers deliberately embed markup: `inc/extensions/hooks.php` emits
+ * `<strong>Label: </strong> "" &#8594; new` when a field is added and
+ * `<strong>Label: </strong> <del>old</del> &#8594; new` when one is modified.
+ * Rendering those as text would show the raw tags to the user.
+ *
+ * The message is NOT entity-decoded first, deliberately. Messages are written as
+ * a markup template around `esc_html()`-escaped values, so decoding would turn
+ * an escaped value back into live markup that the sanitizer then removes —
+ * silently blanking it. A logged old value of `&lt;img src=x&gt;` renders as the
+ * literal text `<img src=x>` without a decode, and as nothing at all with one,
+ * which misreports what changed. `innerHTML` performs the single correct decode
+ * on insertion, so `&#039;` and `&#8594;` still display as `'` and `→`.
+ *
+ * NOTE — because the sanitizer is the only control here, `esc_html()` in the log
+ * writers is now belt-and-braces rather than load-bearing. Two Pro writers embed
+ * submitter-influenced values with no escaping at all
+ * (`inc/extensions/hooks.php` and `inc/business/repeater/init.php`); they are
+ * inert under this policy but should be escaped regardless.
+ *
+ * Non-strings return '' rather than rendering `"null"` or a JSON blob whose `<`
+ * characters would be parsed as markup.
+ *
+ * @since x.x.x
+ *
+ * @param {*} message Raw log message from the API.
+ * @return {string} Sanitized HTML, safe for direct DOM insertion only.
+ */
+export const sanitizeLogMessage = ( message ) =>
+	typeof message === 'string' ? sanitizeEntryValue( message ) : '';

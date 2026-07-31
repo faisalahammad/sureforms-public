@@ -40,13 +40,20 @@ describe( 'isRichTextField', () => {
 		}
 	} );
 
-	it( 'does not treat a comparison typed into a textarea as markup', () => {
-		// Even on the one block allowed to hold markup, a bare comparison must
-		// not select the HTML branch.
+	it( 'documents the limit of the tag heuristic on the markup blocks', () => {
+		// Spaced comparisons and plain text are rejected.
 		expect( isRichTextField( richText( '5 < 10 and 3 > 1' ) ) ).toBe(
 			false
 		);
 		expect( isRichTextField( richText( 'plain answer' ) ) ).toBe( false );
+
+		// But the heuristic is NOT a parser: an unspaced comparison typed into a
+		// rich-text field still looks like a tag and still gets mangled by the
+		// sanitizer. Telling these apart requires actually parsing HTML, so this
+		// is pinned as known behaviour rather than claimed as fixed. `block_name`
+		// is what keeps every OTHER field type safe from this.
+		expect( isRichTextField( richText( 'if a<b then c>d' ) ) ).toBe( true );
+		expect( isRichTextField( richText( 'x<y>z' ) ) ).toBe( true );
 	} );
 
 	it( 'recognises the markup the rich-text editor actually emits', () => {

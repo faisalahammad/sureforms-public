@@ -125,9 +125,10 @@ sureforms/
 - Use `__()` from `@wordpress/i18n` — never hardcode user-facing strings
 - Use TailwindCSS utility classes; use `@bsf/force-ui` for admin UI
 - NEVER use `dangerouslySetInnerHTML` — use `RawHTML` from `@wordpress/element`
-  - **Deliberate exception:** the entries admin view (`EntryDataSection.js` and
-    `EntryLogsSection.js`, among other pre-existing sites) inserts
-    `sanitizeEntryValue()` output directly. Two separate rules apply here:
+  - **Deliberate exception:** the entries admin view — `EntryDataSection.js` and
+    `EntryLogsSection.js` — inserts `sanitizeEntryValue.js` output directly.
+    (Pre-existing unrelated sites: `src/components/presets/index.js`,
+    `src/components/image/index.js`.) Two separate rules apply here:
     - **Never re-parse the sanitized string.** Feeding sanitizer output to a
       SECOND HTML parser (e.g. `html-react-parser`) is what caused the stored-XSS
       CVE-2026-18406: the re-parse decoded entities DOMPurify had deliberately
