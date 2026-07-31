@@ -3,8 +3,6 @@ import { sprintf, _n, __ } from '@wordpress/i18n';
 import { applyFilters } from '@wordpress/hooks';
 import EntryEdit from './EntryEdit';
 import { decodeHTMLEntities } from '../utils/entryHelpers';
-import domPurify from 'dompurify';
-import parse from 'html-react-parser';
 
 /**
  * Render field value - handles both regular and repeater fields
@@ -89,20 +87,21 @@ export const RenderField = ( props ) => {
 					) }
 					{ ! Array.isArray( field.value ) && (
 						<div className="flex-1">
-							{ typeof field?.value === 'string' &&
-							field.value.match( /<[^>]+>/g ) ? (
-								// Render HTML content for fields that contain HTML tags
-									<span className="text-sm font-medium text-text-secondary [overflow-wrap:anywhere] whitespace-pre-wrap">
-										{ parse(
-											domPurify.sanitize( field.value )
-										) }
-									</span>
-								) : (
-								// Render plain text for regular fields
-									<span className="text-sm font-medium text-text-secondary [overflow-wrap:anywhere] whitespace-pre-wrap">
-										{ field?.value ?? '-' }
-									</span>
-								) }
+							{ /*
+							  * Submitted field values are TEXT and are rendered as a React
+							  * text child, which escapes on output. They are never parsed as
+							  * HTML. The previous `parse( domPurify.sanitize( value ) )` path
+							  * was a stored-XSS sink (CVE-2026-18406): feeding DOMPurify's
+							  * output to html-react-parser re-parsed sanitizer-approved text
+							  * as markup, and its <style>/<script> branch routed it into
+							  * dangerouslySetInnerHTML — resurrecting an entity-encoded
+							  * <foreignObject><img onerror> that DOMPurify had legitimately
+							  * treated as inert text. Rendering as text removes the sink
+							  * entirely; a form answer is never HTML.
+							  */ }
+							<span className="text-sm font-medium text-text-secondary [overflow-wrap:anywhere] whitespace-pre-wrap">
+								{ field?.value ?? '-' }
+							</span>
 						</div>
 					) }
 				</div>

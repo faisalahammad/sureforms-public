@@ -4,8 +4,6 @@ import { Button, Text } from '@bsf/force-ui';
 import { __ } from '@wordpress/i18n';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { useEntryLogs } from '../hooks/useEntriesQuery';
-import domPurify from 'dompurify';
-import parse from 'html-react-parser';
 
 /**
  * EntryLogsSection Component
@@ -121,11 +119,17 @@ const EntryLogsSection = ( { entryId, onConfirmation } ) => {
 													color="primary"
 													className="[overflow-wrap:anywhere]"
 												>
-													{ parse(
-														domPurify.sanitize(
-															message
-														)
-													) }
+													{ /*
+													  * Log messages are plain-text status
+													  * strings that can echo submitted data
+													  * (e.g. a recipient email), so they are
+													  * rendered as a React text child and never
+													  * parsed as HTML. The previous
+													  * `parse( domPurify.sanitize( message ) )`
+													  * path was the same stored-XSS sink as the
+													  * entry-value view (CVE-2026-18406).
+													  */ }
+													{ message }
 												</Text>
 											)
 										) }
