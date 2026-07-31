@@ -3,7 +3,10 @@ import { sprintf, _n, __ } from '@wordpress/i18n';
 import { applyFilters } from '@wordpress/hooks';
 import EntryEdit from './EntryEdit';
 import { decodeHTMLEntities } from '../utils/entryHelpers';
-import { sanitizeEntryValue } from '../utils/sanitizeEntryValue';
+import {
+	isRichTextField,
+	sanitizeEntryValue,
+} from '../utils/sanitizeEntryValue';
 
 /**
  * Render field value - handles both regular and repeater fields
@@ -12,13 +15,30 @@ import { sanitizeEntryValue } from '../utils/sanitizeEntryValue';
  * @return {string} Rendered value
  */
 const formatField = ( field ) => {
+	// Implementations of this filter must return a VALUE (string, array or a
+	// React element) — never a markup string intended to be parsed as HTML.
+	// The only HTML sink on this screen is RenderField's rich-text branch, which
+	// runs its input through sanitizeEntryValue() first.
 	const renderProFields = applyFilters(
 		'srfm-pro.entry-details.render-pro-fields'
 	);
 
 	// Handle repeater fields and other PRO fields
 	if ( typeof renderProFields === 'function' ) {
-		return renderProFields( field );
+		const formatted = renderProFields( field );
+
+		// Pro's formatter returns a bare `{ label, value }` and drops
+		// `block_name`. RenderField needs it to tell a rich-text textarea from a
+		// plain answer, so graft it back on — without this, every Pro site falls
+		// through to the escaping text branch and renders rich text as literal
+		// tags. `formatted` wins on conflict; arrays (repeaters) and null pass
+		// through untouched.
+		return formatted &&
+			typeof formatted === 'object' &&
+			! Array.isArray( formatted ) &&
+			! isValidElement( formatted )
+			? { block_name: field?.block_name, ...formatted }
+			: formatted;
 	}
 	const { value, label } = field;
 
@@ -88,37 +108,29 @@ export const RenderField = ( props ) => {
 					) }
 					{ ! Array.isArray( field.value ) && (
 						<div className="flex-1">
-							{ typeof field?.value === 'string' &&
-							field.value.match( /<[^>]+>/g ) ? (
-								/*
-								 * Rich-text fields (textarea with the Rich Text editor)
-								 * legitimately store HTML, so their formatting must render.
-								 * Insert DOMPurify's output DIRECTLY via dangerouslySetInnerHTML
-								 * — its supported, mXSS-safe contract.
-								 *
-								 * CVE-2026-18406 fix: do NOT feed DOMPurify's output to
-								 * html-react-parser. That second parser was the sink — it
-								 * re-parsed sanitizer-approved text and its <style>/<script>
-								 * branch routed it back into dangerouslySetInnerHTML,
-								 * resurrecting an entity-encoded <foreignObject><img onerror>
-								 * that DOMPurify had legitimately treated as inert text.
-								 * DOMPurify-straight-to-DOM keeps that text inert.
-								 */
-									<span
-										className="text-sm font-medium text-text-secondary [overflow-wrap:anywhere] whitespace-pre-wrap"
-										// eslint-disable-next-line react/no-danger -- value is DOMPurify-sanitized and inserted directly (no second HTML parse); see CVE-2026-18406.
-										dangerouslySetInnerHTML={ {
-											__html: sanitizeEntryValue(
-												field.value
-											),
-										} }
-									/>
-								) : (
+							{ isRichTextField( field ) ? (
+							/*
+							 * Rich text must render formatted, so DOMPurify's output is
+							 * inserted DIRECTLY — its supported, mXSS-safe contract.
+							 * Never route it through a second HTML parser; that was the
+							 * CVE-2026-18406 sink. See sanitizeEntryValue().
+							 */
+								<span
+									className="text-sm font-medium text-text-secondary [overflow-wrap:anywhere] whitespace-pre-wrap"
+									// eslint-disable-next-line react/no-danger -- value is DOMPurify-sanitized and inserted directly (no second HTML parse); see CVE-2026-18406.
+									dangerouslySetInnerHTML={ {
+										__html:
+												sanitizeEntryValue(
+													field.value
+												) || '-',
+									} }
+								/>
+							) : (
 								// Plain fields are text: render as a React text child, which escapes on output.
-									<span className="text-sm font-medium text-text-secondary [overflow-wrap:anywhere] whitespace-pre-wrap">
-										{ field?.value ?? '-' }
-									</span>
-								) }
+								<span className="text-sm font-medium text-text-secondary [overflow-wrap:anywhere] whitespace-pre-wrap">
+									{ field?.value ?? '-' }
+								</span>
+							) }
 						</div>
 					) }
 				</div>

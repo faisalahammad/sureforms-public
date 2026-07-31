@@ -5,6 +5,36 @@ import { __ } from '@wordpress/i18n';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { useEntryLogs } from '../hooks/useEntriesQuery';
 import { decodeHTMLEntities } from '../utils/entryHelpers';
+import { sanitizeEntryValue } from '../utils/sanitizeEntryValue';
+
+/**
+ * Prepare a log message for rendering.
+ *
+ * Log messages are NOT plain text. Most are status strings, but the Pro
+ * change-log writers deliberately embed markup: `inc/extensions/hooks.php`
+ * emits `<strong>Label: </strong> "" &#8594; new` when a field is added and
+ * `<strong>Label: </strong> <del>old</del> &#8594; new` when one is modified.
+ * Rendering those as a React text child would show the raw tags to the user.
+ *
+ * Messages are otherwise stored esc_html()-escaped (see inc/form-submit.php),
+ * so they are decoded first — without that, a recipient like O'Brien shows as
+ * O&#039;Brien. decodeHTMLEntities() writes to a DETACHED <textarea>, whose
+ * content model is escapable-raw-text: no elements are constructed and nothing
+ * executes, so it is not itself a sink.
+ *
+ * The decoded string then goes through the SAME strict policy as entry values
+ * and is inserted directly. Never route the result through a second HTML
+ * parser — that composition was the CVE-2026-18406 sink.
+ *
+ * @param {*} message Raw log message from the API.
+ * @return {string} Sanitized HTML, safe for direct DOM insertion only.
+ */
+const formatLogMessage = ( message ) =>
+	sanitizeEntryValue(
+		typeof message === 'string'
+			? decodeHTMLEntities( message )
+			: JSON.stringify( message ) ?? ''
+	);
 
 /**
  * EntryLogsSection Component
@@ -120,31 +150,15 @@ const EntryLogsSection = ( { entryId, onConfirmation } ) => {
 													color="primary"
 													className="[overflow-wrap:anywhere]"
 												>
-													{ /*
-													  * Log messages are plain-text status strings
-													  * that can echo submitted data (e.g. a
-													  * recipient email), so they render as a React
-													  * text child, which escapes on output. The old
-													  * `parse( domPurify.sanitize( message ) )` path
-													  * was the same stored-XSS sink as the
-													  * entry-value view (CVE-2026-18406).
-													  *
-													  * Messages are stored esc_html()-escaped (see
-													  * inc/form-submit.php), and the removed parse()
-													  * was incidentally decoding them — so decode
-													  * here, or a recipient like O'Brien would show
-													  * as O&#039;Brien. decodeHTMLEntities() writes
-													  * to a DETACHED <textarea>, whose content model
-													  * is escapable-raw-text: no elements are
-													  * constructed and nothing executes. React still
-													  * escapes the result on output, so this is a
-													  * display fix, not a hole.
-													  */ }
-													{ typeof message === 'string'
-														? decodeHTMLEntities(
-															message
-														  )
-														: String( message ) }
+													{ /* See formatLogMessage(): Pro change-logs embed <strong>/<del>, so this is sanitized markup inserted directly — never re-parsed. */ }
+													<span
+														// eslint-disable-next-line react/no-danger -- value is DOMPurify-sanitized and inserted directly (no second HTML parse); see CVE-2026-18406.
+														dangerouslySetInnerHTML={ {
+															__html: formatLogMessage(
+																message
+															),
+														} }
+													/>
 												</Text>
 											)
 										) }
