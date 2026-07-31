@@ -154,7 +154,9 @@ class List_Entries extends Abstract_Ability {
 		$args = [
 			'form_id'   => Helper::get_integer_value( $input['form_id'] ?? 0 ),
 			'status'    => ! empty( $input['status'] ) ? sanitize_text_field( Helper::get_string_value( $input['status'] ) ) : 'all',
-			'search'    => ! empty( $input['search'] ) ? sanitize_text_field( Helper::get_string_value( $input['search'] ) ) : '',
+			// isset(), not ! empty(): a literal "0" search is a valid term and must not be
+			// dropped (which would return every entry). Mirrors the REST path.
+			'search'    => isset( $input['search'] ) ? sanitize_text_field( Helper::get_string_value( $input['search'] ) ) : '',
 			'date_from' => ! empty( $input['date_from'] ) ? sanitize_text_field( Helper::get_string_value( $input['date_from'] ) ) : '',
 			'date_to'   => ! empty( $input['date_to'] ) ? sanitize_text_field( Helper::get_string_value( $input['date_to'] ) ) : '',
 			'per_page'  => $per_page,

@@ -104,7 +104,12 @@ class Entries {
 				$total = absint( $cached_total );
 			} else {
 				$total = EntriesTable::get_instance()->get_total_count( $where_conditions );
-				set_transient( $count_cache_key, $total, 30 );
+				// Honor the skip-on-encode-failure decision above: only cache when we have
+				// an unambiguous key. Otherwise set_transient( '', … ) would write a single
+				// global transient shared across all searches.
+				if ( '' !== $count_cache_key ) {
+					set_transient( $count_cache_key, $total, 30 );
+				}
 			}
 		} else {
 			$total = EntriesTable::get_instance()->get_total_count( $where_conditions );

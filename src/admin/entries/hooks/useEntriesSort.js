@@ -21,7 +21,10 @@ const COLUMN_TO_API_FIELD = {
 	dateTime: 'created_at',
 };
 
-const ALLOWED_SORT_BY = Object.keys( COLUMN_TO_API_FIELD );
+// The URL stores the resolved API field (handleSort does setSortBy( apiField )), so the
+// allowlist must be the API field VALUES ( 'id', 'status', 'created_at' ) — keys would
+// drop ?sortBy=created_at on reload and lose Date/Time sorting.
+const ALLOWED_SORT_BY = Object.values( COLUMN_TO_API_FIELD );
 
 export const useEntriesSort = ( initialSortBy = '', initialOrder = '' ) => {
 	const [ searchParams, setSearchParams ] = useSearchParams();
