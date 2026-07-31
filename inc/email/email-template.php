@@ -232,7 +232,7 @@ class Email_Template {
 
 					$label       = explode( '-lbl-', $field_name )[1];
 					$label       = explode( '-', $label )[0];
-					$field_label = $label ? Helper::decrypt( $label ) : '';
+					$field_label = $label ? Helper::decode( $label ) : '';
 
 					$field_block_name = Helper::get_block_name_from_field( $field_name );
 

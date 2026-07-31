@@ -815,7 +815,7 @@ class Rest_Api {
 
 				$label_parts      = explode( '-lbl-', $field_name );
 				$label            = isset( $label_parts[1] ) ? explode( '-', $label_parts[1] )[0] : '';
-				$label            = $label ? Helper::decrypt( $label ) : '';
+				$label            = $label ? Helper::decode( $label ) : '';
 				$field_block_name = Helper::get_block_name_from_field( $field_name );
 
 				/**
@@ -1239,7 +1239,7 @@ class Rest_Api {
 					$base_field_name = '';
 
 					if ( ! empty( $label ) && ! empty( $slug ) && ! empty( $block_id ) ) {
-						$input_label     = '-lbl-' . Helper::encrypt( $label );
+						$input_label     = '-lbl-' . Helper::encode( $label );
 						$base_field_name = $input_label . '-' . $slug;
 
 						// Handle special case for dropdown with instance counter.

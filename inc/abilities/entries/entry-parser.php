@@ -53,7 +53,7 @@ trait Entry_Parser {
 
 				$label_parts      = explode( '-lbl-', $field_name );
 				$label            = isset( $label_parts[1] ) ? explode( '-', $label_parts[1] )[0] : '';
-				$label            = $label ? Helper::decrypt( $label ) : '';
+				$label            = $label ? Helper::decode( $label ) : '';
 				$field_block_name = Helper::get_block_name_from_field( $field_name );
 
 				$form_data[] = [
