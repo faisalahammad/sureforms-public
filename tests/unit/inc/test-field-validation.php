@@ -479,4 +479,76 @@ class Test_Field_Validation extends TestCase {
 			'A srfm_email_field_char_limits override should be reflected in the resolved limits.'
 		);
 	}
+
+	/**
+	 * get_known_field_block_ids() returns the block ids present in the form's markup,
+	 * including fields nested inside a repeater/container (innerBlocks).
+	 */
+	public function test_get_known_field_block_ids_includes_nested_fields() {
+		$content  = '<!-- wp:srfm/input {"block_id":"aaaa1111"} /-->';
+		$content .= '<!-- wp:srfm/repeater {"block_id":"bbbb2222"} -->';
+		$content .= '<!-- wp:srfm/input {"block_id":"cccc3333"} /-->';
+		$content .= '<!-- /wp:srfm/repeater -->';
+
+		$form_id = wp_insert_post(
+			[
+				'post_type'    => 'sureforms_form',
+				'post_status'  => 'publish',
+				'post_title'   => 'Known Fields Form',
+				'post_content' => $content,
+			]
+		);
+
+		$ids = Field_Validation::get_known_field_block_ids( $form_id );
+
+		$this->assertArrayHasKey( 'aaaa1111', $ids, 'top-level field id present' );
+		$this->assertArrayHasKey( 'bbbb2222', $ids, 'repeater id present' );
+		$this->assertArrayHasKey( 'cccc3333', $ids, 'nested field id present (innerBlocks walked)' );
+		$this->assertArrayNotHasKey( 'deadbeef', $ids, 'an id the form does not define is absent' );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * Invalid form ids return an empty set (callers fail open).
+	 */
+	public function test_get_known_field_block_ids_empty_for_invalid_form() {
+		$this->assertSame( [], Field_Validation::get_known_field_block_ids( 0 ) );
+		$this->assertSame( [], Field_Validation::get_known_field_block_ids( -5 ) );
+		$this->assertSame( [], Field_Validation::get_known_field_block_ids( 'x' ) );
+	}
+
+	/**
+	 * REGRESSION (#2993): validate_form_data() rejects a submitted key whose block id
+	 * is not part of the form — an anonymous submitter can otherwise invent fields on
+	 * any published form. Known fields still pass; the check fails open when the form's
+	 * block set cannot be derived.
+	 */
+	public function test_validate_form_data_rejects_unknown_field_keys() {
+		$form_id = wp_insert_post(
+			[
+				'post_type'    => 'sureforms_form',
+				'post_status'  => 'publish',
+				'post_title'   => 'Reject Unknown Form',
+				'post_content' => '<!-- wp:srfm/input {"block_id":"realfield"} /-->',
+			]
+		);
+
+		// A key the form does NOT define must be rejected.
+		$errors = Field_Validation::validate_form_data(
+			[ 'srfm-input-deadbeef-lbl-R2hvc3Q-ghost' => 'injected' ],
+			$form_id
+		);
+		$this->assertArrayHasKey( 'srfm-input-deadbeef-lbl-R2hvc3Q-ghost', $errors, 'invented field is rejected' );
+
+		// A key that IS in the form is not rejected as unknown (it may still be validated
+		// for other rules, but must not carry the "unexpected field" rejection here).
+		$errors2 = Field_Validation::validate_form_data(
+			[ 'srfm-input-realfield-lbl-UmVhbA-real' => 'ok' ],
+			$form_id
+		);
+		$this->assertArrayNotHasKey( 'srfm-input-realfield-lbl-UmVhbA-real', $errors2, 'known field is accepted' );
+
+		wp_delete_post( $form_id, true );
+	}
 }

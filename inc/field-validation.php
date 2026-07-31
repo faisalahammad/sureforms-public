@@ -197,6 +197,64 @@ class Field_Validation {
 	}
 
 	/**
+	 * Build the set of block ids that legitimately belong to a form.
+	 *
+	 * Walks the form's block markup and collects the `block_id` of every SureForms
+	 * (`srfm/*`) block, recursing into `innerBlocks` (so repeater/container children are
+	 * included) and expanding `core/block` reusable/synced pattern references into their
+	 * `wp_block` post (so pattern-embedded fields are included too). A cycle guard on the
+	 * reference ids prevents infinite recursion.
+	 *
+	 * Used by {@see self::validate_form_data()} to reject submitted keys whose block id
+	 * is not part of the form. Note: this is deliberately NOT `prepared_validation_data()`
+	 * — that map only holds blocks with extra validation config (dropdowns, payments,
+	 * textarea min-length) and omits plain inputs, so it is not a field allowlist.
+	 *
+	 * @param int|mixed $form_id The form post id.
+	 * @since 2.12.3
+	 * @return array<string,true> Map of known block id => true. Empty when the form's
+	 *                            blocks could not be derived (callers should fail open).
+	 */
+	public static function get_known_field_block_ids( $form_id ) {
+		static $cache = [];
+
+		$form_id = Helper::get_integer_value( $form_id );
+		if ( $form_id <= 0 ) {
+			return [];
+		}
+
+		if ( isset( $cache[ $form_id ] ) ) {
+			return $cache[ $form_id ];
+		}
+
+		$ids  = [];
+		$post = get_post( $form_id );
+
+		if ( $post instanceof \WP_Post && ! empty( $post->post_content ) && function_exists( 'parse_blocks' ) ) {
+			$visited = [];
+			self::collect_field_block_ids( parse_blocks( $post->post_content ), $ids, $visited );
+		}
+
+		/**
+		 * Filter the set of block ids considered valid for a form during submission.
+		 *
+		 * Extensions that inject legitimate fields not present in the form's own block
+		 * markup (for example dynamically generated keys) can add their block ids here so
+		 * those submissions are not rejected as unknown. Returning an empty set disables
+		 * the unknown-field rejection for that form (fail open).
+		 *
+		 * @since 2.12.3
+		 * @param array<string,true> $ids     Map of known block id => true.
+		 * @param int                $form_id The form post id.
+		 */
+		$ids = apply_filters( 'srfm_known_field_block_ids', $ids, $form_id );
+
+		$cache[ $form_id ] = is_array( $ids ) ? $ids : [];
+
+		return $cache[ $form_id ];
+	}
+
+	/**
 	 * Validate form data for a given form.
 	 *
 	 * This function checks each field in the submitted form data (including uploaded files)
@@ -220,6 +278,12 @@ class Field_Validation {
 		// Retrieve the processed form configuration for validation.
 		$get_form_config = self::prepared_validation_data( Helper::get_integer_value( $current_form_id ) );
 
+		// The set of block ids that actually belong to this form. Submitted keys whose
+		// block id is NOT in this set are fields the form does not define — an
+		// anonymous submitter can otherwise invent arbitrary "-lbl-" keys that are then
+		// stored and rendered. See the "unknown field key" reject below.
+		$known_block_ids = self::get_known_field_block_ids( Helper::get_integer_value( $current_form_id ) );
+
 		$form_data = apply_filters( 'srfm_field_validation_data', $form_data );
 
 		// Iterate over each field in the form data.
@@ -241,6 +305,29 @@ class Field_Validation {
 			if ( is_string( $key ) && preg_match( '/-([a-zA-Z0-9]+)$/', $get_name_with_id[0], $matches ) ) {
 				$extracted_id = $matches[1];
 				// Now $extracted_id contains "c867d9d9" for "srfm-email-c867d9d9".
+			}
+
+			// Reject fields the form does not define.
+			//
+			// The '-lbl-' check above proves only that the key LOOKS like a SureForms
+			// field, not that this form actually has it. Without this guard an
+			// unauthenticated submitter can add arbitrary "srfm-<type>-<id>-lbl-..."
+			// keys to any published form and have them accepted, stored and later
+			// rendered in the admin, in emails and in exports.
+			//
+			// Fail-open is deliberate: $known_block_ids is empty only when the form's
+			// blocks could not be derived (no/empty post_content, a parse failure, or a
+			// structure this walk does not recognise). Enforcing on an empty set would
+			// reject every field, so we skip the check and fall back to the existing
+			// per-field validation rather than risk breaking a legitimate form.
+			//
+			// Read/export paths are intentionally untouched: this runs on SUBMISSION
+			// only, so historical entries whose keys no longer match a rebuilt form
+			// (see #2665) remain fully readable — the current form simply cannot submit
+			// those stale keys any more.
+			if ( ! empty( $known_block_ids ) && ( '' === $extracted_id || ! isset( $known_block_ids[ $extracted_id ] ) ) ) {
+				$not_valid_fields[ $key ] = __( 'Unexpected field.', 'sureforms' );
+				continue;
 			}
 
 			// $get_slug will be the slug after the first hyphen in the second part.
@@ -363,6 +450,51 @@ class Field_Validation {
 			'local'  => isset( $email_limits['local'] ) ? absint( $email_limits['local'] ) : 64,
 			'domain' => isset( $email_limits['domain'] ) ? absint( $email_limits['domain'] ) : 255,
 		];
+	}
+
+	/**
+	 * Recursively collect SureForms block ids from a parsed block tree.
+	 *
+	 * @param array<mixed>       $blocks  Parsed blocks from parse_blocks().
+	 * @param array<string,true> $ids     Accumulator of block id => true (by reference).
+	 * @param array<int,true>    $visited Expanded reusable-block post ids, guards cycles.
+	 * @since 2.12.3
+	 * @return void
+	 */
+	private static function collect_field_block_ids( $blocks, &$ids, &$visited ) {
+		if ( ! is_array( $blocks ) ) {
+			return;
+		}
+
+		foreach ( $blocks as $block ) {
+			if ( ! is_array( $block ) ) {
+				continue;
+			}
+
+			$attrs      = isset( $block['attrs'] ) && is_array( $block['attrs'] ) ? $block['attrs'] : [];
+			$block_name = isset( $block['blockName'] ) && is_string( $block['blockName'] ) ? $block['blockName'] : '';
+
+			if ( 0 === strpos( $block_name, 'srfm/' ) && ! empty( $attrs['block_id'] ) && is_string( $attrs['block_id'] ) ) {
+				$ids[ sanitize_text_field( $attrs['block_id'] ) ] = true;
+			}
+
+			// Expand reusable/synced patterns so fields living inside a pattern count as
+			// part of the form.
+			if ( 'core/block' === $block_name && ! empty( $attrs['ref'] ) && is_scalar( $attrs['ref'] ) ) {
+				$ref = absint( $attrs['ref'] );
+				if ( $ref > 0 && ! isset( $visited[ $ref ] ) ) {
+					$visited[ $ref ] = true;
+					$ref_post        = get_post( $ref );
+					if ( $ref_post instanceof \WP_Post && 'wp_block' === $ref_post->post_type && '' !== $ref_post->post_content ) {
+						self::collect_field_block_ids( parse_blocks( $ref_post->post_content ), $ids, $visited );
+					}
+				}
+			}
+
+			if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
+				self::collect_field_block_ids( $block['innerBlocks'], $ids, $visited );
+			}
+		}
 	}
 
 	/**
