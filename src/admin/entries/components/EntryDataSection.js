@@ -3,7 +3,7 @@ import { sprintf, _n, __ } from '@wordpress/i18n';
 import { applyFilters } from '@wordpress/hooks';
 import EntryEdit from './EntryEdit';
 import { decodeHTMLEntities } from '../utils/entryHelpers';
-import domPurify from 'dompurify';
+import { sanitizeEntryValue } from '../utils/sanitizeEntryValue';
 
 /**
  * Render field value - handles both regular and repeater fields
@@ -108,7 +108,7 @@ export const RenderField = ( props ) => {
 										className="text-sm font-medium text-text-secondary [overflow-wrap:anywhere] whitespace-pre-wrap"
 										// eslint-disable-next-line react/no-danger -- value is DOMPurify-sanitized and inserted directly (no second HTML parse); see CVE-2026-18406.
 										dangerouslySetInnerHTML={ {
-											__html: domPurify.sanitize(
+											__html: sanitizeEntryValue(
 												field.value
 											),
 										} }

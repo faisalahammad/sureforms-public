@@ -125,6 +125,14 @@ sureforms/
 - Use `__()` from `@wordpress/i18n` — never hardcode user-facing strings
 - Use TailwindCSS utility classes; use `@bsf/force-ui` for admin UI
 - NEVER use `dangerouslySetInnerHTML` — use `RawHTML` from `@wordpress/element`
+  - **Deliberate exception:** `src/admin/entries/components/EntryDataSection.js`
+    inserts DOMPurify output directly. Do NOT "fix" this to `RawHTML` or route it
+    through `html-react-parser` — feeding sanitizer output to a SECOND HTML parser
+    is what caused the stored-XSS CVE-2026-18406 (the re-parse decoded entities
+    DOMPurify had deliberately left inert). Sanitizer-straight-to-DOM is
+    DOMPurify's documented, mXSS-safe contract; `RawHTML` is itself a
+    `dangerouslySetInnerHTML` wrapper that adds no safety and renders a `<div>`.
+    Any post-sanitize transform of that string reopens the vulnerability.
 
 ### General
 - NEVER create files unless absolutely necessary — prefer editing existing files

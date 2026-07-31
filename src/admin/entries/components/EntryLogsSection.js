@@ -4,6 +4,7 @@ import { Button, Text } from '@bsf/force-ui';
 import { __ } from '@wordpress/i18n';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { useEntryLogs } from '../hooks/useEntriesQuery';
+import { decodeHTMLEntities } from '../utils/entryHelpers';
 
 /**
  * EntryLogsSection Component
@@ -127,8 +128,23 @@ const EntryLogsSection = ( { entryId, onConfirmation } ) => {
 													  * `parse( domPurify.sanitize( message ) )` path
 													  * was the same stored-XSS sink as the
 													  * entry-value view (CVE-2026-18406).
+													  *
+													  * Messages are stored esc_html()-escaped (see
+													  * inc/form-submit.php), and the removed parse()
+													  * was incidentally decoding them — so decode
+													  * here, or a recipient like O'Brien would show
+													  * as O&#039;Brien. decodeHTMLEntities() writes
+													  * to a DETACHED <textarea>, whose content model
+													  * is escapable-raw-text: no elements are
+													  * constructed and nothing executes. React still
+													  * escapes the result on output, so this is a
+													  * display fix, not a hole.
 													  */ }
-													{ message }
+													{ typeof message === 'string'
+														? decodeHTMLEntities(
+															message
+														  )
+														: String( message ) }
 												</Text>
 											)
 										) }
