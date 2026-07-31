@@ -57,10 +57,48 @@ describe( 'entry value sanitization (CVE-2026-18406)', () => {
 		expect( out ).not.toMatch( /<input/i );
 	} );
 
-	it( 'strips style attributes used for overlay/UI-redress', () => {
+	it( 'strips overlay CSS but keeps the formatting the editor emits', () => {
+		// `style` cannot simply be forbidden: the rich-text editor registers
+		// Quill's STYLE attributors for alignment/direction and its colour formats
+		// are style-based, and Helper::sanitize_textarea() preserves them —
+		// disable_style_attr_parsing() returns an empty allowlist, which makes
+		// WordPress's safecss_filter_attr() skip filtering (kses.php: `if ( empty(
+		// $allowed_attr ) ) { return $css; }`). Forbidding it outright would
+		// de-colour and un-align every rich-text entry already stored.
+		expect( sanitize( '<span style="color: rgb(230, 0, 0);">r</span>' ) ).toMatch(
+			/color:\s*rgb\(230, 0, 0\)/
+		);
+		expect( sanitize( '<p style="text-align: center;">m</p>' ) ).toMatch(
+			/text-align:\s*center/
+		);
+		expect( sanitize( '<p style="direction: rtl;">r</p>' ) ).toMatch(
+			/direction:\s*rtl/
+		);
+
+		// ...but the properties needed for a full-viewport overlay are dropped.
 		expect(
 			sanitize( '<p style="position:fixed;inset:0;z-index:9999">x</p>' )
 		).not.toMatch( /style=/i );
+
+		// ...including when mixed in with a legitimate declaration.
+		const mixed = sanitize( '<p style="color:red;position:fixed;top:0">x</p>' );
+		expect( mixed ).toMatch( /color:\s*red/ );
+		expect( mixed ).not.toMatch( /position/i );
+
+		// ...and a URL-fetching value on an allowed property is refused outright.
+		expect(
+			sanitize( '<p style="background-color:url(https://evil.example/)">x</p>' )
+		).not.toMatch( /url\(/i );
+	} );
+
+	it( 'strips class and data attributes used to smuggle in bundled utilities', () => {
+		// This is a Tailwind admin app whose content glob covers all of src/, so
+		// every utility used anywhere is compiled into this bundle. Allowing
+		// `class` would reproduce the exact overlay the CSS filtering prevents.
+		expect(
+			sanitize( '<div class="fixed inset-0 z-[99999999]">x</div>' )
+		).not.toMatch( /class=/i );
+		expect( sanitize( '<p data-x="y">x</p>' ) ).not.toMatch( /data-x/i );
 	} );
 
 	it( 'strips javascript: URLs', () => {
