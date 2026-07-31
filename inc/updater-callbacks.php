@@ -117,9 +117,12 @@ class Updater_Callbacks {
 	 * @return void
 	 */
 	public static function clear_elementor_page_assets_cache() {
-		if ( ! class_exists( '\Elementor\Plugin' ) ) {
-			return;
-		}
+		// Deliberately NOT gated on class_exists( '\Elementor\Plugin' ). Updater::init()
+		// writes the version marker unconditionally, so this callback runs exactly once —
+		// and if Elementor happens not to be loaded in that particular request, the cache
+		// would never be cleared and every pre-existing Elementor page would keep
+		// footer-loading the CSS forever. delete_post_meta_by_key() is a harmless no-op on
+		// sites that never used Elementor, so the guard bought nothing.
 		delete_post_meta_by_key( '_elementor_page_assets' );
 	}
 }

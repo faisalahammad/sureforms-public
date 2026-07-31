@@ -426,7 +426,7 @@ Visit the [SureForms features page](https://sureforms.com/features/?utm_source=w
 You can report security issues through our [Bug Bounty Program](https://brainstormforce.com/bug-bounty-program/). We collaborate with Patchstack to validate, triage, and handle security reports.
 
 == Changelog ==
-= 2.12.3 - 30th July 2026 =
+= 2.12.3 - 3rd August 2026 =
 * New: Added an "Entries" shortcut in the Instant Form admin bar to open a form's entries in one click.
 * Improvement: Enhanced WPML compatibility. [https://wpml.org/plugin/sureforms/](https://wpml.org/plugin/sureforms/)
 * Fix: Enhanced entries search - includes submitted data too.
@@ -434,6 +434,8 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 * Fix: The number field no longer looks misaligned when "Use label as placeholder" is on.
 * Fix: Cloudflare Turnstile no longer shows a warning on WordPress 7.0.
 * Fix: Payment History styles load only on required pages.
+* Fix: Forms with default styles disabled no longer break the page — previously this aborted setup of every later form on the same page.
+* Fix: Removed the entries "Language" column. Sorting or filtering entries by language is no longer available, including via the entries API.
 = 2.12.2 - 20th July 2026 =
 * New: Added a Payment History widget for Elementor and Bricks.
 * Fix: Custom CSS now applies correctly on the single form view.

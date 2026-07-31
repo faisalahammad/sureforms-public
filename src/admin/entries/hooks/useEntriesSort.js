@@ -8,25 +8,39 @@ import { useSearchParams } from 'react-router-dom';
  * @param {string} initialOrder  - Initial sort order (default: '')
  * @return {Object} Sort state and handlers
  */
+/**
+ * Map frontend column keys to backend API field names.
+ *
+ * Module scope: this is static, and keeping it inside the hook re-created it every
+ * render while being closed over by handleSort/getSortDirection without appearing in
+ * their dependency arrays.
+ */
+const COLUMN_TO_API_FIELD = {
+	id: 'id',
+	status: 'status',
+	dateTime: 'created_at',
+};
+
+// The URL stores the resolved API field (handleSort does setSortBy( apiField )), so the
+// allowlist must be the API field VALUES ( 'id', 'status', 'created_at' ) — keys would
+// drop ?sortBy=created_at on reload and lose Date/Time sorting.
+const ALLOWED_SORT_BY = Object.values( COLUMN_TO_API_FIELD );
+
 export const useEntriesSort = ( initialSortBy = '', initialOrder = '' ) => {
 	const [ searchParams, setSearchParams ] = useSearchParams();
 
-	// Initialize state from URL params
-	const [ sortBy, setSortBy ] = useState(
-		searchParams.get( 'sortBy' ) || initialSortBy
-	);
+	// Initialize state from URL params.
+	// Allowlist the value: users who sorted by Language in 2.11-2.12.2 still have
+	// ?sortBy=language in their history, and that column no longer exists in either
+	// COLUMN_TO_API_FIELD or the REST orderby enum — so passing it through failed REST
+	// validation and errored the whole list with no header left to click to recover.
+	const [ sortBy, setSortBy ] = useState( () => {
+		const fromUrl = searchParams.get( 'sortBy' ) || initialSortBy;
+		return ALLOWED_SORT_BY.includes( fromUrl ) ? fromUrl : initialSortBy;
+	} );
 	const [ order, setOrder ] = useState(
 		searchParams.get( 'order' ) || initialOrder
 	);
-
-	/**
-	 * Map frontend column keys to backend API field names
-	 */
-	const columnToApiFieldMap = {
-		id: 'id',
-		status: 'status',
-		dateTime: 'created_at',
-	};
 
 	// Update URL params when sort changes
 	useEffect( () => {
@@ -55,7 +69,7 @@ export const useEntriesSort = ( initialSortBy = '', initialOrder = '' ) => {
 	 */
 	const handleSort = useCallback(
 		( columnKey ) => {
-			const apiField = columnToApiFieldMap[ columnKey ];
+			const apiField = COLUMN_TO_API_FIELD[ columnKey ];
 
 			if ( ! apiField ) {
 				return;
@@ -83,7 +97,7 @@ export const useEntriesSort = ( initialSortBy = '', initialOrder = '' ) => {
 	 */
 	const getSortDirection = useCallback(
 		( columnKey ) => {
-			const apiField = columnToApiFieldMap[ columnKey ];
+			const apiField = COLUMN_TO_API_FIELD[ columnKey ];
 			if ( sortBy === apiField ) {
 				return order.toLowerCase();
 			}

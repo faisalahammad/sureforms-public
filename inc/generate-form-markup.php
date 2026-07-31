@@ -81,12 +81,23 @@ class Generate_Form_Markup {
 			return;
 		}
 
+		// The only consumer is the admin-bar node, which bails for anyone without
+		// manage_options. Without this guard every anonymous front-end request ran
+		// parse_blocks() plus recursive get_post() expansion of synced patterns for a
+		// feature it could never see. The current user is already resolved at `wp`.
+		if ( ! is_admin_bar_showing() || ! Helper::current_user_can() ) {
+			return;
+		}
+
 		$post_id = absint( get_queried_object_id() );
 		if ( 0 === $post_id ) {
 			return;
 		}
 
-		$content = Helper::get_string_value( get_post_field( 'post_content', $post_id ) );
+		// 'raw' context: the default 'display' context applies the post_content filter,
+		// so the parsed list could disagree with Form_Styling::should_skip_frontend_styles(),
+		// which reads raw.
+		$content = Helper::get_string_value( get_post_field( 'post_content', $post_id, 'raw' ) );
 		foreach ( Form_Styling::get_form_ids_from_content( $content ) as $form_id ) {
 			$fid = absint( $form_id );
 			if ( $fid > 0 ) {
@@ -109,9 +120,18 @@ class Generate_Form_Markup {
 	 * Add an "Entries" node to the frontend admin bar on any page that contains a
 	 * SureForms form, deep-linking to the Entries admin page pre-filtered to that
 	 * form. The form list comes from collect_queried_form_ids() (seeded at `wp`)
-	 * plus the render-time registry — covering the block, [sureforms] shortcode,
-	 * Elementor, Bricks and FSE paths — and a `srfm_admin_bar_entries_form_ids`
-	 * filter lets other sources contribute. With multiple forms the node becomes a
+	 * plus the render-time registry.
+	 *
+	 * ACTUAL COVERAGE: srfm/form blocks, synced/reusable patterns (core/block) and
+	 * [sureforms] shortcodes in the queried post's content, plus a singular form CPT
+	 * page. Page builders that store layout outside post_content (Elementor in
+	 * _elementor_data, Bricks in _bricks_page_content_*) and FSE template parts are
+	 * NOT covered: the render-time registry is written during the_content, which on
+	 * block themes runs after wp_admin_bar_render() at wp_body_open, so the node is
+	 * already built. On classic themes those paths happen to work via core's wp_footer
+	 * fallback, which makes the feature silently theme-dependent. Use the
+	 * `srfm_admin_bar_entries_form_ids` filter to contribute builder-sourced IDs until
+	 * early builder detection lands. With multiple forms the node becomes a
 	 * submenu (one child per form); the parent then links to the unfiltered page.
 	 *
 	 * Runs on admin_bar_menu, which fires as the bar renders (wp_body_open on modern
