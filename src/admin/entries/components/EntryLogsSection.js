@@ -120,13 +120,12 @@ const EntryLogsSection = ( { entryId, onConfirmation } ) => {
 													className="[overflow-wrap:anywhere]"
 												>
 													{ /*
-													  * Log messages are plain-text status
-													  * strings that can echo submitted data
-													  * (e.g. a recipient email), so they are
-													  * rendered as a React text child and never
-													  * parsed as HTML. The previous
-													  * `parse( domPurify.sanitize( message ) )`
-													  * path was the same stored-XSS sink as the
+													  * Log messages are plain-text status strings
+													  * that can echo submitted data (e.g. a
+													  * recipient email), so they render as a React
+													  * text child, which escapes on output. The old
+													  * `parse( domPurify.sanitize( message ) )` path
+													  * was the same stored-XSS sink as the
 													  * entry-value view (CVE-2026-18406).
 													  */ }
 													{ message }

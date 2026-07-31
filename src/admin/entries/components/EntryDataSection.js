@@ -3,6 +3,7 @@ import { sprintf, _n, __ } from '@wordpress/i18n';
 import { applyFilters } from '@wordpress/hooks';
 import EntryEdit from './EntryEdit';
 import { decodeHTMLEntities } from '../utils/entryHelpers';
+import domPurify from 'dompurify';
 
 /**
  * Render field value - handles both regular and repeater fields
@@ -87,21 +88,37 @@ export const RenderField = ( props ) => {
 					) }
 					{ ! Array.isArray( field.value ) && (
 						<div className="flex-1">
-							{ /*
-							  * Submitted field values are TEXT and are rendered as a React
-							  * text child, which escapes on output. They are never parsed as
-							  * HTML. The previous `parse( domPurify.sanitize( value ) )` path
-							  * was a stored-XSS sink (CVE-2026-18406): feeding DOMPurify's
-							  * output to html-react-parser re-parsed sanitizer-approved text
-							  * as markup, and its <style>/<script> branch routed it into
-							  * dangerouslySetInnerHTML — resurrecting an entity-encoded
-							  * <foreignObject><img onerror> that DOMPurify had legitimately
-							  * treated as inert text. Rendering as text removes the sink
-							  * entirely; a form answer is never HTML.
-							  */ }
-							<span className="text-sm font-medium text-text-secondary [overflow-wrap:anywhere] whitespace-pre-wrap">
-								{ field?.value ?? '-' }
-							</span>
+							{ typeof field?.value === 'string' &&
+							field.value.match( /<[^>]+>/g ) ? (
+								/*
+								 * Rich-text fields (textarea with the Rich Text editor)
+								 * legitimately store HTML, so their formatting must render.
+								 * Insert DOMPurify's output DIRECTLY via dangerouslySetInnerHTML
+								 * — its supported, mXSS-safe contract.
+								 *
+								 * CVE-2026-18406 fix: do NOT feed DOMPurify's output to
+								 * html-react-parser. That second parser was the sink — it
+								 * re-parsed sanitizer-approved text and its <style>/<script>
+								 * branch routed it back into dangerouslySetInnerHTML,
+								 * resurrecting an entity-encoded <foreignObject><img onerror>
+								 * that DOMPurify had legitimately treated as inert text.
+								 * DOMPurify-straight-to-DOM keeps that text inert.
+								 */
+									<span
+										className="text-sm font-medium text-text-secondary [overflow-wrap:anywhere] whitespace-pre-wrap"
+										// eslint-disable-next-line react/no-danger -- value is DOMPurify-sanitized and inserted directly (no second HTML parse); see CVE-2026-18406.
+										dangerouslySetInnerHTML={ {
+											__html: domPurify.sanitize(
+												field.value
+											),
+										} }
+									/>
+								) : (
+								// Plain fields are text: render as a React text child, which escapes on output.
+									<span className="text-sm font-medium text-text-secondary [overflow-wrap:anywhere] whitespace-pre-wrap">
+										{ field?.value ?? '-' }
+									</span>
+								) }
 						</div>
 					) }
 				</div>
