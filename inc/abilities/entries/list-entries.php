@@ -97,7 +97,7 @@ class List_Entries extends Abstract_Ability {
 				'orderby'   => [
 					'type'        => 'string',
 					'description' => __( 'Column to order results by.', 'sureforms' ),
-					'enum'        => [ 'created_at', 'ID', 'form_id', 'status' ],
+					'enum'        => [ 'created_at', 'ID', 'id', 'form_id', 'status' ],
 					'default'     => 'created_at',
 				],
 				'order'     => [

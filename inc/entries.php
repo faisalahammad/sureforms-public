@@ -148,7 +148,7 @@ class Entries {
 			'total'        => $total,
 			'per_page'     => absint( $args['per_page'] ),
 			'current_page' => absint( $args['page'] ),
-			'total_pages'  => ceil( $total / absint( $args['per_page'] ) ),
+			'total_pages'  => ceil( $total / max( 1, absint( $args['per_page'] ) ) ),
 			'emptyTrash'   => 0 === $trash_count,
 		];
 	}

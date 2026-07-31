@@ -154,24 +154,34 @@ class String_Backfill {
 			return;
 		}
 
-		// A run already in flight — don't start a second chain. Reclaimed once the lock
-		// goes stale, which is what recovers a worker that died without chaining.
+		// A run already in flight (a fresh, non-stale lock) — don't start a second chain.
 		if ( $this->is_run_in_flight() ) {
 			return;
 		}
 
-		// Take the lock BEFORE enqueuing so concurrent admin requests don't both start a
-		// chain, but do NOT record completion here — that only happens when the final page
-		// comes back empty. autoload=false: these admin-only markers never need to load on
-		// the front end.
-		update_option(
+		// A stale lock left by a worker that died without chaining. Clear it so the
+		// atomic add_option() below can re-take it.
+		delete_option( self::LOCK_OPTION );
+
+		// Take the lock atomically BEFORE enqueuing. add_option() is an INSERT that returns
+		// false when the row already exists, so two concurrent admin requests can't both
+		// pass is_run_in_flight() and both start a chain — exactly one wins. Completion is
+		// NOT recorded here; that only happens when the final page comes back empty.
+		// autoload=false: this admin-only marker never needs to load on the front end.
+		$acquired = add_option(
 			self::LOCK_OPTION,
 			[
 				'schema'  => self::SCHEMA_VERSION,
 				'started' => time(),
 			],
+			'',
 			false
 		);
+
+		if ( ! $acquired ) {
+			// Another request won the race.
+			return;
+		}
 
 		// Verify the action actually got queued. as_enqueue_async_action() returns 0 when
 		// the insert wrote no rows, silently and without raising — so an unchecked call
@@ -321,6 +331,16 @@ class String_Backfill {
 	 */
 	public function backfill_one( int $form_id ): bool {
 		if ( $form_id <= 0 ) {
+			return false;
+		}
+
+		// Only ever touch SureForms forms. backfill_batch()'s get_posts() is already
+		// post-type-scoped, but self::HOOK stays registered for actions queued by the
+		// previous implementation and routes any numeric arg through
+		// handle_backfill_action() — so guard here too, mirroring
+		// String_Collector::on_form_delete(), so a stray do_action( self::HOOK, $id )
+		// can't write our meta onto (or run collect() against) an arbitrary post.
+		if ( SRFM_FORMS_POST_TYPE !== get_post_type( $form_id ) ) {
 			return false;
 		}
 
