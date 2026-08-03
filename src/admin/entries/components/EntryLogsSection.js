@@ -111,8 +111,14 @@ const EntryLogsSection = ( { entryId, onConfirmation } ) => {
 											) }` }
 									</div>
 									{ log.messages &&
-										log.messages.map(
-											( message, index ) => (
+										log.messages
+											.map( sanitizeLogMessage )
+											// A non-string or fully-stripped message
+											// sanitizes to '', which would otherwise
+											// render an empty <Text> row consuming a
+											// space-y-2 gap.
+											.filter( Boolean )
+											.map( ( html, index ) => (
 												<Text
 													key={ index }
 													size={ 14 }
@@ -124,14 +130,11 @@ const EntryLogsSection = ( { entryId, onConfirmation } ) => {
 													<span
 														// eslint-disable-next-line react/no-danger -- value is DOMPurify-sanitized and inserted directly (no second HTML parse); see CVE-2026-18406.
 														dangerouslySetInnerHTML={ {
-															__html: sanitizeLogMessage(
-																message
-															),
+															__html: html,
 														} }
 													/>
 												</Text>
-											)
-										) }
+											) ) }
 								</div>
 								{ !! RenderDeleteButton && (
 									<RenderDeleteButton

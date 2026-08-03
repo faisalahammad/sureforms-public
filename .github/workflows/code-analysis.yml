@@ -112,3 +112,9 @@ jobs:
 
             - name: Lint CSS
               run: npm run lint-css
+
+            # No other job runs the JS unit tests. Without this step the entry
+            # sanitizer policy has no gate: widening it back to DOMPurify's
+            # defaults would break tests that never execute in CI.
+            - name: JS unit tests
+              run: npm run test:unit

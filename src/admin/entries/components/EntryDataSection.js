@@ -6,6 +6,7 @@ import { decodeHTMLEntities } from '../utils/entryHelpers';
 import {
 	isRichTextField,
 	sanitizeFieldValue,
+	withBlockName,
 } from '../utils/sanitizeEntryValue';
 
 /**
@@ -27,20 +28,9 @@ const formatField = ( field ) => {
 
 	// Handle repeater fields and other PRO fields
 	if ( typeof renderProFields === 'function' ) {
-		const formatted = renderProFields( field );
-
-		// Pro's formatter returns a bare `{ label, value }` and drops
-		// `block_name`. RenderField needs it to tell a rich-text textarea from a
-		// plain answer, so graft it back on — without this, every Pro site falls
-		// through to the escaping text branch and renders rich text as literal
-		// tags. `formatted` wins on conflict; arrays (repeaters) and null pass
-		// through untouched.
-		return formatted &&
-			typeof formatted === 'object' &&
-			! Array.isArray( formatted ) &&
-			! isValidElement( formatted )
-			? { block_name: field?.block_name, ...formatted }
-			: formatted;
+		// Pro's formatter drops `block_name`, which RenderField needs to tell a
+		// textarea from a plain answer. See withBlockName() for why.
+		return withBlockName( field, renderProFields( field ) );
 	}
 	const { value, label } = field;
 
@@ -120,7 +110,12 @@ export const RenderField = ( props ) => {
 							 * policy lives in sanitizeFieldValue().
 							 */
 								<span
-									className="text-sm font-medium text-text-secondary [overflow-wrap:anywhere] whitespace-pre-wrap"
+									// `class` is stripped from the sanitized markup, so the
+									// server-rendered payment anchor arrives unstyled. Style it
+									// from the wrapper we control instead of allowing `class`
+									// through the policy — a stored `class` attribute is the
+									// Tailwind overlay vector FORBID_ATTR exists to block.
+									className="text-sm font-medium text-text-secondary [overflow-wrap:anywhere] whitespace-pre-wrap [&_a]:text-link-primary [&_a]:no-underline [&_a:hover]:text-link-primary-hover [&_a:hover]:underline"
 									// eslint-disable-next-line react/no-danger -- value is DOMPurify-sanitized and inserted directly (no second HTML parse); see CVE-2026-18406.
 									dangerouslySetInnerHTML={ {
 										__html:

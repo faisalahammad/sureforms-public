@@ -141,20 +141,30 @@ describe( 'entry value sanitization (CVE-2026-18406)', () => {
 	} );
 
 	it( 'rebuilds the style attribute from the CSSOM rather than parsing it by hand', () => {
-		// A string filter that splits on ';' and slices at ':' gets all three of
-		// these wrong: it retains `colorX` (indexOf returns -1, so slice(0,-1)
-		// yields the property `color`), it truncates at the ';' inside a quoted
-		// value, and it has to blocklist every URL-bearing CSS function by hand.
+		// The discriminating case against a hand-rolled `split(';')` +
+		// `slice(0, indexOf(':'))` filter: with no colon, indexOf returns -1, so
+		// `colorX` parses as the ALLOWLISTED property `color` and the junk
+		// declaration is retained. Rebuilding from the CSSOM drops it, because
+		// the parser never accepted it in the first place.
+		//
+		// Deliberately NOT asserted here: quoted-`;` and comment-`;` payloads
+		// such as `background-color: 'a;position:fixed'`. They are handled
+		// correctly, but they do not DISCRIMINATE — a naive split filter also
+		// discards the `position:fixed` fragment because that fragment's property
+		// is not allowlisted either, so those assertions would pass against the
+		// implementation this test claims to rule out.
 		expect( sanitize( '<p style="colorX">x</p>' ) ).not.toMatch( /style=/i );
-		expect(
-			sanitize( '<p style="background-color: \'a;position:fixed\'">x</p>' )
-		).not.toMatch( /position/i );
-		expect(
-			sanitize( '<p style="color:red/*;position:fixed*/">x</p>' )
-		).not.toMatch( /position/i );
 
 		// Anything able to fetch a resource is gone because the PROPERTY is not
 		// allowlisted — no value blocklist required.
+		//
+		// LIMIT OF THIS TEST: it pins PROPERTY filtering only. The other half of
+		// the invariant — that an ALLOWLISTED property cannot itself carry a
+		// `<url>` — is enforced by the UA's CSS value parser, which jsdom does not
+		// implement for `text-align`/`direction`; under jsdom
+		// `text-align: url(…)` is stored and re-emitted verbatim. Verified by hand
+		// in Chrome 150: all four allowlisted properties reject `url(…)`. Widening
+		// ALLOWED_CSS_PROPERTIES is therefore NOT covered here — review it by hand.
 		for ( const payload of [
 			'<p style="background-color:url(https://evil.example/)">x</p>',
 			'<p style="background-image:image-set(url(https://evil.example/a))">x</p>',
@@ -167,6 +177,18 @@ describe( 'entry value sanitization (CVE-2026-18406)', () => {
 				/url\(|image-set|cross-fade|element\(|attr\(/i
 			);
 		}
+	} );
+
+	it( 'strips id and name, which SANITIZE_DOM alone does not', () => {
+		// DOMPurify's SANITIZE_DOM only rejects values that clobber a document or
+		// form property, so `id="wpbody"` sails through by default and duplicates
+		// a real wp-admin id — hijacking aria-labelledby / label targets and
+		// getElementById lookups. The editor emits neither attribute.
+		const out = sanitize( '<a href="https://ok.test" id="wpbody" name="x">c</a>' );
+
+		expect( out ).not.toMatch( /id=/i );
+		expect( out ).not.toMatch( /name=/i );
+		expect( out ).toMatch( /href="https:\/\/ok\.test"/ );
 	} );
 
 	it( 'strips class and data attributes used to smuggle in bundled utilities', () => {
@@ -305,8 +327,11 @@ describe( 'sanitizeLogMessage', () => {
 
 describe( 'server-rendered markup (srfm-payment)', () => {
 	// inc/payments/stripe/payments-settings.php hooks `srfm_entry_value` and
-	// replaces the stored numeric payment ID with this anchor. It is
-	// plugin-authored, not submitter input, so it keeps `class` and `target`.
+	// replaces the stored numeric payment ID with this anchor. Although it is
+	// plugin-authored it gets NO relaxation: `class` and `target` are stripped
+	// from it too, because `block_name` is submitter-chosen and cannot gate a
+	// weaker policy. The link is restyled from the wrapper span in
+	// EntryDataSection instead.
 	const anchor =
 		'<a type="button" href="http://example.test/wp-admin/admin.php?page=sureforms_payments#/payment/323"' +
 		' class="text-link-primary no-underline hover:underline" target="_blank">View Payment</a>';
@@ -320,6 +345,12 @@ describe( 'server-rendered markup (srfm-payment)', () => {
 		expect( out ).toMatch( /<a\s/i );
 		expect( out ).toMatch( /page=sureforms_payments/ );
 		expect( out ).toMatch( /View Payment/ );
+
+		// Pins the cosmetic cost of the single-policy decision, so nobody
+		// "restores" it by widening the policy: the href and text survive, the
+		// presentation attributes do not.
+		expect( out ).not.toMatch( /class=/i );
+		expect( out ).not.toMatch( /target=/i );
 	} );
 
 	it( 'applies the SAME strict policy to payment as to submitter content', () => {
@@ -343,8 +374,8 @@ describe( 'server-rendered markup (srfm-payment)', () => {
 	} );
 
 	it( 'still refuses class on submitter-authored rich text', () => {
-		// The relaxed policy must not leak to the textarea path — `class` is the
-		// Tailwind overlay vector.
+		// Same policy, same result on the other markup block — `class` is the
+		// Tailwind overlay vector on both.
 		expect(
 			sanitizeFieldValue( {
 				block_name: 'srfm-textarea',
@@ -360,5 +391,15 @@ describe( 'server-rendered markup (srfm-payment)', () => {
 		} );
 
 		expect( out ).not.toMatch( /javascript:|onclick|<img/i );
+	} );
+
+	it( 'returns nothing for non-string or missing values', () => {
+		// isRichTextField() already gates the only call site on typeof string, but
+		// the guard is repeated here so a future direct caller cannot hand a number
+		// or object to DOMPurify's dirty.toString().
+		expect( sanitizeFieldValue( { value: 42 } ) ).toBe( '' );
+		expect( sanitizeFieldValue( { value: null } ) ).toBe( '' );
+		expect( sanitizeFieldValue( {} ) ).toBe( '' );
+		expect( sanitizeFieldValue( undefined ) ).toBe( '' );
 	} );
 } );

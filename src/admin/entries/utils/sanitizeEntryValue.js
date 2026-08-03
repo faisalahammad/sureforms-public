@@ -1,3 +1,4 @@
+import { isValidElement } from '@wordpress/element';
 import createDOMPurify from 'dompurify';
 
 /**
@@ -44,14 +45,20 @@ export const RICH_TEXT_SANITIZE_CONFIG = {
 		'button',
 		'select',
 		'textarea',
-		// No legitimate stored rich text contains media: the Quill toolbar
-		// (assets/js/unminified/blocks/textarea.js) offers header, bold/italic/
-		// underline/strike, lists, blockquote, align, colour, link and clean —
-		// no image, video or audio button. Allowing them would let an
-		// UNAUTHENTICATED submitter force the reviewing admin's browser into an
-		// attacker-controlled GET on entry view: IP / UA / Accept-Language
-		// fingerprint exfiltration, read-receipt confirmation, and same-origin
-		// GET CSRF against any nonce-less admin.php?action= handler.
+		// Allowing media would let an UNAUTHENTICATED submitter force the
+		// reviewing admin's browser into an attacker-controlled GET on entry
+		// view: IP / UA / Accept-Language fingerprint exfiltration, read-receipt
+		// confirmation, and same-origin GET CSRF against any nonce-less
+		// admin.php?action= handler.
+		//
+		// The cost is not quite zero, so it is a deliberate trade rather than a
+		// free win. The Quill toolbar (assets/js/unminified/blocks/textarea.js)
+		// has no image/video/audio button, but the editor registers no `formats`
+		// allowlist either, so the image blot stays live and PASTED image markup
+		// can be stored — `wp_kses_post()` in Helper::sanitize_textarea() keeps
+		// `<img src="https://…">`. An existing entry with a pasted image now
+		// renders without it. Accepted: a submitter-triggered outbound request
+		// from an admin session outweighs displaying pasted images.
 		'img',
 		'picture',
 		'source',
@@ -68,6 +75,10 @@ export const RICH_TEXT_SANITIZE_CONFIG = {
 	// overlay the style filtering is there to prevent. Rich text does not need it.
 	// `srcset`/`poster`/`background` are belt-and-braces alongside the media tags
 	// above, so a future widening of FORBID_TAGS cannot silently reopen the fetch.
+	// `id`/`name` follow the same reasoning as `class`: the editor emits neither,
+	// and DOMPurify's SANITIZE_DOM only blocks values that clobber a document or
+	// form property — it happily keeps `id="wpbody"`, which duplicates a wp-admin
+	// id and can hijack an aria-labelledby/label target or a getElementById lookup.
 	FORBID_ATTR: [
 		'action',
 		'formaction',
@@ -75,6 +86,8 @@ export const RICH_TEXT_SANITIZE_CONFIG = {
 		'srcset',
 		'poster',
 		'background',
+		'id',
+		'name',
 	],
 	ALLOW_DATA_ATTR: false,
 };
@@ -96,6 +109,14 @@ export const RICH_TEXT_SANITIZE_CONFIG = {
  * which is what makes the value blocklist unnecessary. Adding `background`,
  * `background-image`, `list-style`, `content`, `border-image`, `cursor`, `mask`
  * or `filter` would turn this into a live external-fetch vector.
+ *
+ * That invariant is enforced by the USER AGENT's CSS value parser, not by this
+ * file: a value the parser rejects never enters the CSSOM, so it cannot be
+ * re-emitted. Verified in Chrome 150 — all four properties reject `url(…)`.
+ * jsdom's `cssstyle` does NOT implement value validation for `text-align` or
+ * `direction` and will happily store `text-align: url(…)`, so the unit tests
+ * below pin PROPERTY filtering only. Widening this list is therefore a change
+ * the test suite cannot catch; review it by hand.
  *
  * @since x.x.x
  */
@@ -175,8 +196,18 @@ const SERVER_MARKUP_BLOCKS = [ 'srfm-payment' ];
  *
  * This is a heuristic, NOT a parser: `if a<b then c>d` still matches it, because
  * distinguishing that from real markup requires actually parsing HTML. It exists
- * only to keep a plain-text answer typed into a rich-text field off the HTML
- * path in the common case. The real discriminator is `block_name`.
+ * only to keep a plain-text answer typed into a textarea off the HTML path in the
+ * common case. The real discriminator is `block_name`.
+ *
+ * KNOWN RESIDUAL — `srfm-textarea` is the textarea BLOCK, not "rich text": the
+ * block's `isRichText` attribute defaults to false (inc/blocks/textarea/block.json),
+ * so most textareas are plain multi-line answers. One that happens to contain
+ * tag-shaped text still reaches the sanitizer, which removes it: `I tried <div>
+ * and <span>` renders as `I tried and`. That is not a regression — the previous
+ * content-sniffing discriminator did the same to EVERY field type — but it is not
+ * fixed either. Fixing it properly needs `isRichText` on the wire (the entries
+ * REST response assembles per-field context in inc/rest-api.php and could carry
+ * it); until then this is the one field type still exposed to it.
  */
 const HTML_TAG_PATTERN = /<[a-z!/][^<>]*>/i;
 
@@ -221,16 +252,23 @@ export const isRichTextField = ( field ) =>
  * false, and that string would otherwise reach `dangerouslySetInnerHTML`
  * unescaped. An empty cell is the correct degradation.
  *
+ * The policy is deliberately NOT a parameter. An overridable config on a function
+ * named "sanitize" is a footgun: because hooks are instance-global, passing any
+ * config object replaces the whole strict policy while KEEPING the CSS hook, so
+ * `sanitizeEntryValue( value, { ADD_ATTR: [ 'target' ] } )` would quietly return
+ * DOMPurify's full default allowlist — media, `class` and all. A caller that needs
+ * a different policy should change RICH_TEXT_SANITIZE_CONFIG and the tests that
+ * pin it.
+ *
  * @since x.x.x
  *
- * @param {string} value  Raw value.
- * @param {Object} config DOMPurify config. Defaults to the strict policy.
+ * @param {string} value Raw value.
  * @return {string} Sanitized HTML, safe for direct DOM insertion only.
  */
-export const sanitizeEntryValue = (
-	value,
-	config = RICH_TEXT_SANITIZE_CONFIG
-) => ( purifier.isSupported ? purifier.sanitize( value, config ) : '' );
+export const sanitizeEntryValue = ( value ) =>
+	purifier.isSupported
+		? purifier.sanitize( value, RICH_TEXT_SANITIZE_CONFIG )
+		: '';
 
 /**
  * Sanitize a field value for rendering as HTML.
@@ -255,7 +293,38 @@ export const sanitizeEntryValue = (
  * @return {string} Sanitized HTML, safe for direct DOM insertion only.
  */
 export const sanitizeFieldValue = ( field ) =>
-	sanitizeEntryValue( field?.value );
+	typeof field?.value === 'string' ? sanitizeEntryValue( field.value ) : '';
+
+/**
+ * Re-attach `block_name` across the Pro `render-pro-fields` filter boundary.
+ *
+ * Pro's formatter (`sureforms-pro/src/admin/entries/components/EntryDataSection.js`)
+ * returns a bare `{ label, value }` and drops `block_name`, which is the only
+ * discriminator isRichTextField() has. Without this graft `field.block_name` is
+ * undefined on every Pro site and all rich text falls through to the escaping text
+ * branch, rendering as literal tags.
+ *
+ * `formatted` wins on conflict, so Pro can never be widened into a block_name it
+ * did not itself return. Arrays (repeater rows), React elements and null pass
+ * through untouched — repeater rows deliberately do NOT inherit the parent's
+ * `srfm-repeater`, since each row's cells are separate fields whose own block
+ * names Pro does not currently carry.
+ *
+ * Long term Pro should spread `...field` in its formatter and this can go away.
+ *
+ * @since x.x.x
+ *
+ * @param {Object} field     The original field, which still has `block_name`.
+ * @param {*}      formatted Whatever the Pro filter returned.
+ * @return {*} `formatted`, with `block_name` restored when it is a plain object.
+ */
+export const withBlockName = ( field, formatted ) =>
+	formatted &&
+	typeof formatted === 'object' &&
+	! Array.isArray( formatted ) &&
+	! isValidElement( formatted )
+		? { block_name: field?.block_name, ...formatted }
+		: formatted;
 
 /**
  * Sanitize an entry log message.

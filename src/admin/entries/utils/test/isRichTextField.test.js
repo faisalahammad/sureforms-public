@@ -9,7 +9,8 @@
  * blanking real submitted data in the screen site owners use to read leads.
  */
 
-import { isRichTextField } from '../sanitizeEntryValue';
+import { createElement } from '@wordpress/element';
+import { isRichTextField, withBlockName } from '../sanitizeEntryValue';
 
 const richText = ( value ) => ( { block_name: 'srfm-textarea', value } );
 
@@ -79,8 +80,86 @@ describe( 'isRichTextField', () => {
 
 	it( 'requires block_name, which Pro must not drop', () => {
 		// sureforms-pro's render-pro-fields formatter returns a bare
-		// `{ label, value }`; formatField() grafts block_name back on. Without
+		// `{ label, value }`; withBlockName() grafts block_name back on. Without
 		// that graft this returns false and Pro sites show raw tags.
 		expect( isRichTextField( { value: '<p>hi</p>' } ) ).toBe( false );
+	} );
+} );
+
+/**
+ * The graft across the Pro filter boundary.
+ *
+ * This is the single line keeping every Pro site's rich text rendering, so each
+ * shape sureforms-pro's formatFields() can return is pinned here. Shapes taken
+ * from sureforms-pro/src/admin/entries/components/EntryDataSection.js.
+ */
+describe( 'withBlockName', () => {
+	const field = { block_name: 'srfm-textarea', value: '<p>hi</p>' };
+
+	it( 'restores block_name on the default object shape', () => {
+		// Pro's `default:` branch — the load-bearing case.
+		const out = withBlockName( field, {
+			label: 'Message',
+			value: '<p>hi</p>',
+		} );
+
+		expect( out ).toEqual( {
+			block_name: 'srfm-textarea',
+			label: 'Message',
+			value: '<p>hi</p>',
+		} );
+		expect( isRichTextField( out ) ).toBe( true );
+	} );
+
+	it( 'never widens a block_name Pro set itself', () => {
+		// `formatted` wins on conflict, so the graft can only ever fill a gap.
+		expect(
+			withBlockName( { block_name: 'srfm-textarea' }, {
+				block_name: 'srfm-input',
+				value: '<p>x</p>',
+			} ).block_name
+		).toBe( 'srfm-input' );
+	} );
+
+	it( 'passes repeater arrays through untouched', () => {
+		// Pro's `srfm-repeater` branch returns an array of rows. Rows are separate
+		// fields and deliberately do NOT inherit the parent's block_name.
+		const rows = [ { label: 'Repeater 1', value: [ { label: 'a', value: 'b' } ] } ];
+
+		expect( withBlockName( field, rows ) ).toBe( rows );
+	} );
+
+	it( 'passes React elements through untouched', () => {
+		// Pro's `srfm-signature` branch wraps a JSX element as the value; the
+		// upload branch returns an array of them.
+		const element = createElement( 'div', null, 'signature' );
+		const wrapped = withBlockName( field, {
+			label: 'Signature',
+			value: element,
+		} );
+
+		expect( wrapped.value ).toBe( element );
+		expect( isRichTextField( wrapped ) ).toBe( false );
+
+		expect( withBlockName( field, element ) ).toBe( element );
+	} );
+
+	it( 'passes null through untouched', () => {
+		// Pro's `srfm-password` / `srfm-button` branches return null, which the
+		// component filters out.
+		expect( withBlockName( field, null ) ).toBeNull();
+		expect( withBlockName( field, undefined ) ).toBeUndefined();
+	} );
+
+	it( 'passes primitives through untouched', () => {
+		expect( withBlockName( field, 'plain' ) ).toBe( 'plain' );
+		expect( withBlockName( field, 0 ) ).toBe( 0 );
+	} );
+
+	it( 'tolerates a missing source field', () => {
+		expect( withBlockName( undefined, { value: 'x' } ) ).toEqual( {
+			block_name: undefined,
+			value: 'x',
+		} );
 	} );
 } );
