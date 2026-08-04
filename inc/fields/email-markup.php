@@ -37,7 +37,7 @@ class Email_Markup extends Base {
 	protected $input_confirm_label_fallback;
 
 	/**
-	 * Encrypted label for the confirmation input field.
+	 * Encoded label for the confirmation input field.
 	 *
 	 * @var string
 	 * @since 0.0.2
@@ -45,7 +45,7 @@ class Email_Markup extends Base {
 	protected $input_confirm_label;
 
 	/**
-	 * Unique slug for the confirmation input field, combining the form slug, block ID, and encrypted label.
+	 * Unique slug for the confirmation input field, combining the form slug, block ID, and encoded label.
 	 *
 	 * @var string
 	 * @since 0.0.2
@@ -82,7 +82,7 @@ class Email_Markup extends Base {
 		$this->slug                         = 'email';
 		$this->is_confirm_email             = $attributes['isConfirmEmail'] ?? false;
 		$this->input_confirm_label_fallback = __( 'Confirm ', 'sureforms' ) . $this->input_label_fallback;
-		$this->input_confirm_label          = '-lbl-' . Helper::encrypt( $this->input_confirm_label_fallback );
+		$this->input_confirm_label          = '-lbl-' . Helper::encode( $this->input_confirm_label_fallback );
 		$this->unique_confirm_slug          = 'srfm-' . $this->slug . '-confirm-' . $this->block_id . $this->input_confirm_label;
 		$this->read_only                    = ! empty( trim( $this->default ) ) && $attributes['readOnly'];
 		$this->set_unique_slug();
