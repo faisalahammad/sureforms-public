@@ -215,6 +215,207 @@ class Test_Front_End_Payments extends TestCase {
 		$this->assertEquals( $form_data, $result );
 	}
 
+	/**
+	 * Build a published form carrying one payment block.
+	 *
+	 * @param array<string,mixed> $attrs Payment block attributes to merge over the defaults.
+	 * @return int Form ID.
+	 */
+	private function make_payment_form( $attrs = [] ) {
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$attrs = array_merge(
+			[
+				'block_id'           => 'pay12345',
+				'paymentType'        => 'one-time',
+				'customerEmailField' => 'email',
+				'fixedAmount'        => 25,
+			],
+			$attrs
+		);
+
+		return wp_insert_post(
+			[
+				'post_title'   => 'Payment Form',
+				'post_type'    => SRFM_FORMS_POST_TYPE,
+				'post_status'  => 'publish',
+				'post_content' => '<!-- wp:srfm/payment ' . wp_json_encode( $attrs ) . ' /-->',
+			]
+		);
+	}
+
+	/**
+	 * Force a usable payment method so tests do not depend on a connected Stripe account.
+	 *
+	 * @param array<string,mixed> $methods Registered methods.
+	 * @return array<string,mixed>
+	 */
+	public function force_enabled_payment_method( $methods ) {
+		$methods['stripe']['enabled'] = true;
+
+		return $methods;
+	}
+
+	/**
+	 * Stand in for a gateway that verified the payment.
+	 *
+	 * @return array<string,mixed>
+	 */
+	public function stub_verified_payment() {
+		return [ 'payment_id' => 'pay_verified_123' ];
+	}
+
+	/**
+	 * A submission that omits the payment field on a payment-enabled form must fail.
+	 *
+	 * Payment validation was opt-in per submitted field: every failure path was a
+	 * `continue`, so stripping srfm-payment-* from the POST body produced an entry,
+	 * fired notifications and paid nothing. See #2998.
+	 */
+	public function test_validate_payment_fields_requires_payment_when_field_omitted() {
+		add_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+
+		$form_id   = $this->make_payment_form();
+		$form_data = [
+			'form-id'              => $form_id,
+			'srfm-input-1-lbl-x-e' => 'john@example.com',
+		];
+
+		$result = $this->front_end->validate_payment_fields( $form_data );
+
+		$this->assertArrayHasKey( 'error', $result, 'A payment-enabled form must not accept a submission with no payment.' );
+
+		remove_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * An empty or malformed payment value is not a substitute for a verified payment.
+	 */
+	public function test_validate_payment_fields_requires_payment_when_value_is_empty() {
+		add_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+
+		$form_id = $this->make_payment_form();
+
+		foreach ( [ '', '{}', wp_json_encode( [ 'blockId' => 'pay12345' ] ) ] as $payment_value ) {
+			$result = $this->front_end->validate_payment_fields(
+				[
+					'form-id'                          => $form_id,
+					'srfm-payment-pay12345-lbl-x-payment' => $payment_value,
+				]
+			);
+
+			$this->assertArrayHasKey( 'error', $result, 'An unverified payment value must not pass.' );
+		}
+
+		remove_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * A verified payment for the form's payment block passes through unchanged.
+	 */
+	public function test_validate_payment_fields_accepts_verified_payment() {
+		add_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+		add_filter( 'srfm_verify_payment_value', [ $this, 'stub_verified_payment' ] );
+
+		$form_id = $this->make_payment_form();
+		$field   = 'srfm-payment-pay12345-lbl-x-payment';
+
+		$result = $this->front_end->validate_payment_fields(
+			[
+				'form-id' => $form_id,
+				$field    => wp_json_encode(
+					[
+						'paymentId'     => 'pi_test_123',
+						'blockId'       => 'pay12345',
+						'paymentType'   => 'one-time',
+						'paymentMethod' => 'test-gateway',
+					]
+				),
+			]
+		);
+
+		$this->assertArrayNotHasKey( 'error', $result, 'A verified payment must be accepted.' );
+		$this->assertSame( 'pay_verified_123', $result[ $field ] );
+
+		remove_filter( 'srfm_verify_payment_value', [ $this, 'stub_verified_payment' ] );
+		remove_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * A payment block that renders nothing cannot be required.
+	 *
+	 * Without the customer email mapping Payment_Markup::markup() returns '', so a
+	 * legitimate submission carries no payment field and must still be accepted.
+	 */
+	public function test_validate_payment_fields_ignores_unrenderable_payment_block() {
+		add_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+
+		$form_id = $this->make_payment_form( [ 'customerEmailField' => '' ] );
+
+		$result = $this->front_end->validate_payment_fields( [ 'form-id' => $form_id ] );
+
+		$this->assertArrayNotHasKey( 'error', $result );
+
+		remove_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * A payment field under conditional logic may legitimately be hidden client-side.
+	 */
+	public function test_validate_payment_fields_ignores_conditionally_hidden_payment_block() {
+		add_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+
+		$form_id = $this->make_payment_form();
+		update_post_meta(
+			$form_id,
+			'_srfm_conditional_logic',
+			[
+				[
+					'pay12345' => [
+						'action' => 'show',
+						'logic'  => [ [ [ 'field' => 'email', 'operator' => '===', 'value' => 'yes' ] ] ],
+					],
+				],
+			]
+		);
+
+		$result = $this->front_end->validate_payment_fields( [ 'form-id' => $form_id ] );
+
+		$this->assertArrayNotHasKey( 'error', $result );
+
+		remove_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * A form with no payment block is unaffected.
+	 */
+	public function test_validate_payment_fields_form_without_payment_block_unchanged() {
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$form_id = wp_insert_post(
+			[
+				'post_title'   => 'Plain Form',
+				'post_type'    => SRFM_FORMS_POST_TYPE,
+				'post_status'  => 'publish',
+				'post_content' => '<!-- wp:srfm/input {"block_id":"plain567"} /-->',
+			]
+		);
+
+		$form_data = [
+			'form-id'                => $form_id,
+			'srfm-input-1-lbl-x-name' => 'John',
+		];
+
+		$this->assertSame( $form_data, $this->front_end->validate_payment_fields( $form_data ) );
+
+		wp_delete_post( $form_id, true );
+	}
+
 	// --- add_payment_entry_for_linking ---
 
 	public function test_add_payment_entry_for_linking_accepts_valid_entry() {
