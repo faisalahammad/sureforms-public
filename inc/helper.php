@@ -202,10 +202,12 @@ class Helper {
 		}
 
 		$label = explode( '-lbl-', $field_key )[1];
-		// Getting the encrypted label. we are removing the block slug here.
+		// Getting the encoded label. we are removing the block slug here.
 		$label = explode( '-', $label )[0];
 
-		return $label ? html_entity_decode( self::decrypt( $label ) ) : '';
+		// The result is submitter-controlled and unauthenticated — escape it for its
+		// context at the sink (esc_html, escape_csv_formula, ...), never trust it.
+		return $label ? html_entity_decode( self::decode( $label ) ) : '';
 	}
 
 	/**
@@ -513,15 +515,24 @@ class Helper {
 	 * Base64-encode a string for use inside a field key.
 	 *
 	 * NOT ENCRYPTION. This is plain, unkeyed base64 (padding stripped) used only to
-	 * carry a label safely inside a field key. There is no key, no HMAC and no integrity
+	 * carry a label inside a field key. There is no key, no HMAC and no integrity
 	 * protection, so a value round-tripped through decode() is fully attacker-forgeable
 	 * and must never be treated as authentic or trusted as a security boundary. When a
 	 * label's integrity matters, look it up from the form's stored block definitions by
 	 * block id instead of decoding it from the submitted key.
 	 *
+	 * Two behaviours worth knowing before relying on this pair:
+	 *
+	 * - The input is run through wp_strip_all_tags(), so this is not a lossless
+	 *   round trip: decode( encode( $x ) ) !== $x whenever $x contains markup.
+	 *   That stripping happens on this trusted side only — decode() returns raw
+	 *   submitted bytes and does NOT strip anything, so every sink must escape for
+	 *   its own context (esc_html(), escape_csv_formula(), ...).
+	 * - Falsy input (including the string '0') returns '', not base64.
+	 *
 	 * @param string $input The input string to encode.
 	 * @since 0.0.1
-	 * @since 2.12.3 Renamed from encrypt(); encrypt() is a deprecated alias.
+	 * @since x.x.x Renamed from encrypt(); encrypt() is a deprecated alias.
 	 * @return string The base64-encoded string (padding removed).
 	 */
 	public static function encode( $input ) {
@@ -541,7 +552,7 @@ class Helper {
 	/**
 	 * Base64-encode a string.
 	 *
-	 * @deprecated 2.12.3 Use {@see self::encode()}. The name wrongly implied a security
+	 * @deprecated x.x.x Use {@see self::encode()}. The name wrongly implied a security
 	 *             boundary — this is unkeyed base64, not encryption.
 	 *
 	 * @param string $input The input string to encode.
@@ -556,11 +567,12 @@ class Helper {
 	 * Base64-decode a string produced by encode().
 	 *
 	 * NOT DECRYPTION. See {@see self::encode()} — the result is unauthenticated and
-	 * attacker-forgeable; do not trust it where integrity matters.
+	 * attacker-forgeable; do not trust it where integrity matters. The output is raw
+	 * submitted bytes: no tag stripping, no sanitising. Escape it at the sink.
 	 *
 	 * @param string $input The input string to decode.
 	 * @since 0.0.1
-	 * @since 2.12.3 Renamed from decrypt(); decrypt() is a deprecated alias.
+	 * @since x.x.x Renamed from decrypt(); decrypt() is a deprecated alias.
 	 * @return string The decoded string.
 	 */
 	public static function decode( $input ) {
@@ -577,7 +589,7 @@ class Helper {
 	/**
 	 * Base64-decode a string.
 	 *
-	 * @deprecated 2.12.3 Use {@see self::decode()}. The name wrongly implied a security
+	 * @deprecated x.x.x Use {@see self::decode()}. The name wrongly implied a security
 	 *             boundary — this is unkeyed base64, not decryption.
 	 *
 	 * @param string $input The input string to decode.

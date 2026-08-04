@@ -250,7 +250,10 @@ class Email_Template {
 					 *                         'value'           => mixed  The field value
 					 *                         'label'           => string The field name/key
 					 *                         'block_name'      => string The block type identifier
-					 *                         'processed_label' => string The decrypted human readable label
+					 *                         'processed_label' => string The human readable label, base64-decoded
+					 *                                                     out of the submitted field key. Submitter-
+					 *                                                     controlled and unauthenticated — escape it
+					 *                                                     for the output context (esc_html() for HTML).
 					 */
 					do_action(
 						'srfm_before_processing_all_data_field',

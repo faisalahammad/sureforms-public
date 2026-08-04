@@ -45,7 +45,7 @@ class Email_Markup extends Base {
 	protected $input_confirm_label;
 
 	/**
-	 * Unique slug for the confirmation input field, combining the form slug, block ID, and encrypted label.
+	 * Unique slug for the confirmation input field, combining the form slug, block ID, and encoded label.
 	 *
 	 * @var string
 	 * @since 0.0.2

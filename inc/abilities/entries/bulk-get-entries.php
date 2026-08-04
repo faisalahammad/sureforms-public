@@ -20,7 +20,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Bulk_Get_Entries ability class.
  *
  * Retrieves detailed information about multiple form submission entries
- * in a single call, including parsed form data with decrypted labels.
+ * in a single call, including parsed form data with decoded labels.
  *
  * @since 2.5.2
  */

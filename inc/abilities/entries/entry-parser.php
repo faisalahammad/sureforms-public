@@ -37,7 +37,7 @@ trait Entry_Parser {
 	 * @return array<string,mixed> Parsed entry data (without entry_id — caller prepends it).
 	 */
 	protected function parse_entry( array $entry ) {
-		// Parse form data with decrypted labels.
+		// Parse form data with decoded labels (submitter-controlled; escape at the sink).
 		$form_data       = [];
 		$excluded_fields = Helper::get_excluded_fields();
 		$entry_form_data = $entry['form_data'] ?? [];
