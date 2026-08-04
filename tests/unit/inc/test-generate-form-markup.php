@@ -214,6 +214,193 @@ class Test_Generate_Form_Markup extends TestCase {
 	}
 
 	/**
+	 * Create a user with the given role and make it the current user.
+	 *
+	 * @param string $role Role name.
+	 * @return int User ID.
+	 */
+	private function set_current_user_with_role( $role ) {
+		$user_id = wp_insert_user(
+			[
+				'user_login' => 'srfm_markup_' . $role . '_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_markup_' . $role . '_' . wp_rand() . '@example.com',
+				'role'       => $role,
+			]
+		);
+
+		$user_id = is_wp_error( $user_id ) ? 0 : (int) $user_id;
+		wp_set_current_user( $user_id );
+
+		return $user_id;
+	}
+
+	/**
+	 * Build a request for the form-markup endpoint.
+	 *
+	 * @param int $form_id Requested ID.
+	 * @return WP_REST_Request
+	 */
+	private function make_markup_request( $form_id ) {
+		$request = new WP_REST_Request( 'GET', '/sureforms/v1/generate-form-markup' );
+		$request->set_param( 'id', $form_id );
+
+		return $request;
+	}
+
+	/**
+	 * The endpoint requires a user who can edit content — a nonce is not authorization.
+	 *
+	 * See #2995: the route was registered with `__return_true` and gated only by the
+	 * `srfm_form_markup` nonce, which every user who can open the block editor holds.
+	 */
+	public function test_render_form_markup_permissions_check_requires_edit_posts() {
+		// Anonymous.
+		wp_set_current_user( 0 );
+		$this->assertInstanceOf( WP_Error::class, $this->generate_form_markup->render_form_markup_permissions_check() );
+
+		// Subscriber — cannot edit content.
+		$subscriber = $this->set_current_user_with_role( 'subscriber' );
+		$this->assertInstanceOf( WP_Error::class, $this->generate_form_markup->render_form_markup_permissions_check() );
+
+		// Editor — can edit content, so the preview endpoint is available.
+		$editor = $this->set_current_user_with_role( 'editor' );
+		$this->assertTrue( $this->generate_form_markup->render_form_markup_permissions_check() );
+
+		wp_set_current_user( 0 );
+		wp_delete_user( $subscriber );
+		wp_delete_user( $editor );
+	}
+
+	/**
+	 * The endpoint must refuse any post that is not a SureForms form.
+	 *
+	 * This was the disclosure: `get_post( $id )` was unconstrained, so drafts,
+	 * pending, private posts and private CPTs of any author rendered in full.
+	 */
+	public function test_render_form_markup_endpoint_rejects_non_form_post() {
+		$admin = $this->set_current_user_with_role( 'administrator' );
+
+		$private_post = wp_insert_post(
+			[
+				'post_title'   => 'Unpublished secret',
+				'post_type'    => 'post',
+				'post_status'  => 'draft',
+				'post_content' => 'CONFIDENTIAL-MARKER',
+			]
+		);
+
+		$result = $this->generate_form_markup->render_form_markup_endpoint( $this->make_markup_request( $private_post ) );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 'srfm_rest_form_not_found', $result->get_error_code() );
+
+		// A non-existent ID behaves the same way.
+		$missing = $this->generate_form_markup->render_form_markup_endpoint( $this->make_markup_request( 999999 ) );
+		$this->assertInstanceOf( WP_Error::class, $missing );
+
+		wp_delete_post( $private_post, true );
+		wp_set_current_user( 0 );
+		wp_delete_user( $admin );
+	}
+
+	/**
+	 * An unpublished form is only renderable by users with the SureForms forms capability.
+	 */
+	public function test_render_form_markup_endpoint_rejects_unpublished_form_for_editor() {
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$draft_form = wp_insert_post(
+			[
+				'post_title'   => 'Draft Form',
+				'post_type'    => SRFM_FORMS_POST_TYPE,
+				'post_status'  => 'draft',
+				'post_content' => 'simple content',
+			]
+		);
+
+		// Editor passes the endpoint capability but has no manage_options.
+		$editor = $this->set_current_user_with_role( 'editor' );
+		$result = $this->generate_form_markup->render_form_markup_endpoint( $this->make_markup_request( $draft_form ) );
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 'srfm_rest_cannot_render_form', $result->get_error_code() );
+
+		// Administrator can render it.
+		$admin = $this->set_current_user_with_role( 'administrator' );
+		$this->assertIsString( $this->generate_form_markup->render_form_markup_endpoint( $this->make_markup_request( $draft_form ) ) );
+
+		wp_delete_post( $draft_form, true );
+		wp_set_current_user( 0 );
+		wp_delete_user( $editor );
+		wp_delete_user( $admin );
+	}
+
+	/**
+	 * A published form still renders — the legitimate editor-preview path.
+	 */
+	public function test_render_form_markup_endpoint_renders_published_form() {
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$form_id = wp_insert_post(
+			[
+				'post_title'   => 'Published Form',
+				'post_type'    => SRFM_FORMS_POST_TYPE,
+				'post_status'  => 'publish',
+				'post_content' => 'simple content',
+			]
+		);
+
+		$editor = $this->set_current_user_with_role( 'editor' );
+		$result = $this->generate_form_markup->render_form_markup_endpoint( $this->make_markup_request( $form_id ) );
+
+		$this->assertIsString( $result );
+		$this->assertStringContainsString( 'srfm-form-container', $result );
+
+		wp_delete_post( $form_id, true );
+		wp_set_current_user( 0 );
+		wp_delete_user( $editor );
+	}
+
+	/**
+	 * get_form_markup() must render the ID it was given, never one from the query string.
+	 *
+	 * The query-string override let `?id=&srfm_form_markup_nonce=` on any page
+	 * embedding a form swap in a different post — see #2995.
+	 */
+	public function test_get_form_markup_ignores_query_string_id() {
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$form_id = wp_insert_post(
+			[
+				'post_title'   => 'Embedded Form',
+				'post_type'    => SRFM_FORMS_POST_TYPE,
+				'post_status'  => 'publish',
+				'post_content' => 'simple content',
+			]
+		);
+		$other   = wp_insert_post(
+			[
+				'post_title'   => 'Other post',
+				'post_type'    => 'post',
+				'post_status'  => 'draft',
+				'post_content' => 'CONFIDENTIAL-MARKER',
+			]
+		);
+
+		$_GET['id']                     = $other;
+		$_GET['srfm_form_markup_nonce'] = wp_create_nonce( 'srfm_form_markup' );
+
+		$markup = Generate_Form_Markup::get_form_markup( $form_id );
+
+		$this->assertStringNotContainsString( 'CONFIDENTIAL-MARKER', $markup, 'The query string must not redirect the render to another post.' );
+		$this->assertStringContainsString( 'srfm-form-container-' . $form_id, $markup );
+
+		unset( $_GET['id'], $_GET['srfm_form_markup_nonce'] );
+		wp_delete_post( $form_id, true );
+		wp_delete_post( $other, true );
+	}
+
+	/**
 	 * Test get_confirmation_markup returns string.
 	 */
 	public function test_get_confirmation_markup() {
