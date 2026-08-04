@@ -7,7 +7,10 @@
 
 use Yoast\PHPUnitPolyfills\TestCases\TestCase;
 
+use SRFM\Inc\Database\Tables\Entries as EntriesTable;
 use SRFM\Inc\Form_Submit;
+use SRFM\Inc\Helper;
+use SRFM\Inc\Submit_Token;
 
 /**
  * Tests Plugin Initialization.
@@ -590,6 +593,183 @@ class Test_Form_Submit extends TestCase {
 	 */
 	public function test_field_unique_validation() {
 		$this->assertTrue( method_exists( $this->form_submit, 'field_unique_validation' ) );
+	}
+
+	/**
+	 * Build a SureForms field key for a block.
+	 *
+	 * @param string $block_id Block ID.
+	 * @param string $label    Field label.
+	 * @param string $slug     Block slug suffix.
+	 * @return string
+	 */
+	private function make_field_key( $block_id, $label, $slug ) {
+		return 'srfm-input-' . $block_id . '-lbl-' . rtrim( base64_encode( $label ), '=' ) . '-' . $slug;
+	}
+
+	/**
+	 * No-op wp_die handler so wp_send_json() returns instead of ending the process.
+	 *
+	 * @return callable
+	 */
+	public function get_noop_die_handler() {
+		return static function () {};
+	}
+
+	/**
+	 * Invoke the AJAX uniqueness check and return its decoded response.
+	 *
+	 * wp_send_json() calls die() outright unless the request is an AJAX one, so the
+	 * call is framed as AJAX and wp_die() is neutralised for the duration.
+	 *
+	 * @param int                  $form_id Form ID.
+	 * @param array<string,string> $fields  Field keys/values to probe.
+	 * @return array<mixed>
+	 */
+	private function call_unique_validation( $form_id, $fields ) {
+		$previous_post = $_POST;
+		$_POST         = array_merge(
+			[
+				'action' => 'validation_ajax_action',
+				'token'  => Submit_Token::generate( $form_id ),
+				'id'     => $form_id,
+			],
+			$fields
+		);
+
+		add_filter( 'wp_doing_ajax', '__return_true' );
+		add_filter( 'wp_die_ajax_handler', [ $this, 'get_noop_die_handler' ] );
+
+		ob_start();
+		$this->form_submit->field_unique_validation();
+		$json = ob_get_clean();
+
+		remove_filter( 'wp_die_ajax_handler', [ $this, 'get_noop_die_handler' ] );
+		remove_filter( 'wp_doing_ajax', '__return_true' );
+
+		$_POST = $previous_post;
+
+		return json_decode( Helper::get_string_value( $json ), true );
+	}
+
+	/**
+	 * The uniqueness check must only probe fields the form itself marks unique.
+	 *
+	 * Without that restriction the nopriv handler answers "does an entry exist whose
+	 * field X equals Y?" for arbitrary X and Y — an existence oracle over every
+	 * stored submission value. See #2997.
+	 */
+	public function test_field_unique_validation_only_probes_fields_marked_unique() {
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$unique_key   = $this->make_field_key( 'uniq1234', 'Email', 'email' );
+		$ordinary_key = $this->make_field_key( 'plain567', 'Phone', 'phone' );
+
+		$form_id = wp_insert_post(
+			[
+				'post_title'   => 'Unique Field Form',
+				'post_type'    => SRFM_FORMS_POST_TYPE,
+				'post_status'  => 'publish',
+				'post_content' => '<!-- wp:srfm/input {"block_id":"uniq1234","isUnique":true} /--><!-- wp:srfm/input {"block_id":"plain567"} /-->',
+			]
+		);
+
+		EntriesTable::add(
+			[
+				'form_id'   => $form_id,
+				'form_data' => [
+					$unique_key   => 'taken@example.com',
+					$ordinary_key => '5551234567',
+				],
+			]
+		);
+
+		// The feature still works for the field the form marks unique.
+		$response = $this->call_unique_validation( $form_id, [ $unique_key => 'taken@example.com' ] );
+		$this->assertSame( [ [ $unique_key => 'not unique' ] ], $response['data'] );
+
+		// A field that exists on the form but is NOT marked unique leaks nothing,
+		// even though the value demonstrably exists in an entry.
+		$response = $this->call_unique_validation( $form_id, [ $ordinary_key => '5551234567' ] );
+		$this->assertSame( [], $response['data'], 'Fields the form does not mark unique must not be probeable.' );
+
+		// An invented key that never belonged to the form leaks nothing either.
+		$invented = $this->make_field_key( 'ghost999', 'Anything', 'x' );
+		$response = $this->call_unique_validation( $form_id, [ $invented => 'taken@example.com' ] );
+		$this->assertSame( [], $response['data'] );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * A form with no unique fields answers with an empty result set for any probe.
+	 */
+	public function test_field_unique_validation_form_without_unique_fields() {
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$field_key = $this->make_field_key( 'plain567', 'Phone', 'phone' );
+		$form_id   = wp_insert_post(
+			[
+				'post_title'   => 'No Unique Fields Form',
+				'post_type'    => SRFM_FORMS_POST_TYPE,
+				'post_status'  => 'publish',
+				'post_content' => '<!-- wp:srfm/input {"block_id":"plain567"} /-->',
+			]
+		);
+
+		EntriesTable::add(
+			[
+				'form_id'   => $form_id,
+				'form_data' => [ $field_key => '5551234567' ],
+			]
+		);
+
+		$response = $this->call_unique_validation( $form_id, [ $field_key => '5551234567' ] );
+		$this->assertSame( [], $response['data'] );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * The unique-field set is derived from the stored form, including nested blocks
+	 * and reusable patterns, and ignores non-unique fields.
+	 */
+	public function test_get_unique_field_block_ids_derives_set_from_form() {
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$pattern_id = wp_insert_post(
+			[
+				'post_title'   => 'Reusable field',
+				'post_type'    => 'wp_block',
+				'post_status'  => 'publish',
+				'post_content' => '<!-- wp:srfm/input {"block_id":"inpattern","isUnique":true} /-->',
+			]
+		);
+
+		$form_id = wp_insert_post(
+			[
+				'post_title'   => 'Nested Unique Form',
+				'post_type'    => SRFM_FORMS_POST_TYPE,
+				'post_status'  => 'publish',
+				'post_content' => '<!-- wp:srfm/input {"block_id":"toplevel","isUnique":true} /-->'
+					. '<!-- wp:group --><!-- wp:srfm/input {"block_id":"nested01","isUnique":true} /--><!-- /wp:group -->'
+					. '<!-- wp:srfm/input {"block_id":"notuniq1"} /-->'
+					. '<!-- wp:block {"ref":' . $pattern_id . '} /-->',
+			]
+		);
+
+		$block_ids = $this->call_private_method( $this->form_submit, 'get_unique_field_block_ids', [ $form_id ] );
+
+		$this->assertArrayHasKey( 'toplevel', $block_ids );
+		$this->assertArrayHasKey( 'nested01', $block_ids, 'Fields inside container blocks must be found.' );
+		$this->assertArrayHasKey( 'inpattern', $block_ids, 'Fields inside reusable patterns must be found.' );
+		$this->assertArrayNotHasKey( 'notuniq1', $block_ids, 'Fields without isUnique must not be included.' );
+
+		// A form that does not exist yields an empty set.
+		$this->assertSame( [], $this->call_private_method( $this->form_submit, 'get_unique_field_block_ids', [ 999999 ] ) );
+
+		wp_delete_post( $form_id, true );
+		wp_delete_post( $pattern_id, true );
 	}
 
 	/**
