@@ -302,6 +302,42 @@ class Test_Entries_Table extends TestCase {
 	}
 
 	/**
+	 * Test has_duplicate_field_value matches the exact key and nothing else.
+	 *
+	 * The unauthenticated uniqueness check relies on this: a quote in the key must not
+	 * be able to extend the JSON path into a different member, and a key that is merely
+	 * a prefix/suffix of a stored key must not match. See #2997.
+	 */
+	public function test_has_duplicate_field_value_matches_exact_key_only() {
+		$stored_key = 'srfm-input-exact001-lbl-RW1haWw-email';
+		$form_id    = 987651;
+
+		Entries::add(
+			[
+				'form_id'   => $form_id,
+				'form_data' => [ $stored_key => 'taken@example.com' ],
+			]
+		);
+
+		// Baseline: the exact key matches.
+		$this->assertTrue( Entries::has_duplicate_field_value( $form_id, $stored_key, 'taken@example.com' ) );
+
+		// A partial key must not match.
+		$this->assertFalse( Entries::has_duplicate_field_value( $form_id, 'srfm-input-exact001', 'taken@example.com' ) );
+		$this->assertFalse( Entries::has_duplicate_field_value( $form_id, $stored_key . '-extra', 'taken@example.com' ) );
+
+		// A quote in the key must stay inside one quoted member access rather than
+		// walking the path into another member.
+		$this->assertFalse(
+			Entries::has_duplicate_field_value( $form_id, $stored_key . '"."junk-unique01-lbl-x', 'taken@example.com' ),
+			'A crafted JSON path must not resolve to another field.'
+		);
+
+		// And it must not throw or match on a purely malformed key.
+		$this->assertFalse( Entries::has_duplicate_field_value( $form_id, 'a"b\\c', 'taken@example.com' ) );
+	}
+
+	/**
 	 * Test get_all_entry_ids_for_form returns array.
 	 */
 	public function test_get_all_entry_ids_for_form() {

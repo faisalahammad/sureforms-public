@@ -1369,11 +1369,41 @@ class Form_Submit {
 		 * @since x.x.x
 		 *
 		 * @param array<string,true> $block_ids Unique field block IDs, keyed by block ID.
+		 *                                     A plain list of IDs is accepted too and is
+		 *                                     normalised to this shape.
 		 * @param int                $form_id   Form ID.
 		 */
-		$block_ids = apply_filters( 'srfm_unique_field_block_ids', $block_ids, $form_id );
+		$filtered = apply_filters( 'srfm_unique_field_block_ids', $block_ids, $form_id );
 
-		return is_array( $block_ids ) ? $block_ids : [];
+		// Normalise rather than trust: the lookup is isset( $set[ $block_id ] ), so an
+		// add-on returning a plain list would silently disable uniqueness for the form
+		// instead of adding to it. A non-array return keeps the derived set.
+		return is_array( $filtered ) ? self::normalize_block_id_set( $filtered ) : $block_ids;
+	}
+
+	/**
+	 * Normalise a block-ID collection to a block ID => true map.
+	 *
+	 * Accepts both the documented map shape and a plain list of IDs.
+	 *
+	 * @param array<mixed> $block_ids Block IDs as a map or a list.
+	 *
+	 * @since x.x.x
+	 * @return array<string,true> Block IDs keyed by block ID.
+	 */
+	private static function normalize_block_id_set( $block_ids ) {
+		$normalized = [];
+
+		foreach ( $block_ids as $key => $value ) {
+			// List entry: the ID is the value. Map entry: the ID is the key.
+			$block_id = is_int( $key ) ? $value : $key;
+
+			if ( is_string( $block_id ) && '' !== $block_id ) {
+				$normalized[ $block_id ] = true;
+			}
+		}
+
+		return $normalized;
 	}
 
 	/**
@@ -1381,6 +1411,11 @@ class Form_Submit {
 	 *
 	 * Recurses into innerBlocks (repeater/container children) and expands
 	 * reusable/synced patterns, mirroring Form_Styling::collect_form_block_ids().
+	 *
+	 * Note: parse_blocks() does NOT apply block.json defaults, unlike the render path.
+	 * Every field block therefore has to keep isUnique defaulting to false — a block
+	 * that defaults it to true would be serialised without the attribute and would be
+	 * missed here while still rendering data-unique="true".
 	 *
 	 * @param array<mixed>     $blocks       Parsed blocks from parse_blocks().
 	 * @param array<int, true> $visited_refs Reusable-block post IDs already expanded,

@@ -731,6 +731,47 @@ class Test_Form_Submit extends TestCase {
 	}
 
 	/**
+	 * A srfm_unique_field_block_ids callback returning a plain list must add to the set,
+	 * not silently wipe it — the lookup is isset( $set[ $id ] ), so an un-normalised
+	 * list would disable uniqueness for the whole form.
+	 */
+	public function test_get_unique_field_block_ids_normalizes_filter_shapes() {
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$form_id = wp_insert_post(
+			[
+				'post_title'   => 'Filter Shape Form',
+				'post_type'    => SRFM_FORMS_POST_TYPE,
+				'post_status'  => 'publish',
+				'post_content' => '<!-- wp:srfm/input {"block_id":"derived1","isUnique":true} /-->',
+			]
+		);
+
+		// List shape from an add-on.
+		$as_list = static function () {
+			return [ 'fromlist' ];
+		};
+		add_filter( 'srfm_unique_field_block_ids', $as_list );
+		$ids = $this->call_private_method( $this->form_submit, 'get_unique_field_block_ids', [ $form_id ] );
+		remove_filter( 'srfm_unique_field_block_ids', $as_list );
+
+		$this->assertArrayHasKey( 'fromlist', $ids, 'A list-shaped filter return must be normalised to a map.' );
+		$this->assertTrue( $ids['fromlist'] );
+
+		// A broken filter must not wipe the derived set.
+		$as_garbage = static function () {
+			return 'not-an-array';
+		};
+		add_filter( 'srfm_unique_field_block_ids', $as_garbage );
+		$ids = $this->call_private_method( $this->form_submit, 'get_unique_field_block_ids', [ $form_id ] );
+		remove_filter( 'srfm_unique_field_block_ids', $as_garbage );
+
+		$this->assertArrayHasKey( 'derived1', $ids, 'A non-array filter return must fall back to the derived set.' );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
 	 * The unique-field set is derived from the stored form, including nested blocks
 	 * and reusable patterns, and ignores non-unique fields.
 	 */
