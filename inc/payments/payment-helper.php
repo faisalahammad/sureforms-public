@@ -484,6 +484,7 @@ class Payment_Helper {
 			'payment_amount_not_configured'     => __( 'Payment is currently unavailable. Please contact the site administrator to configure the payment amount.', 'sureforms' ),
 			'invalid_variable_amount'           => __( 'Invalid payment amount', 'sureforms' ),
 			'amount_below_minimum'              => __( 'Payment amount must be at least {symbol}{amount}.', 'sureforms' ),
+			'payment_required'                  => __( 'This form requires a payment. Please complete the payment and submit again.', 'sureforms' ),
 
 			// Field mapping validation.
 			'payment_name_not_mapped'           => __( 'Payment is currently unavailable. Please contact the site administrator to configure the customer name field.', 'sureforms' ),
@@ -862,6 +863,144 @@ class Payment_Helper {
 	}
 
 	/**
+	 * Get the payment methods a payment block can actually offer.
+	 *
+	 * The block's enabled methods intersected with the methods that are registered
+	 * and connected. Shared with Payment_Markup so the renderer and the submission
+	 * guard can never disagree about whether a payment field is usable.
+	 *
+	 * @param array<mixed> $attrs Payment block attributes.
+	 *
+	 * @since x.x.x
+	 * @return array<string, mixed> Usable payment methods, keyed by method ID.
+	 */
+	public static function get_registered_payment_methods( $attrs ) {
+		$methods         = [];
+		$attrs           = is_array( $attrs ) ? $attrs : [];
+		$enabled_methods = isset( $attrs['paymentMethods'] ) && is_array( $attrs['paymentMethods'] ) ? $attrs['paymentMethods'] : [ 'stripe' ];
+
+		// Filter to get method configurations - start with Stripe as default.
+		$available_methods = apply_filters(
+			'srfm_payment_methods_registry',
+			[
+				'stripe' => [
+					'id'              => 'stripe',
+					'label'           => __( 'Stripe', 'sureforms' ),
+					'description'     => __( 'Pay with credit or debit card', 'sureforms' ),
+					'icon'            => 'credit-card',
+					'enabled'         => Stripe_Helper::is_stripe_connected(),
+					'container_class' => 'srfm-stripe-payment-element',
+				],
+			]
+		);
+
+		// Filter enabled methods.
+		foreach ( $enabled_methods as $method_id ) {
+			if ( is_array( $available_methods ) && isset( $available_methods[ $method_id ] ) && ! empty( $available_methods[ $method_id ]['enabled'] ) ) {
+				$methods[ $method_id ] = $available_methods[ $method_id ];
+			}
+		}
+
+		return $methods;
+	}
+
+	/**
+	 * Whether a payment block's configuration produces a usable payment field.
+	 *
+	 * Mirrors the conditions under which Payment_Markup::markup() returns early with
+	 * no markup: no usable payment method, or the customer field mappings the gateway
+	 * needs are missing. A block that renders nothing cannot be required on submit.
+	 *
+	 * @param array<mixed> $attrs Payment block attributes.
+	 *
+	 * @since x.x.x
+	 * @return bool True when the block renders a payment field.
+	 */
+	public static function is_payment_field_active( $attrs ) {
+		if ( ! is_array( $attrs ) ) {
+			return false;
+		}
+
+		if ( empty( self::get_registered_payment_methods( $attrs ) ) ) {
+			return false;
+		}
+
+		// Customer field mappings, including the legacy subscriptionPlan fallbacks.
+		$subscription_plan = isset( $attrs['subscriptionPlan'] ) && is_array( $attrs['subscriptionPlan'] ) ? $attrs['subscriptionPlan'] : [];
+		$email_field       = ! empty( $attrs['customerEmailField'] ) ? $attrs['customerEmailField'] : ( $subscription_plan['customer_email'] ?? '' );
+
+		if ( empty( $email_field ) ) {
+			return false;
+		}
+
+		$payment_type = ! empty( $attrs['paymentType'] ) && is_string( $attrs['paymentType'] ) ? $attrs['paymentType'] : 'one-time';
+
+		// A subscription path also needs the customer name mapping.
+		if ( in_array( $payment_type, [ 'subscription', 'both' ], true ) ) {
+			$name_field = ! empty( $attrs['customerNameField'] ) ? $attrs['customerNameField'] : ( $subscription_plan['customer_name'] ?? '' );
+
+			if ( empty( $name_field ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Get the block IDs of payment fields a submission of this form must pay for.
+	 *
+	 * Derived from the stored form, never from what the client submitted. Blocks that
+	 * render nothing (see is_payment_field_active()) and blocks under conditional logic
+	 * are excluded: conditional logic is evaluated on the client, so a hidden payment
+	 * field legitimately submits no payment value and must not be required here.
+	 *
+	 * @param int $form_id Form ID.
+	 *
+	 * @since x.x.x
+	 * @return array<string> Block IDs that require a verified payment.
+	 */
+	public static function get_required_payment_block_ids( $form_id ) {
+		// absint(), matching Submit_Token::verify()'s normalisation in
+		// Form_Submit::submit_form_permissions_check(). get_integer_value() would keep a
+		// negative id and bail below, so the guard would resolve a different form from
+		// the one the submit token authorised.
+		$form_id = absint( $form_id );
+		$form    = $form_id > 0 ? get_post( $form_id ) : null;
+
+		if ( ! $form instanceof \WP_Post || '' === $form->post_content ) {
+			return [];
+		}
+
+		$block_ids = self::collect_active_payment_block_ids( parse_blocks( $form->post_content ) );
+
+		if ( empty( $block_ids ) ) {
+			return [];
+		}
+
+		// Drop blocks that conditional logic can hide.
+		foreach ( self::get_conditional_logic_block_ids( $form_id ) as $conditional_id ) {
+			unset( $block_ids[ $conditional_id ] );
+		}
+
+		/**
+		 * Filters the payment block IDs that require a verified payment on submit.
+		 *
+		 * Lets add-ons that can evaluate their own visibility rules server-side add or
+		 * remove blocks — e.g. re-adding a conditionally shown payment field once the
+		 * rule is known to have matched.
+		 *
+		 * @since x.x.x
+		 *
+		 * @param array<string> $block_ids Block IDs requiring a verified payment.
+		 * @param int           $form_id   Form ID.
+		 */
+		$block_ids = apply_filters( 'srfm_required_payment_block_ids', array_keys( $block_ids ), $form_id );
+
+		return is_array( $block_ids ) ? $block_ids : [];
+	}
+
+	/**
 	 * Resolve the WordPress user associated with a payment record.
 	 *
 	 * Resolution order:
@@ -938,6 +1077,145 @@ class Payment_Helper {
 	 * @return array|null Validation result array or null if validation passes.
 	 * @since 2.3.0
 	 */
+	/**
+	 * Recursively collect the block IDs of payment blocks that render a payment field.
+	 *
+	 * Recurses into innerBlocks and expands core/block reusable/synced patterns, so a
+	 * payment block that renders from inside a pattern is still required. The payment
+	 * block sets "reusable": false, so reaching that state needs imported or
+	 * hand-authored post_content rather than the editor — but a payment field that
+	 * renders and is not required is exactly the hole this guard exists to close.
+	 *
+	 * @param array<mixed>     $blocks       Parsed blocks from parse_blocks().
+	 * @param array<int, true> $visited_refs Reusable-block post IDs already expanded,
+	 *                                       keyed by ID — guards against reference cycles.
+	 *
+	 * @since x.x.x
+	 * @return array<string,true> Active payment block IDs, keyed by block ID.
+	 */
+	private static function collect_active_payment_block_ids( $blocks, &$visited_refs = [] ) {
+		$block_ids = [];
+
+		foreach ( $blocks as $block ) {
+			if ( ! is_array( $block ) ) {
+				continue;
+			}
+
+			$attrs = isset( $block['attrs'] ) && is_array( $block['attrs'] ) ? $block['attrs'] : [];
+
+			if ( 'srfm/payment' === ( $block['blockName'] ?? '' )
+				&& ! empty( $attrs['block_id'] )
+				&& is_scalar( $attrs['block_id'] )
+				&& self::is_payment_field_active( $attrs )
+			) {
+				$block_ids[ Helper::get_string_value( $attrs['block_id'] ) ] = true;
+			}
+
+			if ( isset( $block['blockName'] ) && 'core/block' === $block['blockName'] && ! empty( $attrs['ref'] ) && is_scalar( $attrs['ref'] ) ) {
+				$ref = absint( $attrs['ref'] );
+
+				if ( $ref && ! isset( $visited_refs[ $ref ] ) ) {
+					$visited_refs[ $ref ] = true;
+					$ref_post             = get_post( $ref );
+
+					if ( $ref_post instanceof \WP_Post && 'wp_block' === $ref_post->post_type && '' !== $ref_post->post_content ) {
+						$block_ids += self::collect_active_payment_block_ids( parse_blocks( $ref_post->post_content ), $visited_refs );
+					}
+				}
+			}
+
+			if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
+				$block_ids += self::collect_active_payment_block_ids( $block['innerBlocks'], $visited_refs );
+			}
+		}
+
+		return $block_ids;
+	}
+
+	/**
+	 * Get the block IDs a form has conditional logic rules for.
+	 *
+	 * Field visibility rules live in the `_srfm_conditional_logic` post meta, keyed by
+	 * block ID, and are evaluated on the client. A payment field under such a rule may
+	 * legitimately be hidden at submit time.
+	 *
+	 * @param int $form_id Form ID.
+	 *
+	 * @since x.x.x
+	 * @return array<string> Block IDs carrying conditional logic rules.
+	 */
+	private static function get_conditional_logic_block_ids( $form_id ) {
+		// Only exempt when conditional logic can actually hide anything. The rules are
+		// evaluated client-side by the add-on that registers this meta; without it
+		// nothing hides, so a stale rule (e.g. written by a form importer on a site that
+		// never had the add-on) must not buy a payment block an exemption.
+		if ( ! registered_meta_key_exists( 'post', '_srfm_conditional_logic', SRFM_FORMS_POST_TYPE ) ) {
+			return [];
+		}
+
+		$conditional_logic = get_post_meta( $form_id, '_srfm_conditional_logic', true );
+
+		if ( ! is_array( $conditional_logic ) ) {
+			return [];
+		}
+
+		$block_ids = [];
+
+		foreach ( $conditional_logic as $item ) {
+			if ( ! is_array( $item ) ) {
+				continue;
+			}
+
+			foreach ( $item as $block_id => $rule ) {
+				if ( ! is_string( $block_id ) || '' === $block_id ) {
+					continue;
+				}
+
+				// An actionable rule only — a rule with no conditions can never match, so
+				// the field's visibility is never altered and payment stays required.
+				if ( self::has_actionable_conditional_rule( $rule ) ) {
+					$block_ids[] = $block_id;
+				}
+			}
+		}
+
+		return $block_ids;
+	}
+
+	/**
+	 * Whether a stored conditional-logic rule can actually change a field's visibility.
+	 *
+	 * Both `show` and `hide` actions can leave the field hidden for a given submission
+	 * (show = hidden until the conditions match, hide = visible until they match), so the
+	 * action itself is not the discriminator — the presence of at least one real condition
+	 * is. Empty or malformed rules are left behind by editor cleanup and must not exempt
+	 * a payment block.
+	 *
+	 * @param mixed $rule Stored rule for a single block.
+	 *
+	 * @since x.x.x
+	 * @return bool True when the rule carries at least one condition.
+	 */
+	private static function has_actionable_conditional_rule( $rule ) {
+		if ( ! is_array( $rule ) || empty( $rule['action'] ) || empty( $rule['logic'] ) || ! is_array( $rule['logic'] ) ) {
+			return false;
+		}
+
+		foreach ( $rule['logic'] as $conditions ) {
+			if ( ! is_array( $conditions ) ) {
+				continue;
+			}
+
+			foreach ( $conditions as $condition ) {
+				if ( is_array( $condition ) && ! empty( $condition['field'] ) ) {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
 	/**
 	 * BOTH MODE: resolve the correct amount config keys from the payment block
 	 * config based on which flow (one-time or subscription) the user chose.
