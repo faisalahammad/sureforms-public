@@ -806,10 +806,39 @@ class Test_Payment_Helper extends TestCase {
 		$this->assertNotContains( 'broken03', $required, 'A block that renders nothing must not be required.' );
 		$this->assertNotContains( 'plain04', $required );
 
-		// Conditional logic can hide a field client-side, so it is not required here.
-		update_post_meta( $form_id, '_srfm_conditional_logic', [ [ 'active01' => [ 'action' => 'show' ] ] ] );
+		// An actionable conditional-logic rule can hide the field client-side, so that
+		// block is not required — but only while something is there to evaluate it, and
+		// only for a rule that carries at least one condition.
+		$actionable = [
+			[
+				'active01' => [
+					'action' => 'show',
+					'logic'  => [ [ [ 'field' => 'email', 'operator' => '===', 'value' => 'yes' ] ] ],
+				],
+			],
+		];
+
+		// Unregistered meta (no evaluator present) => the rule buys nothing.
+		update_post_meta( $form_id, '_srfm_conditional_logic', $actionable );
+		$this->assertContains( 'active01', Payment_Helper::get_required_payment_block_ids( $form_id ) );
+
+		register_post_meta(
+			SRFM_FORMS_POST_TYPE,
+			'_srfm_conditional_logic',
+			[
+				'type'   => 'array',
+				'single' => true,
+			]
+		);
+
 		$this->assertNotContains( 'active01', Payment_Helper::get_required_payment_block_ids( $form_id ) );
 		$this->assertContains( 'nested02', Payment_Helper::get_required_payment_block_ids( $form_id ) );
+
+		// A rule with no conditions can never match, so the block stays required.
+		update_post_meta( $form_id, '_srfm_conditional_logic', [ [ 'active01' => [ 'action' => 'show' ] ] ] );
+		$this->assertContains( 'active01', Payment_Helper::get_required_payment_block_ids( $form_id ) );
+
+		unregister_post_meta( SRFM_FORMS_POST_TYPE, '_srfm_conditional_logic' );
 		delete_post_meta( $form_id, '_srfm_conditional_logic' );
 
 		// Missing form / empty content => nothing required.
@@ -818,6 +847,46 @@ class Test_Payment_Helper extends TestCase {
 
 		remove_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
 		wp_delete_post( $form_id, true );
+	}
+
+	public function test_get_required_payment_block_ids_expands_reusable_patterns() {
+		add_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$attrs = wp_json_encode(
+			[
+				'block_id'           => 'inpattern',
+				'paymentType'        => 'one-time',
+				'customerEmailField' => 'email',
+			]
+		);
+
+		$pattern_id = wp_insert_post(
+			[
+				'post_title'   => 'Reusable payment',
+				'post_type'    => 'wp_block',
+				'post_status'  => 'publish',
+				'post_content' => '<!-- wp:srfm/payment ' . $attrs . ' /-->',
+			]
+		);
+		$form_id    = wp_insert_post(
+			[
+				'post_title'   => 'Pattern Payment Form',
+				'post_type'    => SRFM_FORMS_POST_TYPE,
+				'post_status'  => 'publish',
+				'post_content' => '<!-- wp:block {"ref":' . $pattern_id . '} /-->',
+			]
+		);
+
+		$this->assertContains(
+			'inpattern',
+			Payment_Helper::get_required_payment_block_ids( $form_id ),
+			'A payment block that renders from inside a synced pattern must still be required.'
+		);
+
+		remove_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+		wp_delete_post( $form_id, true );
+		wp_delete_post( $pattern_id, true );
 	}
 
 	public function test_get_payment_strings_has_payment_required_message() {

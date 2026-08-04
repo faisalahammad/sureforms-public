@@ -961,7 +961,11 @@ class Payment_Helper {
 	 * @return array<string> Block IDs that require a verified payment.
 	 */
 	public static function get_required_payment_block_ids( $form_id ) {
-		$form_id = Helper::get_integer_value( $form_id );
+		// absint(), matching Submit_Token::verify()'s normalisation in
+		// Form_Submit::submit_form_permissions_check(). get_integer_value() would keep a
+		// negative id and bail below, so the guard would resolve a different form from
+		// the one the submit token authorised.
+		$form_id = absint( $form_id );
 		$form    = $form_id > 0 ? get_post( $form_id ) : null;
 
 		if ( ! $form instanceof \WP_Post || '' === $form->post_content ) {
@@ -1076,12 +1080,20 @@ class Payment_Helper {
 	/**
 	 * Recursively collect the block IDs of payment blocks that render a payment field.
 	 *
-	 * @param array<mixed> $blocks Parsed blocks from parse_blocks().
+	 * Recurses into innerBlocks and expands core/block reusable/synced patterns, so a
+	 * payment block that renders from inside a pattern is still required. The payment
+	 * block sets "reusable": false, so reaching that state needs imported or
+	 * hand-authored post_content rather than the editor — but a payment field that
+	 * renders and is not required is exactly the hole this guard exists to close.
+	 *
+	 * @param array<mixed>     $blocks       Parsed blocks from parse_blocks().
+	 * @param array<int, true> $visited_refs Reusable-block post IDs already expanded,
+	 *                                       keyed by ID — guards against reference cycles.
 	 *
 	 * @since x.x.x
 	 * @return array<string,true> Active payment block IDs, keyed by block ID.
 	 */
-	private static function collect_active_payment_block_ids( $blocks ) {
+	private static function collect_active_payment_block_ids( $blocks, &$visited_refs = [] ) {
 		$block_ids = [];
 
 		foreach ( $blocks as $block ) {
@@ -1099,8 +1111,21 @@ class Payment_Helper {
 				$block_ids[ Helper::get_string_value( $attrs['block_id'] ) ] = true;
 			}
 
+			if ( isset( $block['blockName'] ) && 'core/block' === $block['blockName'] && ! empty( $attrs['ref'] ) && is_scalar( $attrs['ref'] ) ) {
+				$ref = absint( $attrs['ref'] );
+
+				if ( $ref && ! isset( $visited_refs[ $ref ] ) ) {
+					$visited_refs[ $ref ] = true;
+					$ref_post             = get_post( $ref );
+
+					if ( $ref_post instanceof \WP_Post && 'wp_block' === $ref_post->post_type && '' !== $ref_post->post_content ) {
+						$block_ids += self::collect_active_payment_block_ids( parse_blocks( $ref_post->post_content ), $visited_refs );
+					}
+				}
+			}
+
 			if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
-				$block_ids += self::collect_active_payment_block_ids( $block['innerBlocks'] );
+				$block_ids += self::collect_active_payment_block_ids( $block['innerBlocks'], $visited_refs );
 			}
 		}
 
@@ -1120,6 +1145,14 @@ class Payment_Helper {
 	 * @return array<string> Block IDs carrying conditional logic rules.
 	 */
 	private static function get_conditional_logic_block_ids( $form_id ) {
+		// Only exempt when conditional logic can actually hide anything. The rules are
+		// evaluated client-side by the add-on that registers this meta; without it
+		// nothing hides, so a stale rule (e.g. written by a form importer on a site that
+		// never had the add-on) must not buy a payment block an exemption.
+		if ( ! registered_meta_key_exists( 'post', '_srfm_conditional_logic', SRFM_FORMS_POST_TYPE ) ) {
+			return [];
+		}
+
 		$conditional_logic = get_post_meta( $form_id, '_srfm_conditional_logic', true );
 
 		if ( ! is_array( $conditional_logic ) ) {
@@ -1133,14 +1166,54 @@ class Payment_Helper {
 				continue;
 			}
 
-			foreach ( array_keys( $item ) as $block_id ) {
-				if ( is_string( $block_id ) && '' !== $block_id ) {
+			foreach ( $item as $block_id => $rule ) {
+				if ( ! is_string( $block_id ) || '' === $block_id ) {
+					continue;
+				}
+
+				// An actionable rule only — a rule with no conditions can never match, so
+				// the field's visibility is never altered and payment stays required.
+				if ( self::has_actionable_conditional_rule( $rule ) ) {
 					$block_ids[] = $block_id;
 				}
 			}
 		}
 
 		return $block_ids;
+	}
+
+	/**
+	 * Whether a stored conditional-logic rule can actually change a field's visibility.
+	 *
+	 * Both `show` and `hide` actions can leave the field hidden for a given submission
+	 * (show = hidden until the conditions match, hide = visible until they match), so the
+	 * action itself is not the discriminator — the presence of at least one real condition
+	 * is. Empty or malformed rules are left behind by editor cleanup and must not exempt
+	 * a payment block.
+	 *
+	 * @param mixed $rule Stored rule for a single block.
+	 *
+	 * @since x.x.x
+	 * @return bool True when the rule carries at least one condition.
+	 */
+	private static function has_actionable_conditional_rule( $rule ) {
+		if ( ! is_array( $rule ) || empty( $rule['action'] ) || empty( $rule['logic'] ) || ! is_array( $rule['logic'] ) ) {
+			return false;
+		}
+
+		foreach ( $rule['logic'] as $conditions ) {
+			if ( ! is_array( $conditions ) ) {
+				continue;
+			}
+
+			foreach ( $conditions as $condition ) {
+				if ( is_array( $condition ) && ! empty( $condition['field'] ) ) {
+					return true;
+				}
+			}
+		}
+
+		return false;
 	}
 
 	/**

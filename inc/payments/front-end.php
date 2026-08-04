@@ -1154,7 +1154,8 @@ class Front_End {
 	 * @return array<mixed> Form data, carrying an `error` key when a payment is missing.
 	 */
 	private function require_verified_payments( $form_data, $verified_block_ids ) {
-		$form_id = isset( $form_data['form-id'] ) ? Helper::get_integer_value( $form_data['form-id'] ) : 0;
+		// absint() to match the normalisation the submit token was verified against.
+		$form_id = isset( $form_data['form-id'] ) ? absint( Helper::get_string_value( $form_data['form-id'] ) ) : 0;
 
 		if ( 0 === $form_id ) {
 			return $form_data;

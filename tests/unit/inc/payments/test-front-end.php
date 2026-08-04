@@ -364,10 +364,28 @@ class Test_Front_End_Payments extends TestCase {
 	}
 
 	/**
+	 * Register the conditional-logic meta the way the Pro add-on does, so the exclusion
+	 * is reachable in a free-only test environment.
+	 *
+	 * @return void
+	 */
+	private function register_conditional_logic_meta() {
+		register_post_meta(
+			SRFM_FORMS_POST_TYPE,
+			'_srfm_conditional_logic',
+			[
+				'type'   => 'array',
+				'single' => true,
+			]
+		);
+	}
+
+	/**
 	 * A payment field under conditional logic may legitimately be hidden client-side.
 	 */
 	public function test_validate_payment_fields_ignores_conditionally_hidden_payment_block() {
 		add_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+		$this->register_conditional_logic_meta();
 
 		$form_id = $this->make_payment_form();
 		update_post_meta(
@@ -386,6 +404,90 @@ class Test_Front_End_Payments extends TestCase {
 		$result = $this->front_end->validate_payment_fields( [ 'form-id' => $form_id ] );
 
 		$this->assertArrayNotHasKey( 'error', $result );
+
+		// A `hide` rule leaves the field visible by default, but it can still be hidden
+		// when the conditions match, so it is exempt on the same grounds.
+		update_post_meta(
+			$form_id,
+			'_srfm_conditional_logic',
+			[
+				[
+					'pay12345' => [
+						'action' => 'hide',
+						'logic'  => [ [ [ 'field' => 'email', 'operator' => '===', 'value' => 'yes' ] ] ],
+					],
+				],
+			]
+		);
+		$this->assertArrayNotHasKey( 'error', $this->front_end->validate_payment_fields( [ 'form-id' => $form_id ] ) );
+
+		unregister_post_meta( SRFM_FORMS_POST_TYPE, '_srfm_conditional_logic' );
+		remove_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * A conditional-logic rule with no conditions can never hide the field, so it must
+	 * not buy the payment block an exemption from the requirement.
+	 */
+	public function test_validate_payment_fields_requires_payment_for_empty_conditional_rule() {
+		add_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+		$this->register_conditional_logic_meta();
+
+		$form_id = $this->make_payment_form();
+
+		foreach ( [ [], [ [] ], [ [ [] ] ] ] as $empty_logic ) {
+			update_post_meta(
+				$form_id,
+				'_srfm_conditional_logic',
+				[
+					[
+						'pay12345' => [
+							'action' => 'show',
+							'logic'  => $empty_logic,
+						],
+					],
+				]
+			);
+
+			$this->assertArrayHasKey(
+				'error',
+				$this->front_end->validate_payment_fields( [ 'form-id' => $form_id ] ),
+				'A rule with no conditions must not exempt the payment block.'
+			);
+		}
+
+		unregister_post_meta( SRFM_FORMS_POST_TYPE, '_srfm_conditional_logic' );
+		remove_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * Without the add-on that evaluates conditional logic, nothing hides the field, so a
+	 * stale rule (e.g. written by a form importer) must not exempt it either.
+	 */
+	public function test_validate_payment_fields_requires_payment_when_conditional_logic_unregistered() {
+		add_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+
+		$form_id = $this->make_payment_form();
+		update_post_meta(
+			$form_id,
+			'_srfm_conditional_logic',
+			[
+				[
+					'pay12345' => [
+						'action' => 'show',
+						'logic'  => [ [ [ 'field' => 'email', 'operator' => '===', 'value' => 'yes' ] ] ],
+					],
+				],
+			]
+		);
+
+		$this->assertArrayHasKey(
+			'error',
+			$this->front_end->validate_payment_fields( [ 'form-id' => $form_id ] ),
+			'A conditional-logic rule must not exempt a payment block when nothing evaluates it.'
+		);
 
 		remove_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
 		wp_delete_post( $form_id, true );
