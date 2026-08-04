@@ -766,9 +766,18 @@ class Entries {
 	 * @return void
 	 */
 	private static function write_csv_header( $stream, $block_labels ) {
+		// Labels are decoded out of stored form_data keys, so they are submitter-influenced
+		// and need the same formula escaping as the data cells — see write_csv_rows().
+		$labels = array_map(
+			static function ( $label ) {
+				return self::escape_csv_formula( Helper::get_string_value( $label ) );
+			},
+			array_values( $block_labels )
+		);
+
 		$header = array_merge(
 			[ __( 'Entry ID', 'sureforms' ), __( 'Date', 'sureforms' ), __( 'Status', 'sureforms' ) ],
-			array_values( $block_labels )
+			$labels
 		);
 		fputcsv( $stream, $header ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fputcsv
 	}

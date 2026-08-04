@@ -445,6 +445,49 @@ class Test_Entries extends TestCase {
 	}
 
 	/**
+	 * Test write_csv_header neutralizes formula injection in column labels.
+	 *
+	 * Labels are decoded out of stored form_data keys, so an anonymous submitter can
+	 * influence them — see #2996. Data cells were already escaped; the header was not.
+	 */
+	public function test_write_csv_header_escapes_formula_in_labels() {
+		$stream = fopen( 'php://temp', 'r+' );
+
+		$this->call_private_method_static(
+			Entries::class,
+			'write_csv_header',
+			[ $stream, [ 'abc123' => "=cmd|'/c calc'!A1" ] ]
+		);
+
+		rewind( $stream );
+		$csv = stream_get_contents( $stream );
+		fclose( $stream );
+
+		$this->assertStringContainsString( "'=cmd|'/c calc'!A1", $csv, 'Formula label must be prefixed with a single quote.' );
+		$this->assertStringNotContainsString( ',=cmd', $csv, 'Formula label must never reach the header unescaped.' );
+	}
+
+	/**
+	 * Test write_csv_header leaves ordinary labels untouched.
+	 */
+	public function test_write_csv_header_keeps_plain_labels_unchanged() {
+		$stream = fopen( 'php://temp', 'r+' );
+
+		$this->call_private_method_static(
+			Entries::class,
+			'write_csv_header',
+			[ $stream, [ 'abc123' => 'Full Name' ] ]
+		);
+
+		rewind( $stream );
+		$csv = stream_get_contents( $stream );
+		fclose( $stream );
+
+		$this->assertStringContainsString( 'Full Name', $csv );
+		$this->assertStringNotContainsString( "'Full Name", $csv );
+	}
+
+	/**
 	 * Helper method to call private static methods for testing.
 	 */
 	private function call_private_method_static( $class, $method_name, $parameters = [] ) {
