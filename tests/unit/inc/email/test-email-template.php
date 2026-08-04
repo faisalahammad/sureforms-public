@@ -63,6 +63,35 @@ class Test_Email_Template extends TestCase {
 	}
 
 	/**
+	 * Test the {all_data} label is escaped as text and cannot smuggle markup into the email.
+	 *
+	 * The label is base64-decoded out of the submitted field key, so it is fully
+	 * attacker-controllable — see #2991.
+	 */
+	public function test_render_escapes_all_data_field_label() {
+		$payload    = '<a href="https://evil.example">Click to verify</a>';
+		$field_name = 'srfm-input-lbl-' . rtrim( base64_encode( $payload ), '=' ) . '-x';
+
+		$result = $this->email_template->render( [ $field_name => 'submitted value' ], '{all_data}' );
+
+		$this->assertStringNotContainsString( '<a href="https://evil.example"', $result );
+		$this->assertStringContainsString( '&lt;a href=', $result );
+		$this->assertStringContainsString( 'submitted value', $result );
+	}
+
+	/**
+	 * Test a plain {all_data} label still renders readably after escaping.
+	 */
+	public function test_render_keeps_plain_all_data_field_label_readable() {
+		$field_name = 'srfm-input-lbl-' . rtrim( base64_encode( 'Full Name' ), '=' ) . '-x';
+
+		$result = $this->email_template->render( [ $field_name => 'Jane' ], '{all_data}' );
+
+		$this->assertStringContainsString( 'Full Name', $result );
+		$this->assertStringContainsString( 'Jane', $result );
+	}
+
+	/**
 	 * Test remove_border_from_last_tr_td_table removes border from last row.
 	 */
 	public function test_remove_border_from_last_tr_td_table() {

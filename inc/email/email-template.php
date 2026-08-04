@@ -316,7 +316,8 @@ class Email_Template {
 					?>
 				<tr class="field-label">
 					<th style="<?php echo esc_attr( $td_style ); ?>color: #1E293B;background-color: #F1F5F9;">
-						<strong><?php echo wp_kses_post( html_entity_decode( $field_label ) ); ?>:</strong>
+						<?php // The label is decoded from the submitted field key, so it is attacker-controllable — escape it as text, never as markup. ?>
+						<strong><?php echo esc_html( html_entity_decode( $field_label ) ); ?>:</strong>
 					</th>
 				</tr>
 				<tr class="field-value">
