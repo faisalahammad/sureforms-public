@@ -518,6 +518,43 @@ class Entries {
 	}
 
 	/**
+	 * Neutralize CSV formula/macro injection in an exported cell.
+	 *
+	 * Spreadsheet applications (Excel, Google Sheets, LibreOffice) interpret a
+	 * cell whose value begins with `=`, `+`, `-`, `@`, a tab, or a carriage
+	 * return as a formula and may execute it when an admin opens the export.
+	 * A submitter could store `=HYPERLINK(...)` or `=cmd|...` in a field and
+	 * have it run on the admin's machine. Prefixing such values with a single
+	 * quote forces the spreadsheet to treat them as literal text.
+	 *
+	 * Well-formed numbers (including negative and decimal values) are returned
+	 * unchanged so numeric columns remain numeric in the spreadsheet.
+	 *
+	 * Public so every CSV writer in the product can share one implementation rather
+	 * than carrying its own copy — SureForms Pro exports partial entries through a
+	 * separate writer and needs the same guard.
+	 *
+	 * @param string $value Cell value (already normalized for CSV).
+	 *
+	 * @since 2.10.0
+	 * @since x.x.x Promoted from private to public so other export writers can reuse it.
+	 * @return string Safe cell value.
+	 */
+	public static function escape_csv_formula( $value ) {
+		$value = Helper::get_string_value( $value );
+
+		if ( '' === $value || is_numeric( $value ) ) {
+			return $value;
+		}
+
+		if ( in_array( $value[0], [ '=', '+', '-', '@', "\t", "\r" ], true ) ) {
+			return "'" . $value;
+		}
+
+		return $value;
+	}
+
+	/**
 	 * Build where conditions for entry queries.
 	 *
 	 * @param array<string, int|string|array<int>> $args Query arguments.
@@ -867,42 +904,5 @@ class Entries {
 		}
 
 		return sanitize_text_field( Helper::get_string_value( $field_value ) );
-	}
-
-	/**
-	 * Neutralize CSV formula/macro injection in an exported cell.
-	 *
-	 * Spreadsheet applications (Excel, Google Sheets, LibreOffice) interpret a
-	 * cell whose value begins with `=`, `+`, `-`, `@`, a tab, or a carriage
-	 * return as a formula and may execute it when an admin opens the export.
-	 * A submitter could store `=HYPERLINK(...)` or `=cmd|...` in a field and
-	 * have it run on the admin's machine. Prefixing such values with a single
-	 * quote forces the spreadsheet to treat them as literal text.
-	 *
-	 * Well-formed numbers (including negative and decimal values) are returned
-	 * unchanged so numeric columns remain numeric in the spreadsheet.
-	 *
-	 * Public so every CSV writer in the product can share one implementation rather
-	 * than carrying its own copy — SureForms Pro exports partial entries through a
-	 * separate writer and needs the same guard.
-	 *
-	 * @param string $value Cell value (already normalized for CSV).
-	 *
-	 * @since 2.10.0
-	 * @since x.x.x Promoted from private to public so other export writers can reuse it.
-	 * @return string Safe cell value.
-	 */
-	public static function escape_csv_formula( $value ) {
-		$value = Helper::get_string_value( $value );
-
-		if ( '' === $value || is_numeric( $value ) ) {
-			return $value;
-		}
-
-		if ( in_array( $value[0], [ '=', '+', '-', '@', "\t", "\r" ], true ) ) {
-			return "'" . $value;
-		}
-
-		return $value;
 	}
 }
