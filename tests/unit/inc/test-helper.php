@@ -3029,4 +3029,38 @@ class Test_Helper extends TestCase {
 			$this->assertSame( Helper::decode( Helper::encode( $v ) ), Helper::decrypt( Helper::encrypt( $v ) ), 'decrypt() alias equals decode()' );
 		}
 	}
+
+	/**
+	 * The deprecated decrypt() alias delegates to decode() unchanged.
+	 */
+	public function test_decrypt_alias_delegates_to_decode() {
+		$this->assertSame( 'hello', Helper::decrypt( 'aGVsbG8' ), 'decodes a padding-stripped value' );
+		$this->assertSame( Helper::decode( 'aGVsbG8' ), Helper::decrypt( 'aGVsbG8' ) );
+		$this->assertSame( '', Helper::decrypt( '' ), 'empty input returns empty' );
+		$this->assertSame( '', Helper::decrypt( null ), 'non-string input returns empty' );
+
+		// Round-trips through the alias pair, and through mixed old/new names.
+		$this->assertSame( 'Full Name', Helper::decrypt( Helper::encode( 'Full Name' ) ) );
+		$this->assertSame( 'Full Name', Helper::decode( Helper::encrypt( 'Full Name' ) ) );
+	}
+
+	/**
+	 * fetch_svg() wraps a known icon in the srfm-icon span, merges the extra class and
+	 * raw attributes, and degrades to an empty span for an unknown icon.
+	 */
+	public function test_fetch_svg() {
+		$markup = Helper::fetch_svg( 'circle-checked', 'srfm-payment-icon', 'aria-hidden="true"' );
+
+		$this->assertStringContainsString( 'class="srfm-icon srfm-payment-icon"', $markup );
+		$this->assertStringContainsString( 'aria-hidden="true"', $markup );
+		$this->assertStringContainsString( '<svg', $markup );
+
+		// No class / no attributes still produces the wrapper.
+		$this->assertStringContainsString( 'class="srfm-icon"', Helper::fetch_svg( 'circle-checked' ) );
+
+		// Unknown icon: wrapper only, no SVG.
+		$unknown = Helper::fetch_svg( 'no-such-icon-12345' );
+		$this->assertStringContainsString( 'class="srfm-icon"', $unknown );
+		$this->assertStringNotContainsString( '<svg', $unknown );
+	}
 }
