@@ -283,6 +283,11 @@ class Form_Submit {
 			);
 		}
 
+		// Drop submitted keys this form does not define before anything consumes them.
+		// Runs on SUBMISSION only, so historical entries whose keys no longer match a
+		// rebuilt form (see #2665) stay fully readable on the read/export paths.
+		$form_data = Field_Validation::strip_unknown_field_keys( $form_data, $current_form_id );
+
 		$validated_form_data = Field_Validation::validate_form_data( $form_data, $current_form_id );
 
 		if ( ! empty( $validated_form_data ) ) {
