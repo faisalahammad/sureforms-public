@@ -298,14 +298,14 @@ class Field_Validation {
 			}
 
 			$get_name_with_id = explode( '-lbl-', $key );
-			// Extract the part after the last '-' in the key, if it matches the pattern.
-			// Example: $get_name_with_id[0] = "srfm-email-c867d9d9".
-			// $extracted_id = "c867d9d9".
-			$extracted_id = '';
-			if ( is_string( $key ) && preg_match( '/-([a-zA-Z0-9]+)$/', $get_name_with_id[0], $matches ) ) {
-				$extracted_id = $matches[1];
-				// Now $extracted_id contains "c867d9d9" for "srfm-email-c867d9d9".
-			}
+			// Extract the block id, i.e. the segment right before the first '-lbl-'.
+			// Example: $get_name_with_id[0] = "srfm-email-c867d9d9" => "c867d9d9".
+			//
+			// Uses the shared Helper so submission agrees with every downstream consumer
+			// of a field key (entries export, uniqueness check, smart tags). A local
+			// regex here would define a second, subtly different notion of "the block
+			// id" and the two could disagree on a legacy id.
+			$extracted_id = is_string( $key ) ? Helper::get_block_id_from_key( $key ) : '';
 
 			// Reject fields the form does not define.
 			//

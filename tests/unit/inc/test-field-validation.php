@@ -510,6 +510,32 @@ class Test_Field_Validation extends TestCase {
 	}
 
 	/**
+	 * REGRESSION: a submitted key whose block id is not all-alphanumeric must still
+	 * resolve to that block id, so a legitimate field is not rejected as unknown.
+	 *
+	 * The guard extracts the id with Helper::get_block_id_from_key() — the same helper
+	 * every downstream consumer uses. A local regex would return nothing here and the
+	 * field would be rejected.
+	 */
+	public function test_validate_form_data_accepts_non_alphanumeric_block_id() {
+		$form_id = wp_insert_post(
+			[
+				'post_type'    => 'sureforms_form',
+				'post_status'  => 'publish',
+				'post_title'   => 'Odd Block Id Form',
+				'post_content' => '<!-- wp:srfm/input {"block_id":"ab_12cd"} /-->',
+			]
+		);
+
+		$key    = 'srfm-input-ab_12cd-lbl-UmVhbA-real';
+		$errors = Field_Validation::validate_form_data( [ $key => 'ok' ], $form_id );
+
+		$this->assertArrayNotHasKey( $key, $errors, 'A field whose block id contains an underscore must not be rejected.' );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
 	 * Invalid form ids return an empty set (callers fail open).
 	 */
 	public function test_get_known_field_block_ids_empty_for_invalid_form() {
