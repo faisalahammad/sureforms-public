@@ -29,7 +29,7 @@ trait Entry_Parser {
 	/**
 	 * Parse a raw entry array into the standard response shape.
 	 *
-	 * Handles form data decryption, form title lookup,
+	 * Handles form data decoding, form title lookup,
 	 * submission info building (with IP masking), and user info.
 	 *
 	 * @param array<string,mixed> $entry Raw entry from the database.

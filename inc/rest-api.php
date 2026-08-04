@@ -823,7 +823,9 @@ class Rest_Api {
 				 *
 				 * This filter is used to allow 3rd party plugins or custom code to modify
 				 * the entry field value in the entry details REST API response, if required.
-				 * For example, you may want to decrypt, format, or mask sensitive data before output.
+				 * For example, you may want to format, mask, or otherwise transform sensitive
+				 * data before output. Note the value reaching this filter is not encrypted by
+				 * SureForms — labels and values are carried as unkeyed base64 at most.
 				 *
 				 * @since 2.0.0
 				 *

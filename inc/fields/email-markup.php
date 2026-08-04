@@ -37,7 +37,7 @@ class Email_Markup extends Base {
 	protected $input_confirm_label_fallback;
 
 	/**
-	 * Encrypted label for the confirmation input field.
+	 * Encoded label for the confirmation input field.
 	 *
 	 * @var string
 	 * @since 0.0.2
