@@ -463,8 +463,38 @@ class Test_Entries extends TestCase {
 		$csv = stream_get_contents( $stream );
 		fclose( $stream );
 
-		$this->assertStringContainsString( "'=cmd|'/c calc'!A1", $csv, 'Formula label must be prefixed with a single quote.' );
-		$this->assertStringNotContainsString( ',=cmd', $csv, 'Formula label must never reach the header unescaped.' );
+		// Parse the row back rather than substring-matching: the payload contains a
+		// space, so fputcsv() quotes the field either way and a naive ",=cmd" negative
+		// assertion would pass even with the fix reverted.
+		$cells = str_getcsv( trim( $csv ) );
+
+		$this->assertSame( "'=cmd|'/c calc'!A1", end( $cells ), 'Formula label must be quote-prefixed in the header cell.' );
+	}
+
+	/**
+	 * Test escape_csv_formula neutralizes each dangerous leading character and leaves
+	 * ordinary and numeric values alone.
+	 *
+	 * Now public so Pro's separate partial-entries writer can share it instead of
+	 * carrying its own weaker copy.
+	 */
+	public function test_escape_csv_formula() {
+		foreach ( [ '=', '+', '-', '@', "\t", "\r" ] as $trigger ) {
+			$this->assertSame(
+				"'" . $trigger . 'HYPERLINK("http://evil")',
+				Entries::escape_csv_formula( $trigger . 'HYPERLINK("http://evil")' ),
+				'Leading ' . wp_json_encode( $trigger ) . ' must be neutralized.'
+			);
+		}
+
+		// Ordinary text is untouched.
+		$this->assertSame( 'Full Name', Entries::escape_csv_formula( 'Full Name' ) );
+		$this->assertSame( '', Entries::escape_csv_formula( '' ) );
+
+		// Numeric columns must stay numeric in the spreadsheet.
+		foreach ( [ '42', '-5', '3.14', '-0.5', '1e3' ] as $number ) {
+			$this->assertSame( $number, Entries::escape_csv_formula( $number ), $number . ' must remain numeric.' );
+		}
 	}
 
 	/**
