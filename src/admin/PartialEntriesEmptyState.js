@@ -4,7 +4,7 @@
  * Mirrors the SurveyEmptyState layout with the shared dashboard Header
  * so the page feels like a first-class admin screen.
  *
- * @since 2.12.3
+ * @since 2.9.0
  */
 
 import { createRoot } from '@wordpress/element';

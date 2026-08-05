@@ -6,7 +6,7 @@
  * selection; previously-imported forms show a badge, a link to the existing
  * SureForms post, and a re-import behavior control (update / skip / create).
  *
- * @since 2.12.3
+ * @since 2.11.0
  */
 
 import { useEffect, useMemo, useState } from '@wordpress/element';

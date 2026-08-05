@@ -7,7 +7,7 @@
  * (ImportResult). Mounted from `src/admin/settings/Component.js` when the URL
  * `tab` query param equals `migration-settings`.
  *
- * @since 2.12.3
+ * @since 2.11.0
  */
 
 import { useEffect, useState } from '@wordpress/element';

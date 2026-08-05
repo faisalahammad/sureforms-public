@@ -11,7 +11,7 @@
  * so `parse()` would return `core/missing` blocks and lose the field names.
  * The regex is registration-independent and mirrors the server-side emitter.
  *
- * @since 2.12.3
+ * @since 2.11.0
  */
 
 import { __ } from '@wordpress/i18n';

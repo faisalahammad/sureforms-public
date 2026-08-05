@@ -5,7 +5,7 @@
  * endpoints registered in `inc/migrator/bootstrap.php`. The REST nonce is
  * attached automatically by WordPress's apiFetch middleware.
  *
- * @since 2.12.3
+ * @since 2.11.0
  */
 
 import apiFetch from '@wordpress/api-fetch';

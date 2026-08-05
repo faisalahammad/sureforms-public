@@ -1,7 +1,7 @@
 /**
  * Payment History Block.
  *
- * @since 2.12.3
+ * @since 2.8.0
  */
 
 import { MdOutlineReceipt as icon } from 'react-icons/md';

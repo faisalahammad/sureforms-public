@@ -11,7 +11,7 @@
  * properties are defined in a <style> tag nested inside the container.
  *
  * @package
- * @since 2.12.3
+ * @since 2.7.0
  */
 ( function () {
 	'use strict';
@@ -41,7 +41,7 @@
 	 * Build CSS text for all variable overrides and apply via the dynamic <style> tag.
 	 *
 	 * @param {Object} cssVars Key-value pairs of CSS variable names to values.
-	 * @since 2.12.3
+	 * @since 2.7.0
 	 */
 	function applyCssVarOverrides( cssVars ) {
 		let cssText = '.' + containerId + ' {\n';
