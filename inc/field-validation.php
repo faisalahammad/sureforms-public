@@ -205,8 +205,11 @@ class Field_Validation {
 	 * `wp_block` post (so pattern-embedded fields are included too). A cycle guard on the
 	 * reference ids prevents infinite recursion.
 	 *
-	 * Used by {@see self::validate_form_data()} to reject submitted keys whose block id
-	 * is not part of the form. Note: this is deliberately NOT `prepared_validation_data()`
+	 * Used by {@see self::strip_unknown_field_keys()}, which DROPS submitted keys whose
+	 * block id is not part of the form rather than rejecting the submission — see the
+	 * note there for why rejecting made cached forms unsubmittable.
+	 *
+	 * Note: this is deliberately NOT `prepared_validation_data()`
 	 * — that map only holds blocks with extra validation config (dropdowns, payments,
 	 * textarea min-length) and omits plain inputs, so it is not a field allowlist.
 	 *
@@ -269,10 +272,10 @@ class Field_Validation {
 	/**
 	 * Remove submitted field keys the form does not define.
 	 *
-	 * The `-lbl-` substring proves only that a key LOOKS like a SureForms field, not that
-	 * this form actually has it. Without this an unauthenticated submitter can add
-	 * arbitrary `srfm-<type>-<id>-lbl-...` keys to any published form and have them
-	 * stored and later rendered in the admin, in emails and in exports.
+	 * SECURITY INVARIANT — every submitted key must be checked against the form's own
+	 * definition. The `-lbl-` substring proves only that a key LOOKS like a SureForms
+	 * field, not that this form actually defines it, so shape alone is never sufficient:
+	 * only keys the form declares may reach storage, email or export.
 	 *
 	 * Unknown keys are dropped rather than rejected. Rejecting looked safer but behaved
 	 * badly: the allowlist is derived from `post_content` at submit time while the

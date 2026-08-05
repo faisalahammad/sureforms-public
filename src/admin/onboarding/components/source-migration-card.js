@@ -16,7 +16,7 @@
  *                                  for this source.
  *   - `installed: false`         → not rendered (filtered out upstream).
  *
- * @since x.x.x
+ * @since 2.11.0
  */
 
 import { __, _n, sprintf } from '@wordpress/i18n';

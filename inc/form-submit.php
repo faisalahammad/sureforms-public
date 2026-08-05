@@ -1035,10 +1035,11 @@ class Form_Submit {
 			wp_send_json_error( [ 'error' => __( 'Too many requests. Please try again shortly.', 'sureforms' ) ], 429 );
 		}
 
-		// Only the fields the form itself marks unique may be probed. Without this the
-		// handler answers "does an entry exist whose field X equals Y?" for arbitrary
-		// X and Y — an existence oracle over every stored submission value. A form with
-		// no unique fields therefore matches nothing and always answers with an empty set.
+		// SECURITY INVARIANT — only the fields the form itself marks unique may be
+		// probed through this unauthenticated handler. The allowlist is what keeps the
+		// lookup scoped to values a site owner opted into checking, rather than to
+		// stored submission data generally. A form with no unique fields therefore
+		// matches nothing and always answers with an empty set.
 		$unique_block_ids = $this->get_unique_field_block_ids( $form_id );
 
 		// Extract and validate field values from POST data.
