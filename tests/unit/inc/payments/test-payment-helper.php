@@ -693,6 +693,208 @@ class Test_Payment_Helper extends TestCase {
 		$this->assertFalse( $below['valid'] );
 	}
 
+	// --- get_registered_payment_methods / is_payment_field_active / get_required_payment_block_ids ---
+
+	/**
+	 * Force a usable payment method so tests do not depend on a connected Stripe account.
+	 *
+	 * @param array<string,mixed> $methods Registered methods.
+	 * @return array<string,mixed>
+	 */
+	public function force_enabled_payment_method( $methods ) {
+		$methods['stripe']['enabled'] = true;
+
+		return $methods;
+	}
+
+	public function test_get_registered_payment_methods_respects_enabled_flag() {
+		// Nothing connected => no usable method.
+		$this->assertSame( [], Payment_Helper::get_registered_payment_methods( [ 'paymentMethods' => [ 'stripe' ] ] ) );
+
+		add_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+		$this->assertArrayHasKey( 'stripe', Payment_Helper::get_registered_payment_methods( [ 'paymentMethods' => [ 'stripe' ] ] ) );
+
+		// A method the block does not enable is never returned.
+		$this->assertSame( [], Payment_Helper::get_registered_payment_methods( [ 'paymentMethods' => [ 'unknown-gateway' ] ] ) );
+
+		// Missing attribute defaults to stripe, preserving pre-2.4.0 blocks.
+		$this->assertArrayHasKey( 'stripe', Payment_Helper::get_registered_payment_methods( [] ) );
+
+		remove_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+	}
+
+	public function test_is_payment_field_active_mirrors_render_requirements() {
+		add_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+
+		// One-time with the email mapping => renders.
+		$this->assertTrue( Payment_Helper::is_payment_field_active( [ 'customerEmailField' => 'email' ] ) );
+
+		// No email mapping => markup() returns '' => not active.
+		$this->assertFalse( Payment_Helper::is_payment_field_active( [ 'customerEmailField' => '' ] ) );
+		$this->assertFalse( Payment_Helper::is_payment_field_active( [] ) );
+
+		// Subscription also needs the name mapping.
+		$this->assertFalse(
+			Payment_Helper::is_payment_field_active(
+				[
+					'paymentType'        => 'subscription',
+					'customerEmailField' => 'email',
+				]
+			)
+		);
+		$this->assertTrue(
+			Payment_Helper::is_payment_field_active(
+				[
+					'paymentType'        => 'subscription',
+					'customerEmailField' => 'email',
+					'customerNameField'  => 'name',
+				]
+			)
+		);
+
+		// Legacy subscriptionPlan mappings still count.
+		$this->assertTrue(
+			Payment_Helper::is_payment_field_active(
+				[
+					'paymentType'       => 'both',
+					'subscriptionPlan'  => [
+						'customer_email' => 'email',
+						'customer_name'  => 'name',
+					],
+				]
+			)
+		);
+
+		remove_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+
+		// With no usable payment method nothing is active.
+		$this->assertFalse( Payment_Helper::is_payment_field_active( [ 'customerEmailField' => 'email' ] ) );
+		$this->assertFalse( Payment_Helper::is_payment_field_active( 'not-an-array' ) );
+	}
+
+	public function test_get_required_payment_block_ids_derives_set_from_form() {
+		add_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+
+		$attrs = static function ( $block_id, $email_field = 'email' ) {
+			return wp_json_encode(
+				[
+					'block_id'           => $block_id,
+					'paymentType'        => 'one-time',
+					'customerEmailField' => $email_field,
+				]
+			);
+		};
+
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$form_id = wp_insert_post(
+			[
+				'post_title'   => 'Required Payment Blocks Form',
+				'post_type'    => SRFM_FORMS_POST_TYPE,
+				'post_status'  => 'publish',
+				'post_content' => '<!-- wp:srfm/payment ' . $attrs( 'active01' ) . ' /-->'
+					. '<!-- wp:group --><!-- wp:srfm/payment ' . $attrs( 'nested02' ) . ' /--><!-- /wp:group -->'
+					. '<!-- wp:srfm/payment ' . $attrs( 'broken03', '' ) . ' /-->'
+					. '<!-- wp:srfm/input {"block_id":"plain04"} /-->',
+			]
+		);
+
+		$required = Payment_Helper::get_required_payment_block_ids( $form_id );
+
+		$this->assertContains( 'active01', $required );
+		$this->assertContains( 'nested02', $required, 'Payment blocks inside containers must be found.' );
+		$this->assertNotContains( 'broken03', $required, 'A block that renders nothing must not be required.' );
+		$this->assertNotContains( 'plain04', $required );
+
+		// An actionable conditional-logic rule can hide the field client-side, so that
+		// block is not required — but only while something is there to evaluate it, and
+		// only for a rule that carries at least one condition.
+		$actionable = [
+			[
+				'active01' => [
+					'action' => 'show',
+					'logic'  => [ [ [ 'field' => 'email', 'operator' => '===', 'value' => 'yes' ] ] ],
+				],
+			],
+		];
+
+		// Unregistered meta (no evaluator present) => the rule buys nothing.
+		update_post_meta( $form_id, '_srfm_conditional_logic', $actionable );
+		$this->assertContains( 'active01', Payment_Helper::get_required_payment_block_ids( $form_id ) );
+
+		register_post_meta(
+			SRFM_FORMS_POST_TYPE,
+			'_srfm_conditional_logic',
+			[
+				'type'   => 'array',
+				'single' => true,
+			]
+		);
+
+		$this->assertNotContains( 'active01', Payment_Helper::get_required_payment_block_ids( $form_id ) );
+		$this->assertContains( 'nested02', Payment_Helper::get_required_payment_block_ids( $form_id ) );
+
+		// A rule with no conditions can never match, so the block stays required.
+		update_post_meta( $form_id, '_srfm_conditional_logic', [ [ 'active01' => [ 'action' => 'show' ] ] ] );
+		$this->assertContains( 'active01', Payment_Helper::get_required_payment_block_ids( $form_id ) );
+
+		unregister_post_meta( SRFM_FORMS_POST_TYPE, '_srfm_conditional_logic' );
+		delete_post_meta( $form_id, '_srfm_conditional_logic' );
+
+		// Missing form / empty content => nothing required.
+		$this->assertSame( [], Payment_Helper::get_required_payment_block_ids( 999999 ) );
+		$this->assertSame( [], Payment_Helper::get_required_payment_block_ids( 0 ) );
+
+		remove_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+		wp_delete_post( $form_id, true );
+	}
+
+	public function test_get_required_payment_block_ids_expands_reusable_patterns() {
+		add_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$attrs = wp_json_encode(
+			[
+				'block_id'           => 'inpattern',
+				'paymentType'        => 'one-time',
+				'customerEmailField' => 'email',
+			]
+		);
+
+		$pattern_id = wp_insert_post(
+			[
+				'post_title'   => 'Reusable payment',
+				'post_type'    => 'wp_block',
+				'post_status'  => 'publish',
+				'post_content' => '<!-- wp:srfm/payment ' . $attrs . ' /-->',
+			]
+		);
+		$form_id    = wp_insert_post(
+			[
+				'post_title'   => 'Pattern Payment Form',
+				'post_type'    => SRFM_FORMS_POST_TYPE,
+				'post_status'  => 'publish',
+				'post_content' => '<!-- wp:block {"ref":' . $pattern_id . '} /-->',
+			]
+		);
+
+		$this->assertContains(
+			'inpattern',
+			Payment_Helper::get_required_payment_block_ids( $form_id ),
+			'A payment block that renders from inside a synced pattern must still be required.'
+		);
+
+		remove_filter( 'srfm_payment_methods_registry', [ $this, 'force_enabled_payment_method' ] );
+		wp_delete_post( $form_id, true );
+		wp_delete_post( $pattern_id, true );
+	}
+
+	public function test_get_payment_strings_has_payment_required_message() {
+		$strings = Payment_Helper::get_payment_strings();
+		$this->assertArrayHasKey( 'payment_required', $strings );
+		$this->assertNotEmpty( $strings['payment_required'] );
+	}
+
 	private function call_private_method( $object, $method_name, $parameters = [] ) {
 		$reflection = new \ReflectionClass( Payment_Helper::class );
 		$method     = $reflection->getMethod( $method_name );

@@ -479,4 +479,211 @@ class Test_Field_Validation extends TestCase {
 			'A srfm_email_field_char_limits override should be reflected in the resolved limits.'
 		);
 	}
+
+	/**
+	 * get_known_field_block_ids() returns the block ids present in the form's markup,
+	 * including fields nested inside a repeater/container (innerBlocks).
+	 */
+	public function test_get_known_field_block_ids_includes_nested_fields() {
+		$content  = '<!-- wp:srfm/input {"block_id":"aaaa1111"} /-->';
+		$content .= '<!-- wp:srfm/repeater {"block_id":"bbbb2222"} -->';
+		$content .= '<!-- wp:srfm/input {"block_id":"cccc3333"} /-->';
+		$content .= '<!-- /wp:srfm/repeater -->';
+
+		$form_id = wp_insert_post(
+			[
+				'post_type'    => 'sureforms_form',
+				'post_status'  => 'publish',
+				'post_title'   => 'Known Fields Form',
+				'post_content' => $content,
+			]
+		);
+
+		$ids = Field_Validation::get_known_field_block_ids( $form_id );
+
+		$this->assertArrayHasKey( 'aaaa1111', $ids, 'top-level field id present' );
+		$this->assertArrayHasKey( 'bbbb2222', $ids, 'repeater id present' );
+		$this->assertArrayHasKey( 'cccc3333', $ids, 'nested field id present (innerBlocks walked)' );
+		$this->assertArrayNotHasKey( 'deadbeef', $ids, 'an id the form does not define is absent' );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * REGRESSION: a submitted key whose block id is not all-alphanumeric must still
+	 * resolve to that block id, so a legitimate field is not dropped as unknown.
+	 *
+	 * The guard extracts the id with Helper::get_block_id_from_key() — the same helper
+	 * every downstream consumer uses. A local regex would return nothing here and the
+	 * field would be dropped.
+	 */
+	public function test_strip_unknown_field_keys_keeps_non_alphanumeric_block_id() {
+		$form_id = wp_insert_post(
+			[
+				'post_type'    => 'sureforms_form',
+				'post_status'  => 'publish',
+				'post_title'   => 'Odd Block Id Form',
+				'post_content' => '<!-- wp:srfm/input {"block_id":"ab_12cd"} /-->',
+			]
+		);
+
+		$key  = 'srfm-input-ab_12cd-lbl-UmVhbA-real';
+		$kept = Field_Validation::strip_unknown_field_keys( [ $key => 'ok' ], $form_id );
+
+		$this->assertArrayHasKey( $key, $kept, 'A field whose block id contains an underscore must be kept.' );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * Invalid form ids return an empty set (callers fail open).
+	 */
+	public function test_get_known_field_block_ids_empty_for_invalid_form() {
+		$this->assertSame( [], Field_Validation::get_known_field_block_ids( 0 ) );
+		$this->assertSame( [], Field_Validation::get_known_field_block_ids( -5 ) );
+		$this->assertSame( [], Field_Validation::get_known_field_block_ids( 'x' ) );
+	}
+
+	/**
+	 * REGRESSION (#2993): a submitted key whose block id is not part of the form is
+	 * dropped — an anonymous submitter can otherwise invent fields on any published
+	 * form and have them stored, mailed and exported. Known fields survive untouched.
+	 *
+	 * Dropped rather than rejected on purpose: the allowlist is derived at submit time
+	 * while the visitor's HTML was rendered earlier, so rejecting would make a cached
+	 * or re-saved form unsubmittable. See strip_unknown_field_keys()'s docblock.
+	 */
+	public function test_strip_unknown_field_keys_drops_invented_keys() {
+		$form_id = wp_insert_post(
+			[
+				'post_type'    => 'sureforms_form',
+				'post_status'  => 'publish',
+				'post_title'   => 'Strip Unknown Form',
+				'post_content' => '<!-- wp:srfm/input {"block_id":"realfield"} /-->',
+			]
+		);
+
+		$stripped = Field_Validation::strip_unknown_field_keys(
+			[
+				'srfm-input-realfield-lbl-UmVhbA-real'   => 'ok',
+				'srfm-input-deadbeef-lbl-R2hvc3Q-ghost'  => 'injected',
+				'form-id'                                => $form_id,
+			],
+			$form_id
+		);
+
+		$this->assertArrayNotHasKey( 'srfm-input-deadbeef-lbl-R2hvc3Q-ghost', $stripped, 'invented field is dropped' );
+		$this->assertArrayHasKey( 'srfm-input-realfield-lbl-UmVhbA-real', $stripped, 'known field survives' );
+		$this->assertArrayHasKey( 'form-id', $stripped, 'non-field keys are left alone' );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * REGRESSION (#2993, review H1): repeater child keys must be validated too.
+	 *
+	 * Pro submits repeater rows as `repeaterKey[index][childKey]`, which PHP collapses
+	 * into one top-level key holding nested arrays, and process_repeater_field() copies
+	 * those child keys verbatim before they are label-decoded downstream. A top-level
+	 * only walk therefore left the identical hole one level down: copy the real repeater
+	 * block_id out of page source, then nest forged child keys inside it.
+	 */
+	public function test_strip_unknown_field_keys_drops_unknown_repeater_child_keys() {
+		$content  = '<!-- wp:srfm/repeater {"block_id":"bbbb2222"} -->';
+		$content .= '<!-- wp:srfm/input {"block_id":"cccc3333"} /-->';
+		$content .= '<!-- /wp:srfm/repeater -->';
+
+		$form_id = wp_insert_post(
+			[
+				'post_type'    => 'sureforms_form',
+				'post_status'  => 'publish',
+				'post_title'   => 'Repeater Strip Form',
+				'post_content' => $content,
+			]
+		);
+
+		$repeater_key = 'srfm-repeater-bbbb2222-lbl-Um93cw-rows';
+		$child_key    = 'srfm-input-cccc3333-lbl-Q2hpbGQ-child';
+		$forged_key   = 'srfm-input-deadbeef-lbl-R2hvc3Q-ghost';
+
+		$stripped = Field_Validation::strip_unknown_field_keys(
+			[
+				$repeater_key => [
+					[
+						$child_key  => 'legit',
+						$forged_key => 'injected',
+					],
+				],
+			],
+			$form_id
+		);
+
+		$this->assertArrayHasKey( $repeater_key, $stripped, 'the repeater itself is known and kept' );
+		$this->assertArrayHasKey( $child_key, $stripped[ $repeater_key ][0], 'legitimate child key survives' );
+		$this->assertArrayNotHasKey( $forged_key, $stripped[ $repeater_key ][0], 'forged nested child key is dropped' );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * The most load-bearing back-compat behaviour in this change: when the form's block
+	 * set cannot be derived, nothing is stripped. Enforcing on an empty allowlist would
+	 * silently delete every submitted field.
+	 */
+	public function test_strip_unknown_field_keys_fails_open_when_blocks_underivable() {
+		$form_id = wp_insert_post(
+			[
+				'post_type'    => 'sureforms_form',
+				'post_status'  => 'publish',
+				'post_title'   => 'Empty Form',
+				'post_content' => '',
+			]
+		);
+
+		$key      = 'srfm-input-deadbeef-lbl-R2hvc3Q-ghost';
+		$stripped = Field_Validation::strip_unknown_field_keys( [ $key => 'x' ], $form_id );
+
+		$this->assertArrayHasKey( $key, $stripped, 'An empty block set must not strip anything.' );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * The srfm_known_field_block_ids filter must not be a footgun: a callback returning
+	 * a plain list instead of a map would otherwise make every real field look unknown,
+	 * and a non-array return would drop the allowlist entirely.
+	 */
+	public function test_known_field_block_ids_filter_coerces_defensively() {
+		$form_id = wp_insert_post(
+			[
+				'post_type'    => 'sureforms_form',
+				'post_status'  => 'publish',
+				'post_title'   => 'Filter Coercion Form',
+				'post_content' => '<!-- wp:srfm/input {"block_id":"realfield"} /-->',
+			]
+		);
+
+		// A list return is converted to a map rather than taken literally.
+		$as_list = static function () {
+			return [ 'realfield', 'extrafield' ];
+		};
+		add_filter( 'srfm_known_field_block_ids', $as_list );
+		$ids = Field_Validation::get_known_field_block_ids( $form_id );
+		remove_filter( 'srfm_known_field_block_ids', $as_list );
+
+		$this->assertArrayHasKey( 'realfield', $ids, 'list entries become map keys' );
+		$this->assertArrayHasKey( 'extrafield', $ids, 'filter-added id is honoured' );
+
+		// A non-array return falls back to the walked set instead of disabling the check.
+		$as_garbage = static function () {
+			return 'nonsense';
+		};
+		add_filter( 'srfm_known_field_block_ids', $as_garbage );
+		$ids2 = Field_Validation::get_known_field_block_ids( $form_id );
+		remove_filter( 'srfm_known_field_block_ids', $as_garbage );
+
+		$this->assertSame( [ 'realfield' => true ], $ids2, 'a bad return falls back to the walked set' );
+
+		wp_delete_post( $form_id, true );
+	}
 }

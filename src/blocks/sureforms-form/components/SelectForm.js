@@ -21,11 +21,14 @@ const SelectForm = ( {
 	const fetchForms = async () => {
 		let response;
 		try {
+			// No explicit X-WP-Nonce: apiFetch's nonce middleware supplies the real
+			// wp_rest nonce. srfm_block_data.forms_data_nonce was never localized, so
+			// passing it sent the header as `undefined` and relied on the middleware
+			// overwriting it.
 			response = await apiFetch( {
 				path: 'sureforms/v1/forms-data',
 				headers: {
 					'content-type': 'application/json',
-					'X-WP-Nonce': srfm_block_data.forms_data_nonce,
 				},
 			} );
 			// if in the response object title is '' then set title to '(no title)'
@@ -43,6 +46,7 @@ const SelectForm = ( {
 	const getFormMarkup = async ( queryParams ) => {
 		let response;
 		try {
+			// See fetchForms(): apiFetch supplies the wp_rest nonce itself.
 			response = await apiFetch( {
 				path: addQueryArgs(
 					srfm_block_data.get_form_markup_url,
@@ -50,7 +54,6 @@ const SelectForm = ( {
 				),
 				headers: {
 					'content-type': 'application/json',
-					'X-WP-Nonce': srfm_block_data.generate_form_markup_nonce,
 				},
 			} );
 			return response;
@@ -132,11 +135,7 @@ const SelectForm = ( {
 						<div
 							onClick={ () => {
 								selectOption( option );
-								const queryParams = {
-									id: option.id,
-									srfm_form_markup_nonce:
-										srfm_block_data.srfm_form_markup_nonce,
-								};
+								const queryParams = { id: option.id };
 								const formMarkup = getFormMarkup( queryParams );
 								setFormId( option.id );
 								setForm( formMarkup );

@@ -232,7 +232,7 @@ class Email_Template {
 
 					$label       = explode( '-lbl-', $field_name )[1];
 					$label       = explode( '-', $label )[0];
-					$field_label = $label ? Helper::decrypt( $label ) : '';
+					$field_label = $label ? Helper::decode( $label ) : '';
 
 					$field_block_name = Helper::get_block_name_from_field( $field_name );
 
@@ -250,7 +250,10 @@ class Email_Template {
 					 *                         'value'           => mixed  The field value
 					 *                         'label'           => string The field name/key
 					 *                         'block_name'      => string The block type identifier
-					 *                         'processed_label' => string The decrypted human readable label
+					 *                         'processed_label' => string The human readable label, base64-decoded
+					 *                                                     out of the submitted field key. Submitter-
+					 *                                                     controlled and unauthenticated — escape it
+					 *                                                     for the output context (esc_html() for HTML).
 					 */
 					do_action(
 						'srfm_before_processing_all_data_field',
@@ -316,7 +319,8 @@ class Email_Template {
 					?>
 				<tr class="field-label">
 					<th style="<?php echo esc_attr( $td_style ); ?>color: #1E293B;background-color: #F1F5F9;">
-						<strong><?php echo wp_kses_post( html_entity_decode( $field_label ) ); ?>:</strong>
+						<?php // The label is decoded from the submitted field key, so it is attacker-controllable — escape it as text, never as markup. ?>
+						<strong><?php echo esc_html( html_entity_decode( $field_label ) ); ?>:</strong>
 					</th>
 				</tr>
 				<tr class="field-value">

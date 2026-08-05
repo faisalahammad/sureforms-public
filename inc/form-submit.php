@@ -283,6 +283,11 @@ class Form_Submit {
 			);
 		}
 
+		// Drop submitted keys this form does not define before anything consumes them.
+		// Runs on SUBMISSION only, so historical entries whose keys no longer match a
+		// rebuilt form (see #2665) stay fully readable on the read/export paths.
+		$form_data = Field_Validation::strip_unknown_field_keys( $form_data, $current_form_id );
+
 		$validated_form_data = Field_Validation::validate_form_data( $form_data, $current_form_id );
 
 		if ( ! empty( $validated_form_data ) ) {
@@ -1030,6 +1035,12 @@ class Form_Submit {
 			wp_send_json_error( [ 'error' => __( 'Too many requests. Please try again shortly.', 'sureforms' ) ], 429 );
 		}
 
+		// Only the fields the form itself marks unique may be probed. Without this the
+		// handler answers "does an entry exist whose field X equals Y?" for arbitrary
+		// X and Y — an existence oracle over every stored submission value. A form with
+		// no unique fields therefore matches nothing and always answers with an empty set.
+		$unique_block_ids = $this->get_unique_field_block_ids( $form_id );
+
 		// Extract and validate field values from POST data.
 		$skip_keys  = [ 'action', 'token', 'id' ];
 		$duplicates = [];
@@ -1048,6 +1059,13 @@ class Form_Submit {
 			}
 
 			if ( '' === $value ) {
+				continue;
+			}
+
+			// The key must resolve to a block this form configured as unique.
+			$block_id = Helper::get_block_id_from_key( $field_key );
+
+			if ( '' === $block_id || ! isset( $unique_block_ids[ $block_id ] ) ) {
 				continue;
 			}
 
@@ -1322,6 +1340,130 @@ class Form_Submit {
 		// defaults $entry_language to current_language(), so this keeps mis-tagging
 		// to the server's own determination instead of the (cacheable) client value.
 		return $language === $provider->current_language();
+	}
+
+	/**
+	 * Collect the block IDs of the fields a form configures as unique.
+	 *
+	 * Derived from the stored form, never from the request — the whole point is that
+	 * the client cannot nominate which fields are probeable. The frontend already
+	 * sends only inputs rendered with data-unique="true", which comes from the same
+	 * isUnique attribute, so this is the server-side mirror of what the client does.
+	 *
+	 * @param int $form_id Form ID.
+	 *
+	 * @since x.x.x
+	 * @return array<string,true> Unique field block IDs, keyed by block ID.
+	 */
+	private function get_unique_field_block_ids( $form_id ) {
+		$form = get_post( $form_id );
+
+		if ( ! $form instanceof \WP_Post || '' === $form->post_content ) {
+			return [];
+		}
+
+		$visited_refs = [];
+		$block_ids    = $this->collect_unique_field_block_ids( parse_blocks( $form->post_content ), $visited_refs );
+
+		/**
+		 * Filters the block IDs treated as unique fields for the AJAX uniqueness check.
+		 *
+		 * Lets add-ons whose fields a static parse of the form cannot see contribute
+		 * their own unique fields.
+		 *
+		 * @since x.x.x
+		 *
+		 * @param array<string,true> $block_ids Unique field block IDs, keyed by block ID.
+		 *                                     A plain list of IDs is accepted too and is
+		 *                                     normalised to this shape.
+		 * @param int                $form_id   Form ID.
+		 */
+		$filtered = apply_filters( 'srfm_unique_field_block_ids', $block_ids, $form_id );
+
+		// Normalise rather than trust: the lookup is isset( $set[ $block_id ] ), so an
+		// add-on returning a plain list would silently disable uniqueness for the form
+		// instead of adding to it. A non-array return keeps the derived set.
+		return is_array( $filtered ) ? self::normalize_block_id_set( $filtered ) : $block_ids;
+	}
+
+	/**
+	 * Normalise a block-ID collection to a block ID => true map.
+	 *
+	 * Accepts both the documented map shape and a plain list of IDs.
+	 *
+	 * @param array<mixed> $block_ids Block IDs as a map or a list.
+	 *
+	 * @since x.x.x
+	 * @return array<string,true> Block IDs keyed by block ID.
+	 */
+	private static function normalize_block_id_set( $block_ids ) {
+		$normalized = [];
+
+		foreach ( $block_ids as $key => $value ) {
+			// List entry: the ID is the value. Map entry: the ID is the key.
+			$block_id = is_int( $key ) ? $value : $key;
+
+			if ( is_string( $block_id ) && '' !== $block_id ) {
+				$normalized[ $block_id ] = true;
+			}
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * Recursively collect block IDs of blocks whose isUnique attribute is enabled.
+	 *
+	 * Recurses into innerBlocks (repeater/container children) and expands
+	 * reusable/synced patterns, mirroring Form_Styling::collect_form_block_ids().
+	 *
+	 * Note: parse_blocks() does NOT apply block.json defaults, unlike the render path.
+	 * Every field block therefore has to keep isUnique defaulting to false — a block
+	 * that defaults it to true would be serialised without the attribute and would be
+	 * missed here while still rendering data-unique="true".
+	 *
+	 * @param array<mixed>     $blocks       Parsed blocks from parse_blocks().
+	 * @param array<int, true> $visited_refs Reusable-block post IDs already expanded,
+	 *                                       keyed by ID — guards against reference cycles.
+	 *
+	 * @since x.x.x
+	 * @return array<string,true> Unique field block IDs, keyed by block ID.
+	 */
+	private function collect_unique_field_block_ids( $blocks, &$visited_refs = [] ) {
+		$block_ids = [];
+
+		foreach ( $blocks as $block ) {
+			if ( ! is_array( $block ) ) {
+				continue;
+			}
+
+			$attrs = isset( $block['attrs'] ) && is_array( $block['attrs'] ) ? $block['attrs'] : [];
+
+			if ( ! empty( $attrs['isUnique'] ) && ! empty( $attrs['block_id'] ) && is_scalar( $attrs['block_id'] ) ) {
+				$block_ids[ Helper::get_string_value( $attrs['block_id'] ) ] = true;
+			}
+
+			// Reusable/synced pattern: expand the referenced wp_block post so a field
+			// living inside a pattern is seen like an inline block.
+			if ( isset( $block['blockName'] ) && 'core/block' === $block['blockName'] && ! empty( $attrs['ref'] ) && is_scalar( $attrs['ref'] ) ) {
+				$ref = absint( $attrs['ref'] );
+
+				if ( $ref && ! isset( $visited_refs[ $ref ] ) ) {
+					$visited_refs[ $ref ] = true;
+					$ref_post             = get_post( $ref );
+
+					if ( $ref_post instanceof \WP_Post && 'wp_block' === $ref_post->post_type && 'publish' === $ref_post->post_status && '' !== $ref_post->post_content ) {
+						$block_ids += $this->collect_unique_field_block_ids( parse_blocks( $ref_post->post_content ), $visited_refs );
+					}
+				}
+			}
+
+			if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
+				$block_ids += $this->collect_unique_field_block_ids( $block['innerBlocks'], $visited_refs );
+			}
+		}
+
+		return $block_ids;
 	}
 
 	/**
