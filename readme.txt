@@ -426,16 +426,23 @@ Visit the [SureForms features page](https://sureforms.com/features/?utm_source=w
 You can report security issues through our [Bug Bounty Program](https://brainstormforce.com/bug-bounty-program/). We collaborate with Patchstack to validate, triage, and handle security reports.
 
 == Changelog ==
-= 2.12.3 - 3rd August 2026 =
+= 2.12.3 - 5th August 2026 =
 * New: Added an "Entries" shortcut in the Instant Form admin bar to open a form's entries in one click.
 * Improvement: Enhanced WPML compatibility. [https://wpml.org/plugin/sureforms/](https://wpml.org/plugin/sureforms/)
-* Fix: Enhanced entries search - includes submitted data too.
-* Fix: Fixed a failed database update that could stop forms from accepting submissions.
-* Fix: The number field no longer looks misaligned when "Use label as placeholder" is on.
 * Fix: Cloudflare Turnstile no longer shows a warning on WordPress 7.0.
-* Fix: Payment History styles load only on required pages.
+* Fix: Enhanced entries search - includes submitted data too.
+* Fix: Enhanced protection against formula injection when exporting entries to CSV.
+* Fix: Fixed a failed database update that could stop forms from accepting submissions.
 * Fix: Forms with default styles disabled no longer break the page — previously this aborted setup of every later form on the same page.
+* Fix: Improved escaping of dynamic content in entry notification emails.
+* Fix: Improved handling of unexpected field data during form submission.
+* Fix: Payment History styles load only on required pages.
+* Fix: Payment-enabled forms now require a verified payment before a submission is accepted.
 * Fix: Removed the entries "Language" column. Sorting or filtering entries by language is no longer available, including via the entries API.
+* Fix: Restricted access to the internal form markup generation endpoint.
+* Fix: Strengthened output sanitization for entries displayed in the admin dashboard.
+* Fix: The number field no longer looks misaligned when "Use label as placeholder" is on.
+* Fix: Tightened validation for unique field submissions to only check applicable fields.
 = 2.12.2 - 20th July 2026 =
 * New: Added a Payment History widget for Elementor and Bricks.
 * Fix: Custom CSS now applies correctly on the single form view.
