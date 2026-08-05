@@ -46,7 +46,7 @@ inc/abilities/
 │   └── get-form-stats.php      # readonly, idempotent — entry counts
 ├── entries/
 │   ├── list-entries.php        # readonly, idempotent — paginated listing
-│   ├── get-entry.php           # readonly, idempotent — decrypted form_data
+│   ├── get-entry.php           # readonly, idempotent — decoded form_data
 │   ├── update-entry-status.php # write, idempotent — read/unread/trash/restore
 │   └── delete-entry.php        # destructive — permanent delete
 ├── embedding/

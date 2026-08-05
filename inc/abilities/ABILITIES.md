@@ -321,7 +321,7 @@ Complete reference for all 15 abilities registered with the WordPress Abilities 
 
 ### 10. `sureforms/get-entry`
 
-**Get Entry Details** — Retrieve detailed entry information including submitted field data with decrypted labels.
+**Get Entry Details** — Retrieve detailed entry information including submitted field data with decoded labels.
 
 **File:** `inc/abilities/entries/get-entry.php`
 
