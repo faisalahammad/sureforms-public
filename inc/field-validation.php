@@ -269,10 +269,10 @@ class Field_Validation {
 	/**
 	 * Remove submitted field keys the form does not define.
 	 *
-	 * The `-lbl-` substring proves only that a key LOOKS like a SureForms field, not that
-	 * this form actually has it. Without this an unauthenticated submitter can add
-	 * arbitrary `srfm-<type>-<id>-lbl-...` keys to any published form and have them
-	 * stored and later rendered in the admin, in emails and in exports.
+	 * SECURITY INVARIANT — every submitted key must be checked against the form's own
+	 * definition. The `-lbl-` substring proves only that a key LOOKS like a SureForms
+	 * field, not that this form actually defines it, so shape alone is never sufficient:
+	 * only keys the form declares may reach storage, email or export.
 	 *
 	 * Unknown keys are dropped rather than rejected. Rejecting looked safer but behaved
 	 * badly: the allowlist is derived from `post_content` at submit time while the

@@ -486,12 +486,11 @@ class Entries extends Base {
 	 *
 	 * SECURITY INVARIANT — do not relax the key matching. The only caller is the
 	 * unauthenticated uniqueness check (Form_Submit::field_unique_validation()), which
-	 * allows a probe only for fields the form marks unique (#2997). That restriction
-	 * holds because the lookup is anchored to the EXACT submitted key: a stored
-	 * form_data key always embeds its own block ID, so a key that resolves to field X
-	 * can only carry X's block ID. Matching on block ID instead, or switching to LIKE /
-	 * JSON_SEARCH, would let a crafted key pass the unique-field gate while reading a
-	 * different field's value — re-opening the existence oracle over all stored data.
+	 * allows a probe only for fields the form marks unique. That restriction holds
+	 * because the lookup is anchored to the EXACT submitted key: a stored form_data key
+	 * always embeds its own block ID, so a key that resolves to field X can only carry
+	 * X's block ID. Matching on block ID instead, or switching to LIKE / JSON_SEARCH,
+	 * would break that anchoring and widen the probe beyond the allowlisted field.
 	 *
 	 * @param int    $form_id     The form ID to search within.
 	 * @param string $field_key   The form_data JSON key to match against.

@@ -274,9 +274,14 @@ module.exports = function ( grunt ) {
 				],
 			},
 			plugin_function_comment: {
+				// JS is swept as well as PHP. The sweep used to glob PHP only, so
+				// `@since x.x.x` placeholders in src/**/*.js survived every release
+				// and were carried into the built bundles in assets/.
 				src: [
 					'*.php',
 					'**/*.php',
+					'src/**/*.js',
+					'assets/js/**/*.js',
 					'!node_modules/**',
 					'!php-tests/**',
 					'!bin/**',
@@ -285,7 +290,10 @@ module.exports = function ( grunt ) {
 				overwrite: true,
 				replacements: [
 					{
-						from: /x.x.x/ig,
+						// Dots escaped: unescaped they match any character, so the
+						// pattern would also rewrite incidental strings such as
+						// "x1x2x" — a real risk now that minified JS is in scope.
+						from: /x\.x\.x/gi,
 						to: '<%=pkg.version %>',
 					},
 				],

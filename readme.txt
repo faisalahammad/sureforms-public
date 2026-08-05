@@ -430,6 +430,7 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 * New: Added an "Entries" shortcut in the Instant Form admin bar to open a form's entries in one click.
 * Improvement: Enhanced WPML compatibility. [https://wpml.org/plugin/sureforms/](https://wpml.org/plugin/sureforms/)
 * Improvement: Hardened security across entries, form submissions, and payments.
+* Fix: Fixed a stored cross-site scripting vulnerability in the entries view (CVE-2026-18406). Props to daroo and Wordfence for the responsible disclosure.
 * Fix: Cloudflare Turnstile no longer shows a warning on WordPress 7.0.
 * Fix: Enhanced entries search - includes submitted data too.
 * Fix: Fixed a failed database update that could stop forms from accepting submissions.
@@ -449,3 +450,6 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 The full changelog is available [here](https://sureforms.com/whats-new/?utm_source=wordpress.org&utm_medium=whats_new).
 
 == Upgrade Notice ==
+
+= 2.12.3 =
+This release fixes a stored cross-site scripting vulnerability in the entries view (CVE-2026-18406) and hardens entries, form submissions and payments. Updating is strongly recommended.

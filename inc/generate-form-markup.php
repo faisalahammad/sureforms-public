@@ -342,10 +342,10 @@ class Generate_Form_Markup {
 	 * @since 0.0.1
 	 */
 	public static function get_form_markup( $id, $show_title_current_page = true, $sf_classname = '', $post_type = 'post', $do_blocks = false, $block_attrs = [] ) {
-		// A renderer must never read the request for its target. The REST route owns
-		// that (see render_form_markup_endpoint), and the query-string override used
-		// to let ?id=&srfm_form_markup_nonce= short-circuit the caller's own ID on
-		// any page embedding a form.
+		// SECURITY INVARIANT — a renderer must never read the request to decide what to
+		// render. The caller's `$id` is the only source of truth here; the REST route
+		// owns request parsing (see render_form_markup_endpoint). Reintroducing any
+		// query-string override would let a URL change which form a page renders.
 		$id = Helper::get_integer_value( $id );
 
 		// Check for any form restrictions.
