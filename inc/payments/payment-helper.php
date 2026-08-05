@@ -871,7 +871,7 @@ class Payment_Helper {
 	 *
 	 * @param array<mixed> $attrs Payment block attributes.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return array<string, mixed> Usable payment methods, keyed by method ID.
 	 */
 	public static function get_registered_payment_methods( $attrs ) {
@@ -913,7 +913,7 @@ class Payment_Helper {
 	 *
 	 * @param array<mixed> $attrs Payment block attributes.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return bool True when the block renders a payment field.
 	 */
 	public static function is_payment_field_active( $attrs ) {
@@ -957,7 +957,7 @@ class Payment_Helper {
 	 *
 	 * @param int $form_id Form ID.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return array<string> Block IDs that require a verified payment.
 	 */
 	public static function get_required_payment_block_ids( $form_id ) {
@@ -990,7 +990,7 @@ class Payment_Helper {
 		 * remove blocks — e.g. re-adding a conditionally shown payment field once the
 		 * rule is known to have matched.
 		 *
-		 * @since x.x.x
+		 * @since 2.12.3
 		 *
 		 * @param array<string> $block_ids Block IDs requiring a verified payment.
 		 * @param int           $form_id   Form ID.
@@ -1090,7 +1090,7 @@ class Payment_Helper {
 	 * @param array<int, true> $visited_refs Reusable-block post IDs already expanded,
 	 *                                       keyed by ID — guards against reference cycles.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return array<string,true> Active payment block IDs, keyed by block ID.
 	 */
 	private static function collect_active_payment_block_ids( $blocks, &$visited_refs = [] ) {
@@ -1141,7 +1141,7 @@ class Payment_Helper {
 	 *
 	 * @param int $form_id Form ID.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return array<string> Block IDs carrying conditional logic rules.
 	 */
 	private static function get_conditional_logic_block_ids( $form_id ) {
@@ -1193,7 +1193,7 @@ class Payment_Helper {
 	 *
 	 * @param mixed $rule Stored rule for a single block.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return bool True when the rule carries at least one condition.
 	 */
 	private static function has_actionable_conditional_rule( $rule ) {

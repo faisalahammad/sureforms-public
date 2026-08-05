@@ -278,7 +278,7 @@ class Generate_Form_Markup {
 	 * enqueue_block_editor_assets, so passing it proves only that the caller reached
 	 * the editor, never what they are allowed to read.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return bool|\WP_Error True when allowed, WP_Error otherwise.
 	 */
 	public function render_form_markup_permissions_check() {
@@ -302,7 +302,7 @@ class Generate_Form_Markup {
 	 *
 	 * @param \WP_REST_Request<array<string,mixed>> $request REST request.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return string|\WP_Error Form markup, or WP_Error when the form is not renderable for this caller.
 	 */
 	public function render_form_markup_endpoint( $request ) {

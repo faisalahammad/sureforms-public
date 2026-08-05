@@ -211,7 +211,7 @@ class Field_Validation {
 	 * textarea min-length) and omits plain inputs, so it is not a field allowlist.
 	 *
 	 * @param int|mixed $form_id The form post id.
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return array<string,true> Map of known block id => true. Empty when the form's
 	 *                            blocks could not be derived (callers should fail open).
 	 */
@@ -249,7 +249,7 @@ class Field_Validation {
 		 * Expects a map of `block_id => true`. A plain list of ids is accepted and
 		 * converted; any other return value is ignored in favour of the walked set.
 		 *
-		 * @since x.x.x
+		 * @since 2.12.3
 		 * @param array<string,true> $ids     Map of known block id => true.
 		 * @param int                $form_id The form post id.
 		 */
@@ -289,7 +289,7 @@ class Field_Validation {
 	 *
 	 * @param array<mixed> $form_data The submitted form data (sanitized).
 	 * @param int|mixed    $form_id   The ID of the form being submitted.
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return array<mixed> The form data with unknown field keys removed.
 	 */
 	public static function strip_unknown_field_keys( $form_data, $form_id ) {
@@ -499,7 +499,7 @@ class Field_Validation {
 	 *
 	 * @param array<mixed>       $rows            The repeater's submitted rows.
 	 * @param array<string,true> $known_block_ids Map of block ids belonging to the form.
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return array<mixed> The rows with unknown child keys removed.
 	 */
 	private static function strip_unknown_repeater_keys( $rows, $known_block_ids ) {
@@ -531,7 +531,7 @@ class Field_Validation {
 	 * @param array<string,true> $ids     Accumulator of block id => true (by reference).
 	 * @param array<int,true>    $visited Expanded reusable-block post ids, guards cycles.
 	 * @param int                $depth   Current recursion depth, guards pathological trees.
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return void
 	 */
 	private static function collect_field_block_ids( $blocks, &$ids, &$visited, $depth = 0 ) {

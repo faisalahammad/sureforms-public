@@ -548,7 +548,7 @@ class Entries {
 	 * @param string $value Cell value (already normalized for CSV).
 	 *
 	 * @since 2.10.0
-	 * @since x.x.x Promoted from private to public so other export writers can reuse it.
+	 * @since 2.12.3 Promoted from private to public so other export writers can reuse it.
 	 * @return string Safe cell value.
 	 */
 	public static function escape_csv_formula( $value ) {

@@ -1352,7 +1352,7 @@ class Form_Submit {
 	 *
 	 * @param int $form_id Form ID.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return array<string,true> Unique field block IDs, keyed by block ID.
 	 */
 	private function get_unique_field_block_ids( $form_id ) {
@@ -1371,7 +1371,7 @@ class Form_Submit {
 		 * Lets add-ons whose fields a static parse of the form cannot see contribute
 		 * their own unique fields.
 		 *
-		 * @since x.x.x
+		 * @since 2.12.3
 		 *
 		 * @param array<string,true> $block_ids Unique field block IDs, keyed by block ID.
 		 *                                     A plain list of IDs is accepted too and is
@@ -1393,7 +1393,7 @@ class Form_Submit {
 	 *
 	 * @param array<mixed> $block_ids Block IDs as a map or a list.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return array<string,true> Block IDs keyed by block ID.
 	 */
 	private static function normalize_block_id_set( $block_ids ) {
@@ -1426,7 +1426,7 @@ class Form_Submit {
 	 * @param array<int, true> $visited_refs Reusable-block post IDs already expanded,
 	 *                                       keyed by ID — guards against reference cycles.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return array<string,true> Unique field block IDs, keyed by block ID.
 	 */
 	private function collect_unique_field_block_ids( $blocks, &$visited_refs = [] ) {

@@ -1150,7 +1150,7 @@ class Front_End {
 	 * @param array<mixed>       $form_data          Form data.
 	 * @param array<string,true> $verified_block_ids Payment block IDs verified on this submission.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return array<mixed> Form data, carrying an `error` key when a payment is missing.
 	 */
 	private function require_verified_payments( $form_data, $verified_block_ids ) {
