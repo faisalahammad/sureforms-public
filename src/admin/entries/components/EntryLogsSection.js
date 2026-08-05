@@ -4,8 +4,7 @@ import { Button, Text } from '@bsf/force-ui';
 import { __ } from '@wordpress/i18n';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { useEntryLogs } from '../hooks/useEntriesQuery';
-import domPurify from 'dompurify';
-import parse from 'html-react-parser';
+import { sanitizeLogMessage } from '../utils/sanitizeEntryValue';
 
 /**
  * EntryLogsSection Component
@@ -112,8 +111,14 @@ const EntryLogsSection = ( { entryId, onConfirmation } ) => {
 											) }` }
 									</div>
 									{ log.messages &&
-										log.messages.map(
-											( message, index ) => (
+										log.messages
+											.map( sanitizeLogMessage )
+											// A non-string or fully-stripped message
+											// sanitizes to '', which would otherwise
+											// render an empty <Text> row consuming a
+											// space-y-2 gap.
+											.filter( Boolean )
+											.map( ( html, index ) => (
 												<Text
 													key={ index }
 													size={ 14 }
@@ -121,14 +126,15 @@ const EntryLogsSection = ( { entryId, onConfirmation } ) => {
 													color="primary"
 													className="[overflow-wrap:anywhere]"
 												>
-													{ parse(
-														domPurify.sanitize(
-															message
-														)
-													) }
+													{ /* See sanitizeLogMessage(): Pro change-logs embed <strong>/<del>, so this is sanitized markup inserted directly — never re-parsed. */ }
+													<span
+														// eslint-disable-next-line react/no-danger -- value is DOMPurify-sanitized and inserted directly (no second HTML parse); see CVE-2026-18406.
+														dangerouslySetInnerHTML={ {
+															__html: html,
+														} }
+													/>
 												</Text>
-											)
-										) }
+											) ) }
 								</div>
 								{ !! RenderDeleteButton && (
 									<RenderDeleteButton

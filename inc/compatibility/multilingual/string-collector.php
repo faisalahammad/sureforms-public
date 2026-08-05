@@ -71,6 +71,11 @@ class String_Collector {
 	public function __construct() {
 		add_action( 'save_post_' . SRFM_FORMS_POST_TYPE, [ $this, 'on_form_save' ], 20, 1 );
 
+		// Prune the form's String Package when the form is permanently deleted so
+		// orphaned packages and their translations don't linger. Fires only on
+		// permanent delete, not on trash (a trashed form may be restored).
+		add_action( 'before_delete_post', [ $this, 'on_form_delete' ], 10, 1 );
+
 		// Register the GLOBAL built-in validation strings once per admin request
 		// (no-op when no multilingual provider is active). These strings are not
 		// per-form, so they belong on an admin/authoring hook rather than on every
@@ -80,6 +85,43 @@ class String_Collector {
 		if ( is_admin() ) {
 			add_action( 'admin_init', [ $this, 'collect_validation_messages' ] );
 		}
+
+		// Declare our String Package kind so WPML's "Translate Everything
+		// Automatically" gate — which reads this filter, not just the per-package
+		// post association — queues SureForms form packages for auto-translation.
+		// Registered unconditionally: WPML only fires this filter when active, and
+		// the callback is a pure array append, so it is a no-op otherwise.
+		add_filter( 'wpml_active_string_package_kinds', [ $this, 'declare_package_kind' ] );
+	}
+
+	/**
+	 * Declare the SureForms String Package kind to WPML.
+	 *
+	 * WPML's package-level "Translate Everything Automatically" gate reads this
+	 * filter to decide which string-package kinds to auto-translate. Each form is
+	 * registered as one package with kind {@see String_Translator::PACKAGE_KIND},
+	 * from which WPML derives the kind slug via `sanitize_title()`; computing the
+	 * key the same way here guarantees it matches the slug WPML assigns to our
+	 * packages (no hardcoded slug that could drift from the kind label).
+	 *
+	 * @param mixed $kinds Associative map of kind slug => { title, slug, plural }.
+	 * @since 2.12.3
+	 * @return mixed The kinds map with the SureForms Form kind added.
+	 */
+	public function declare_package_kind( $kinds ) {
+		if ( ! is_array( $kinds ) ) {
+			return $kinds;
+		}
+
+		$slug = sanitize_title( String_Translator::PACKAGE_KIND );
+
+		$kinds[ $slug ] = [
+			'title'  => String_Translator::PACKAGE_KIND,
+			'slug'   => $slug,
+			'plural' => __( 'SureForms Forms', 'sureforms' ),
+		];
+
+		return $kinds;
 	}
 
 	/**
@@ -111,6 +153,47 @@ class String_Collector {
 	}
 
 	/**
+	 * Delete the form's String Package when the form is permanently deleted.
+	 *
+	 * Hooked to before_delete_post (not trash) so a package is only removed when
+	 * its form is gone for good. Bails for other post types and when no provider
+	 * is active.
+	 *
+	 * @param int $form_id The post ID being deleted.
+	 * @since 2.12.3
+	 * @return void
+	 */
+	public function on_form_delete( int $form_id ): void {
+		if ( SRFM_FORMS_POST_TYPE !== get_post_type( $form_id ) ) {
+			return;
+		}
+
+		$provider = Multilingual_Manager::get_instance()->provider();
+
+		if ( ! $provider->is_active() ) {
+			return;
+		}
+
+		// delete_package() is intentionally absent from the Provider interface (see the
+		// note there): declaring it would fatal any third-party provider written against
+		// 2.11.0-2.12.2. Feature-detect instead, so a custom provider without it simply
+		// skips cleanup rather than crashing.
+		if ( ! method_exists( $provider, 'delete_package' ) ) {
+			return;
+		}
+
+		// Deletion only needs the package identity (name + kind); build it directly
+		// rather than String_Translator::form_package(), which also runs
+		// get_the_title() / get_edit_post_link() the delete path doesn't use.
+		$provider->delete_package(
+			[
+				'name' => (string) $form_id,
+				'kind' => String_Translator::PACKAGE_KIND,
+			]
+		);
+	}
+
+	/**
 	 * Walk the form and register every translatable string with the provider.
 	 *
 	 * Public so unit tests can exercise the collection logic directly without
@@ -119,13 +202,17 @@ class String_Collector {
 	 *
 	 * @param int $form_id The form post ID.
 	 * @since 2.11.0
-	 * @return void
+	 * @since 2.12.3 Returns whether collection actually ran, so callers (notably the
+	 *               backfill) can distinguish "collected" from "silently skipped because
+	 *               the provider went inactive" and avoid recording false progress.
+	 * @return bool True when the form's strings were registered, false when the provider
+	 *              was unavailable and nothing was done.
 	 */
-	public function collect( int $form_id ): void {
+	public function collect( int $form_id ): bool {
 		$provider = Multilingual_Manager::get_instance()->provider();
 
 		if ( ! $provider->is_active() ) {
-			return;
+			return false;
 		}
 
 		// Group every per-form string into a single WPML String Package so they
@@ -138,6 +225,16 @@ class String_Collector {
 		if ( $this->packages_supported ) {
 			$provider->start_package( $package );
 		}
+
+		// Form title (post title) — shown as a heading on the form and as the
+		// instant-form banner, so it is translatable like any other string.
+		$this->register_form_string(
+			$form_id,
+			String_Translator::title_name(),
+			Helper::get_string_value( get_the_title( $form_id ) ),
+			// "Group: Leaf" — WPML splits on ': ' to nest this under a Settings group.
+			__( 'Settings', 'sureforms' ) . ': ' . __( 'Form title', 'sureforms' )
+		);
 
 		// Submit button text.
 		$this->register_form_string(
@@ -226,6 +323,8 @@ class String_Collector {
 			$provider->finish_package( $package );
 		}
 		$this->active_package = null;
+
+		return true;
 	}
 
 	/**

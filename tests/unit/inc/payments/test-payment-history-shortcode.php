@@ -22,6 +22,19 @@ class Test_Payment_History_Shortcode extends TestCase {
 		$this->shortcode = Payment_History_Shortcode::get_instance();
 	}
 
+	protected function tearDown(): void {
+		// These tests mutate shared global state (current user, $GLOBALS['post'], $_POST,
+		// and the shared $wp_styles/$wp_scripts registries) and the base polyfill
+		// TestCase restores none of it, so reset here to stop one test's leftovers from
+		// cascading into the next.
+		wp_set_current_user( 0 );
+		$GLOBALS['post'] = null;
+		$_POST           = [];
+		wp_dequeue_style( 'srfm-payment-history' );
+		wp_dequeue_script( 'srfm-payment-history' );
+		parent::tearDown();
+	}
+
 	/**
 	 * Helper method to call private methods for testing.
 	 */
@@ -60,19 +73,63 @@ class Test_Payment_History_Shortcode extends TestCase {
 	// enqueue_assets
 	// ──────────────────────────────────────────────
 
-	public function test_enqueue_assets_skips_js_when_no_global_post() {
-		$GLOBALS['post'] = null;
+	/**
+	 * Create an administrator and set it as the current user (JS is only enqueued for
+	 * logged-in users). Returns the user ID for cleanup.
+	 */
+	private function login_as_admin() {
+		$user_id = wp_insert_user(
+			[
+				'user_login' => 'ph_admin_' . wp_generate_password( 8, false ),
+				'user_pass'  => wp_generate_password(),
+				'user_email' => wp_generate_password( 8, false ) . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		$user_id = is_wp_error( $user_id ) ? 0 : (int) $user_id;
+		wp_set_current_user( $user_id );
+		return $user_id;
+	}
 
-		// Directly calling enqueue_assets() outside the wp_enqueue_scripts action
-		// simulates the render()-time fallback path (page builder compat) where
-		// both CSS and JS are enqueued unconditionally. To test the hook-time path
-		// where JS is conditional, we test via render() behavior instead.
-		// Here we verify the render-time fallback enqueues JS.
-		$this->shortcode->enqueue_assets();
+	private function delete_user_safely( $user_id ) {
+		wp_set_current_user( 0 );
+		if ( ! $user_id ) {
+			return;
+		}
+		if ( ! function_exists( 'wp_delete_user' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/user.php';
+		}
+		wp_delete_user( $user_id );
+	}
+
+	public function test_enqueue_assets_render_fallback_enqueues_for_logged_in_user() {
+		$GLOBALS['post'] = null;
+		$user_id         = $this->login_as_admin();
+
+		// enqueue_assets( true ) is the render()-time fallback path (page builder / FSE
+		// compat) where the presence gate is skipped. JS loads because the user is logged in.
+		$this->shortcode->enqueue_assets( true );
+		$this->assertTrue( wp_style_is( 'srfm-payment-history', 'enqueued' ) );
 		$this->assertTrue( wp_script_is( 'srfm-payment-history', 'enqueued' ) );
 
 		wp_dequeue_style( 'srfm-payment-history' );
 		wp_dequeue_script( 'srfm-payment-history' );
+		$this->delete_user_safely( $user_id );
+	}
+
+	public function test_enqueue_assets_render_fallback_skips_js_for_logged_out_user() {
+		wp_dequeue_style( 'srfm-payment-history' );
+		wp_dequeue_script( 'srfm-payment-history' );
+		$GLOBALS['post'] = null;
+		wp_set_current_user( 0 );
+
+		// Render-time fallback for a logged-out visitor: the CSS still loads (the login
+		// message must be styled) but the JS + nonce are withheld.
+		$this->shortcode->enqueue_assets( true );
+		$this->assertTrue( wp_style_is( 'srfm-payment-history', 'enqueued' ), 'CSS must load so the login message is styled.' );
+		$this->assertFalse( wp_script_is( 'srfm-payment-history', 'enqueued' ), 'JS + nonce must not load for logged-out visitors.' );
+
+		wp_dequeue_style( 'srfm-payment-history' );
 	}
 
 	public function test_enqueue_assets_enqueues_when_shortcode_present() {
@@ -82,25 +139,251 @@ class Test_Payment_History_Shortcode extends TestCase {
 			'post_status'  => 'publish',
 		] );
 		$GLOBALS['post'] = get_post( $post_id );
+		$user_id         = $this->login_as_admin();
 
 		// Direct call simulates the render()-time fallback (page builder path).
-		$this->shortcode->enqueue_assets();
+		$this->shortcode->enqueue_assets( true );
 		$this->assertTrue( wp_script_is( 'srfm-payment-history', 'enqueued' ) );
 
 		// Cleanup.
 		wp_dequeue_style( 'srfm-payment-history' );
 		wp_dequeue_script( 'srfm-payment-history' );
 		wp_delete_post( $post_id, true );
+		$this->delete_user_safely( $user_id );
 	}
 
 	public function test_enqueue_assets_does_not_double_enqueue() {
+		$user_id = $this->login_as_admin();
+
 		// First call enqueues.
-		$this->shortcode->enqueue_assets();
+		$this->shortcode->enqueue_assets( true );
 		$this->assertTrue( wp_script_is( 'srfm-payment-history', 'enqueued' ) );
 
 		// Second call is a no-op (guard check).
-		$this->shortcode->enqueue_assets();
+		$this->shortcode->enqueue_assets( true );
 		$this->assertTrue( wp_script_is( 'srfm-payment-history', 'enqueued' ) );
+
+		wp_dequeue_style( 'srfm-payment-history' );
+		wp_dequeue_script( 'srfm-payment-history' );
+		$this->delete_user_safely( $user_id );
+	}
+
+	/**
+	 * Helper: invoke enqueue_assets() exactly as the wp_enqueue_scripts hook does — with
+	 * no argument, so `$from_render` defaults to false and the presence gate
+	 * (has_block/has_shortcode against the global $post) is exercised.
+	 */
+	private function enqueue_assets_on_hook() {
+		$this->shortcode->enqueue_assets();
+	}
+
+	public function test_register_assets() {
+		// register_assets() must register (not enqueue) both handles so page-builder
+		// widgets can pull the stylesheet into the <head> by handle — the fix for the
+		// Elementor/Bricks FOUC regression.
+		wp_deregister_style( 'srfm-payment-history' );
+		wp_deregister_script( 'srfm-payment-history' );
+
+		$this->shortcode->register_assets();
+
+		$this->assertTrue( wp_style_is( 'srfm-payment-history', 'registered' ), 'Stylesheet handle must be registered for builder head-enqueue.' );
+		$this->assertTrue( wp_script_is( 'srfm-payment-history', 'registered' ), 'Script handle must be registered.' );
+		// Registration alone must not enqueue anything.
+		$this->assertFalse( wp_style_is( 'srfm-payment-history', 'enqueued' ), 'Registering must not enqueue on unrelated pages.' );
+
+		// A builder enqueuing by handle (get_style_depends/enqueue_scripts) then loads it.
+		wp_enqueue_style( 'srfm-payment-history' );
+		$this->assertTrue( wp_style_is( 'srfm-payment-history', 'enqueued' ) );
+		wp_dequeue_style( 'srfm-payment-history' );
+	}
+
+	public function test_register_assets_is_hooked_on_wp_enqueue_scripts_at_priority_one() {
+		// Priority 1 is the whole mechanism: the Elementor/Bricks widgets enqueue the
+		// handle by name during wp_enqueue_scripts, so it must already be registered. If
+		// this silently became priority 10 both builders would enqueue an unregistered
+		// handle and nothing would print — while every other test here stayed green.
+		$this->assertSame(
+			1,
+			has_action( 'wp_enqueue_scripts', [ $this->shortcode, 'register_assets' ] ),
+			'register_assets() must be hooked on wp_enqueue_scripts at priority 1.'
+		);
+	}
+
+	public function test_enqueue_assets_attaches_nonce_data_for_logged_in_user() {
+		$GLOBALS['post'] = null;
+		$user_id         = $this->login_as_admin();
+
+		$this->shortcode->enqueue_assets( true );
+
+		// The nonce/ajax_url/i18n payload must actually attach to the handle — not merely
+		// "script enqueued". wp_localize_script stores it as the handle's 'data'.
+		$data = wp_scripts()->get_data( 'srfm-payment-history', 'data' );
+		$this->assertNotEmpty( $data, 'Localized data (incl. nonce) must attach for logged-in users.' );
+		$this->assertStringContainsString( 'srfm_payment_history', (string) $data );
+
+		$this->delete_user_safely( $user_id );
+	}
+
+	public function test_enqueue_assets_withholds_nonce_data_for_logged_out_user() {
+		// Now that the handle stays permanently registered, "not enqueued" and "no nonce"
+		// are distinct — assert the nonce data itself never attaches for a logged-out visitor.
+		wp_deregister_script( 'srfm-payment-history' );
+		$GLOBALS['post'] = null;
+		wp_set_current_user( 0 );
+
+		$this->shortcode->enqueue_assets( true );
+
+		$this->assertFalse(
+			wp_scripts()->get_data( 'srfm-payment-history', 'data' ),
+			'No localized nonce data may attach for logged-out visitors.'
+		);
+	}
+
+	public function test_enqueue_assets_registers_script_even_when_only_style_registered() {
+		// Regression guard for the asymmetric-guard bug: if the script handle is missing
+		// (an asset-optimisation plugin deregistered it) while the style is still
+		// registered, enqueue_assets() must still re-register the script so the localize
+		// has a handle to attach the nonce to. Pre-fix this failed because the guard keyed
+		// only on the *style* being registered.
+		$this->shortcode->register_assets();
+		wp_deregister_script( 'srfm-payment-history' );
+		$this->assertTrue( wp_style_is( 'srfm-payment-history', 'registered' ), 'Precondition: style registered.' );
+		$this->assertFalse( wp_script_is( 'srfm-payment-history', 'registered' ), 'Precondition: script deregistered.' );
+
+		$GLOBALS['post'] = null;
+		$user_id         = $this->login_as_admin();
+
+		$this->shortcode->enqueue_assets( true );
+
+		$this->assertTrue( wp_script_is( 'srfm-payment-history', 'registered' ), 'Script must be re-registered before enqueue.' );
+		$this->assertNotEmpty( wp_scripts()->get_data( 'srfm-payment-history', 'data' ), 'Nonce data must attach even if the script handle was missing.' );
+
+		$this->delete_user_safely( $user_id );
+	}
+
+	public function test_enqueue_assets_gate_skips_when_block_absent() {
+		wp_dequeue_style( 'srfm-payment-history' );
+		wp_dequeue_script( 'srfm-payment-history' );
+
+		$post_id         = wp_insert_post( [
+			'post_title'   => 'Plain Page',
+			'post_content' => 'No payment history on this page.',
+			'post_status'  => 'publish',
+		] );
+		$GLOBALS['post'] = get_post( $post_id );
+
+		$this->enqueue_assets_on_hook();
+
+		$this->assertFalse( wp_style_is( 'srfm-payment-history', 'enqueued' ), 'CSS must not load on pages without the block/shortcode.' );
+		$this->assertFalse( wp_script_is( 'srfm-payment-history', 'enqueued' ), 'JS must not load on pages without the block/shortcode.' );
+
+		$GLOBALS['post'] = null;
+		wp_delete_post( $post_id, true );
+	}
+
+	public function test_enqueue_assets_gate_skips_when_no_wp_post() {
+		wp_dequeue_style( 'srfm-payment-history' );
+		wp_dequeue_script( 'srfm-payment-history' );
+
+		// Archive / 404 / REST context: $GLOBALS['post'] is not a WP_Post, so the
+		// hook-time gate must early-return and enqueue nothing.
+		$GLOBALS['post'] = null;
+
+		$this->enqueue_assets_on_hook();
+
+		$this->assertFalse( wp_style_is( 'srfm-payment-history', 'enqueued' ), 'CSS must not load when there is no WP_Post.' );
+		$this->assertFalse( wp_script_is( 'srfm-payment-history', 'enqueued' ), 'JS must not load when there is no WP_Post.' );
+	}
+
+	/**
+	 * The real regression guard for this PR: with the block/shortcode present on the
+	 * hook, the assets load — and, more importantly, `test_enqueue_assets_gate_skips_*`
+	 * prove they do NOT load otherwise (the behavioral change vs. the old site-wide load).
+	 */
+	public function test_enqueue_assets_gate_enqueues_when_shortcode_present_on_hook() {
+		wp_dequeue_style( 'srfm-payment-history' );
+		wp_dequeue_script( 'srfm-payment-history' );
+
+		$post_id         = wp_insert_post( [
+			'post_title'   => 'Payment History Page',
+			'post_content' => '[srfm_payment_history]',
+			'post_status'  => 'publish',
+		] );
+		$GLOBALS['post'] = get_post( $post_id );
+		$user_id         = $this->login_as_admin();
+
+		$this->enqueue_assets_on_hook();
+
+		$this->assertTrue( wp_style_is( 'srfm-payment-history', 'enqueued' ), 'CSS must load when the shortcode is present.' );
+		$this->assertTrue( wp_script_is( 'srfm-payment-history', 'enqueued' ), 'JS must load when the shortcode is present.' );
+
+		wp_dequeue_style( 'srfm-payment-history' );
+		wp_dequeue_script( 'srfm-payment-history' );
+		$GLOBALS['post'] = null;
+		wp_delete_post( $post_id, true );
+		$this->delete_user_safely( $user_id );
+	}
+
+	public function test_enqueue_assets_gate_enqueues_when_block_present_on_hook() {
+		wp_dequeue_style( 'srfm-payment-history' );
+		wp_dequeue_script( 'srfm-payment-history' );
+
+		// The Gutenberg block is the primary insertion path — cover its has_block()
+		// detection with real block markup so a block-name typo cannot silently stop
+		// asset loading with the shortcode tests still green.
+		$post_id         = wp_insert_post( [
+			'post_title'   => 'Payment History Block Page',
+			'post_content' => '<!-- wp:srfm/payment-history /-->',
+			'post_status'  => 'publish',
+		] );
+		$GLOBALS['post'] = get_post( $post_id );
+		$user_id         = $this->login_as_admin();
+
+		$this->enqueue_assets_on_hook();
+
+		$this->assertTrue( wp_style_is( 'srfm-payment-history', 'enqueued' ), 'CSS must load when the block is present.' );
+		$this->assertTrue( wp_script_is( 'srfm-payment-history', 'enqueued' ), 'JS must load when the block is present.' );
+
+		wp_dequeue_style( 'srfm-payment-history' );
+		wp_dequeue_script( 'srfm-payment-history' );
+		$GLOBALS['post'] = null;
+		wp_delete_post( $post_id, true );
+		$this->delete_user_safely( $user_id );
+	}
+
+	public function test_enqueue_assets_gate_loads_css_but_not_js_for_logged_out_on_hook() {
+		wp_dequeue_style( 'srfm-payment-history' );
+		wp_dequeue_script( 'srfm-payment-history' );
+
+		$post_id         = wp_insert_post( [
+			'post_title'   => 'Payment History Page',
+			'post_content' => '[srfm_payment_history]',
+			'post_status'  => 'publish',
+		] );
+		$GLOBALS['post'] = get_post( $post_id );
+		wp_set_current_user( 0 );
+
+		$this->enqueue_assets_on_hook();
+
+		$this->assertTrue( wp_style_is( 'srfm-payment-history', 'enqueued' ), 'CSS must load so the login message is styled.' );
+		$this->assertFalse( wp_script_is( 'srfm-payment-history', 'enqueued' ), 'JS + nonce must be withheld from logged-out visitors.' );
+
+		wp_dequeue_style( 'srfm-payment-history' );
+		$GLOBALS['post'] = null;
+		wp_delete_post( $post_id, true );
+	}
+
+	public function test_render_enqueues_css_for_logged_out_user() {
+		wp_dequeue_style( 'srfm-payment-history' );
+		wp_dequeue_script( 'srfm-payment-history' );
+
+		wp_set_current_user( 0 );
+		$result = $this->shortcode->render( [] );
+
+		// The login message is returned, but assets must be enqueued first so it is styled
+		// even when the widget is placed where the wp_enqueue_scripts gate cannot detect it.
+		$this->assertStringContainsString( 'srfm-pd-widget', $result );
+		$this->assertTrue( wp_style_is( 'srfm-payment-history', 'enqueued' ), 'Login message must load the stylesheet for logged-out users.' );
 
 		wp_dequeue_style( 'srfm-payment-history' );
 		wp_dequeue_script( 'srfm-payment-history' );

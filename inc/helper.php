@@ -192,6 +192,14 @@ class Helper {
 	/**
 	 * Extracts the field label from the dynamic field key ( or field slug ).
 	 *
+	 * ALWAYS escape the return value at the sink. The label is decoded from the
+	 * submitted key via {@see self::decode()}, so it is submitter-controlled and
+	 * unauthenticated — and this method is strictly more dangerous than decode()
+	 * alone, because it additionally runs html_entity_decode(), which expands
+	 * entities and therefore undoes any htmlspecialchars()-on-store defence.
+	 * When a label's integrity matters, read it from the form's stored block
+	 * definitions by block id instead of from the submitted key.
+	 *
 	 * @param string $field_key Dynamic field key.
 	 * @since 1.1.1
 	 * @return string Extracted field label.
@@ -202,10 +210,12 @@ class Helper {
 		}
 
 		$label = explode( '-lbl-', $field_key )[1];
-		// Getting the encrypted label. we are removing the block slug here.
+		// Getting the encoded label. we are removing the block slug here.
 		$label = explode( '-', $label )[0];
 
-		return $label ? html_entity_decode( self::decrypt( $label ) ) : '';
+		// The result is submitter-controlled and unauthenticated — escape it for its
+		// context at the sink (esc_html, escape_csv_formula, ...), never trust it.
+		return $label ? html_entity_decode( self::decode( $label ) ) : '';
 	}
 
 	/**
@@ -510,13 +520,32 @@ class Helper {
 	}
 
 	/**
-	 * Encrypt data using base64.
+	 * Base64-encode a string for use inside a field key.
 	 *
-	 * @param string $input The input string which needs to be encrypted.
-	 * @since 0.0.1
-	 * @return string The encrypted string.
+	 * Replaces encrypt(), which is retained as a deprecated alias. The encoding itself
+	 * is unchanged since 0.0.1 — only the name is new.
+	 *
+	 * NOT ENCRYPTION. This is plain, unkeyed base64 (padding stripped) used only to
+	 * carry a label inside a field key. There is no key, no HMAC and no integrity
+	 * protection, so a value round-tripped through decode() is fully attacker-forgeable
+	 * and must never be treated as authentic or trusted as a security boundary. When a
+	 * label's integrity matters, look it up from the form's stored block definitions by
+	 * block id instead of decoding it from the submitted key.
+	 *
+	 * Two behaviours worth knowing before relying on this pair:
+	 *
+	 * - The input is run through wp_strip_all_tags(), so this is not a lossless
+	 *   round trip: decode( encode( $x ) ) !== $x whenever $x contains markup.
+	 *   That stripping happens on this trusted side only — decode() returns raw
+	 *   submitted bytes and does NOT strip anything, so every sink must escape for
+	 *   its own context (esc_html(), escape_csv_formula(), ...).
+	 * - Falsy input (including the string '0') returns '', not base64.
+	 *
+	 * @param string $input The input string to encode.
+	 * @since 2.12.3
+	 * @return string The base64-encoded string (padding removed).
 	 */
-	public static function encrypt( $input ) {
+	public static function encode( $input ) {
 		// If the input is empty or not a string, then abandon ship.
 		if ( empty( $input ) || ! is_string( $input ) ) {
 			return '';
@@ -525,27 +554,62 @@ class Helper {
 		// Strip HTML tags to prevent them from being included in IDs and field names.
 		$input = wp_strip_all_tags( $input );
 
-		// Encrypt the input and return it.
+		// Base64-encode the input and return it.
 		$base_64 = base64_encode( $input ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode
 		return rtrim( $base_64, '=' );
 	}
 
 	/**
-	 * Decrypt data using base64.
+	 * Base64-encode a string.
 	 *
-	 * @param string $input The input string which needs to be decrypted.
+	 * @deprecated 2.12.3 Use {@see self::encode()}. The name wrongly implied a security
+	 *             boundary — this is unkeyed base64, not encryption.
+	 *
+	 * @param string $input The input string to encode.
 	 * @since 0.0.1
-	 * @return string The decrypted string.
+	 * @return string The base64-encoded string.
 	 */
-	public static function decrypt( $input ) {
+	public static function encrypt( $input ) {
+		return self::encode( $input );
+	}
+
+	/**
+	 * Base64-decode a string produced by encode().
+	 *
+	 * Replaces decrypt(), which is retained as a deprecated alias. The decoding itself
+	 * is unchanged since 0.0.1 — only the name is new.
+	 *
+	 * NOT DECRYPTION. See {@see self::encode()} — the result is unauthenticated and
+	 * attacker-forgeable; do not trust it where integrity matters. The output is raw
+	 * submitted bytes: no tag stripping, no sanitising. Escape it at the sink.
+	 *
+	 * @param string $input The input string to decode.
+	 * @since 2.12.3
+	 * @return string The decoded string.
+	 */
+	public static function decode( $input ) {
 		// If the input is empty or not a string, then abandon ship.
 		if ( empty( $input ) || ! is_string( $input ) ) {
 			return '';
 		}
 
-		// Decrypt the input and return it.
+		// Base64-decode the input and return it.
 		$base_64 = $input . str_repeat( '=', strlen( $input ) % 4 );
 		return base64_decode( $base_64 ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode
+	}
+
+	/**
+	 * Base64-decode a string.
+	 *
+	 * @deprecated 2.12.3 Use {@see self::decode()}. The name wrongly implied a security
+	 *             boundary — this is unkeyed base64, not decryption.
+	 *
+	 * @param string $input The input string to decode.
+	 * @since 0.0.1
+	 * @return string The decoded string.
+	 */
+	public static function decrypt( $input ) {
+		return self::decode( $input );
 	}
 
 	/**

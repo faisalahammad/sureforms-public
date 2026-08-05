@@ -115,7 +115,15 @@ const EntriesFilters = ( {
 
 	const handleSearchKeyDown = ( event ) => {
 		if ( event.key === 'Enter' ) {
-			onSearchChange( event.target.value );
+			const value = event.target.value.trim();
+			// Text searches scan submitted form data (unindexed LIKE), so require at
+			// least 3 characters. Numeric terms are exempt — they resolve to an exact,
+			// indexed entry-ID lookup. Empty submits are allowed to clear the search.
+			const isNumeric = /^\d+$/.test( value );
+			if ( value !== '' && ! isNumeric && value.length < 3 ) {
+				return;
+			}
+			onSearchChange( value );
 		}
 	};
 

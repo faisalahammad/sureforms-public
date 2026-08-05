@@ -215,8 +215,7 @@ class Inlinebutton_Markup extends Base {
 							[],
 							null,
 							[
-								false,
-								'defer' => true,
+								'strategy' => 'defer',
 							]
 						);
 						// phpcs:enable WordPress.WP.EnqueuedResourceParameters.MissingVersion, PluginCheck.CodeAnalysis.EnqueuedResourceOffloading.OffloadedContent

@@ -492,6 +492,22 @@ function onHCaptchaError() {
 		}
 
 		/**
+		 * Skip the CSS variable adjustment for de-skinned forms. When default styling
+		 * is disabled ( the `srfm-styling-none` marker class ), the default stylesheet
+		 * that consumes `--srfm-expandable-menu-background` is not enqueued, the
+		 * derived variables ( e.g. `--srfm-color-input-text` ) are not printed — so
+		 * the luminance check below degenerates and this branch would run for every
+		 * form — and the container may have no inline <style> tag at all, which
+		 * previously caused an unguarded `querySelector( 'style' ).innerHTML` crash
+		 * that also broke initialization of every later form on the page.
+		 * The `srfm-has-dark-bg` class above is still applied — it works without the
+		 * default stylesheet and is documented as a hook for custom styling.
+		 */
+		if ( element.classList.contains( 'srfm-styling-none' ) ) {
+			return;
+		}
+
+		/**
 		 * Lets calculate the form's text color.
 		 */
 		const textColor = window
@@ -517,7 +533,17 @@ function onHCaptchaError() {
 				'form-id'
 			) } { ${ cssElements.join( ' ' ) } }`;
 
-			element.querySelector( 'style' ).innerHTML += styles;
+			// The container's inline <style> block is conditional ( it is omitted when
+			// default styling is disabled and no custom CSS exists ) — create it when
+			// missing instead of dereferencing null.
+			let styleTag = element.querySelector( 'style' );
+
+			if ( ! styleTag ) {
+				styleTag = document.createElement( 'style' );
+				element.appendChild( styleTag );
+			}
+
+			styleTag.innerHTML += styles;
 		}
 	}
 

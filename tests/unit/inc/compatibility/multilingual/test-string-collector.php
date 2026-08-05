@@ -38,6 +38,13 @@ class Srfm_String_Collector_Stub_Provider implements Provider {
 	 */
 	public $package_events = [];
 
+	/**
+	 * Recorded delete_package() calls.
+	 *
+	 * @var array<int, array<string,string>>
+	 */
+	public $deleted_packages = [];
+
 	public function is_active(): bool {
 		return true;
 	}
@@ -104,6 +111,10 @@ class Srfm_String_Collector_Stub_Provider implements Provider {
 
 	public function translate_package_string( array $package, string $name, string $value ): string {
 		return $value;
+	}
+
+	public function delete_package( array $package ): void {
+		$this->deleted_packages[] = $package;
 	}
 }
 
@@ -236,6 +247,9 @@ class Test_String_Collector extends TestCase {
 			$this->markTestSkipped( 'Could not create a revision post.' );
 		}
 
+		// Isolate the call under test from the parent form's own save_post→collect().
+		$stub->registered = [];
+
 		String_Collector::get_instance()->on_form_save( (int) $revision_id );
 
 		$this->assertSame( [], $stub->registered, 'No strings should be registered for revisions.' );
@@ -275,6 +289,146 @@ class Test_String_Collector extends TestCase {
 		$row     = array_values( $matched )[0];
 		$this->assertSame( 'Send', $row['value'] );
 		$this->assertSame( 'sureforms', $row['domain'] );
+	}
+
+	public function test_collect_registers_form_title() {
+		$stub    = $this->install_stub_provider();
+		$form_id = $this->make_form( [ 'post_title' => 'Contact Us' ] );
+
+		String_Collector::get_instance()->collect( $form_id );
+
+		$this->assertContains( 'form_' . $form_id . '_form_title', $this->registered_names() );
+
+		$matched = array_filter(
+			$stub->registered,
+			static function ( $row ) use ( $form_id ) {
+				return $row['name'] === 'form_' . $form_id . '_form_title';
+			}
+		);
+		$row = array_values( $matched )[0];
+		$this->assertSame( 'Contact Us', $row['value'] );
+	}
+
+	public function test_on_form_delete_deletes_package() {
+		$stub    = $this->install_stub_provider();
+		$form_id = $this->make_form();
+
+		String_Collector::get_instance()->on_form_delete( $form_id );
+
+		$this->assertCount( 1, $stub->deleted_packages, 'delete_package() should be called once.' );
+		$this->assertSame( (string) $form_id, $stub->deleted_packages[0]['name'] );
+		$this->assertSame( String_Translator::PACKAGE_KIND, $stub->deleted_packages[0]['kind'] );
+	}
+
+	public function test_declare_package_kind_declares_sureforms_kind_on_the_wpml_filter() {
+		// Constructing the collector registers the wpml_active_string_package_kinds filter.
+		String_Collector::get_instance();
+
+		$kinds = apply_filters( 'wpml_active_string_package_kinds', [] );
+
+		$this->assertIsArray( $kinds );
+		$this->assertArrayHasKey( 'sureforms-form', $kinds, 'The SureForms package kind must be declared for WPML TEA.' );
+		$this->assertSame(
+			[
+				'title'  => 'SureForms Form',
+				'slug'   => 'sureforms-form',
+				'plural' => 'SureForms Forms',
+			],
+			$kinds['sureforms-form']
+		);
+		// Slug must equal what WPML derives from the package kind.
+		$this->assertSame( sanitize_title( String_Translator::PACKAGE_KIND ), array_key_first( $kinds ) );
+	}
+
+	public function test_declare_package_kind_preserves_existing_and_ignores_non_array() {
+		$collector = String_Collector::get_instance();
+
+		$existing = [ 'other-kind' => [ 'title' => 'Other', 'slug' => 'other-kind', 'plural' => 'Others' ] ];
+		$result   = $collector->declare_package_kind( $existing );
+		$this->assertArrayHasKey( 'other-kind', $result, 'Existing kinds must be preserved.' );
+		$this->assertArrayHasKey( 'sureforms-form', $result );
+
+		// Non-array input is returned unchanged (defensive against other filter callbacks).
+		$this->assertSame( 'not-an-array', $collector->declare_package_kind( 'not-an-array' ) );
+	}
+
+	public function test_permanent_delete_triggers_package_deletion_via_hook() {
+		$stub    = $this->install_stub_provider();
+		$form_id = $this->make_form();
+
+		// Exercise the real before_delete_post wiring (not a direct on_form_delete call).
+		$stub->deleted_packages = [];
+		wp_delete_post( $form_id, true );
+
+		$this->assertCount( 1, $stub->deleted_packages, 'Permanent delete should delete the package.' );
+		$this->assertSame( (string) $form_id, $stub->deleted_packages[0]['name'] );
+		$this->assertSame( String_Translator::PACKAGE_KIND, $stub->deleted_packages[0]['kind'] );
+	}
+
+	public function test_trashing_a_form_does_not_delete_package() {
+		$stub    = $this->install_stub_provider();
+		$form_id = $this->make_form();
+
+		$stub->deleted_packages = [];
+		wp_trash_post( $form_id );
+
+		// Trash is reversible → before_delete_post does not fire → no deletion.
+		$this->assertSame( [], $stub->deleted_packages, 'Trashing must not delete the package.' );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	public function test_on_form_delete_bails_when_provider_inactive() {
+		if ( defined( 'ICL_SITEPRESS_VERSION' ) && class_exists( '\SitePress' ) ) {
+			$this->markTestSkipped( 'WPML appears to be loaded in the test environment.' );
+		}
+
+		// No stub installed → provider inactive. Must be a no-op (no fatal).
+		$form_id = $this->make_form();
+
+		$before = did_action( 'wpml_delete_package' );
+		String_Collector::get_instance()->on_form_delete( $form_id );
+
+		$this->assertSame( $before, did_action( 'wpml_delete_package' ) );
+	}
+
+	public function test_collect_skips_empty_title() {
+		$stub    = $this->install_stub_provider();
+		$form_id = $this->make_form();
+
+		// Force an empty title directly so no default is re-applied, then isolate
+		// from make_form()'s save_post→collect().
+		wp_update_post(
+			[
+				'ID'         => $form_id,
+				'post_title' => '',
+			]
+		);
+		clean_post_cache( $form_id );
+		$stub->registered = [];
+
+		String_Collector::get_instance()->collect( $form_id );
+
+		$this->assertNotContains( 'form_' . $form_id . '_form_title', array_column( $stub->registered, 'name' ), 'An empty form title must not be registered.' );
+	}
+
+	public function test_on_form_delete_ignores_other_post_types() {
+		$stub    = $this->install_stub_provider();
+		$post_id = wp_insert_post(
+			[
+				'post_type'   => 'post',
+				'post_status' => 'publish',
+				'post_title'  => 'Not a form',
+			]
+		);
+
+		if ( is_wp_error( $post_id ) || 0 === (int) $post_id ) {
+			$this->markTestSkipped( 'Could not create a non-form post.' );
+		}
+
+		String_Collector::get_instance()->on_form_delete( (int) $post_id );
+
+		$this->assertSame( [], $stub->deleted_packages, 'Non-form post types must not delete a package.' );
 	}
 
 	public function test_collect_registers_confirmation_messages_per_index() {
@@ -373,19 +527,31 @@ class Test_String_Collector extends TestCase {
 			]
 		);
 
+		// Isolate from make_form()'s save_post→collect(); only the explicit call matters.
+		$stub->registered = [];
+
 		String_Collector::get_instance()->collect( $form_id );
 
-		$this->assertSame( [], $stub->registered, 'Empty / whitespace-only strings should not be registered.' );
+		// Every empty/whitespace meta value must be skipped (assert their absence
+		// rather than an exact set, so the test is robust to other stored meta).
+		$names = array_column( $stub->registered, 'name' );
+		$this->assertNotContains( 'form_' . $form_id . '_submit_button', $names );
+		$this->assertNotContains( 'form_' . $form_id . '_confirmation_0_message', $names );
+		$this->assertNotContains( 'form_' . $form_id . '_notification_0_subject', $names );
+		$this->assertNotContains( 'form_' . $form_id . '_notification_0_body', $names );
+		$this->assertNotContains( 'form_' . $form_id . '_notification_0_from_name', $names );
 	}
 
 	public function test_collect_handles_missing_meta_gracefully() {
 		$stub    = $this->install_stub_provider();
 		$form_id = $this->make_form();
 
-		// No meta set at all.
+		// No meta set at all. Isolate from make_form()'s save_post→collect().
+		$stub->registered = [];
 		String_Collector::get_instance()->collect( $form_id );
 
-		$this->assertSame( [], $stub->registered, 'A form with no meta should produce no registrations.' );
+		// collect() runs without error and registers the title; absent meta is handled gracefully.
+		$this->assertContains( 'form_' . $form_id . '_form_title', array_column( $stub->registered, 'name' ), 'A form with no meta should still register its title.' );
 	}
 
 	public function test_get_meta_string_returns_string_for_existing_meta() {
@@ -414,9 +580,12 @@ class Test_String_Collector extends TestCase {
 		$form_id = $this->make_form();
 		update_post_meta( $form_id, '_srfm_submit_button_text', "   \n\t  " );
 
+		// Isolate from make_form()'s save_post→collect().
+		$stub->registered = [];
 		String_Collector::get_instance()->collect( $form_id );
 
-		$this->assertSame( [], $stub->registered );
+		// The whitespace-only submit button text must be skipped.
+		$this->assertNotContains( 'form_' . $form_id . '_submit_button', array_column( $stub->registered, 'name' ) );
 	}
 
 	public function test_collect_validation_messages_registers_known_keys() {
@@ -470,6 +639,9 @@ class Test_String_Collector extends TestCase {
 		$stub    = $this->install_stub_provider();
 		$form_id = $this->make_form( [ 'post_content' => '' ] );
 
+		// Isolate from make_form()'s save_post→collect(); collect_block_strings()
+		// itself registers no title, so empty content must yield nothing.
+		$stub->registered = [];
 		String_Collector::get_instance()->collect_block_strings( $form_id );
 
 		$this->assertSame( [], $stub->registered );

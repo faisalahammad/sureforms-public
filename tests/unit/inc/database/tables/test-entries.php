@@ -302,6 +302,42 @@ class Test_Entries_Table extends TestCase {
 	}
 
 	/**
+	 * Test has_duplicate_field_value matches the exact key and nothing else.
+	 *
+	 * The unauthenticated uniqueness check relies on this: a quote in the key must not
+	 * be able to extend the JSON path into a different member, and a key that is merely
+	 * a prefix/suffix of a stored key must not match. See #2997.
+	 */
+	public function test_has_duplicate_field_value_matches_exact_key_only() {
+		$stored_key = 'srfm-input-exact001-lbl-RW1haWw-email';
+		$form_id    = 987651;
+
+		Entries::add(
+			[
+				'form_id'   => $form_id,
+				'form_data' => [ $stored_key => 'taken@example.com' ],
+			]
+		);
+
+		// Baseline: the exact key matches.
+		$this->assertTrue( Entries::has_duplicate_field_value( $form_id, $stored_key, 'taken@example.com' ) );
+
+		// A partial key must not match.
+		$this->assertFalse( Entries::has_duplicate_field_value( $form_id, 'srfm-input-exact001', 'taken@example.com' ) );
+		$this->assertFalse( Entries::has_duplicate_field_value( $form_id, $stored_key . '-extra', 'taken@example.com' ) );
+
+		// A quote in the key must stay inside one quoted member access rather than
+		// walking the path into another member.
+		$this->assertFalse(
+			Entries::has_duplicate_field_value( $form_id, $stored_key . '"."junk-unique01-lbl-x', 'taken@example.com' ),
+			'A crafted JSON path must not resolve to another field.'
+		);
+
+		// And it must not throw or match on a purely malformed key.
+		$this->assertFalse( Entries::has_duplicate_field_value( $form_id, 'a"b\\c', 'taken@example.com' ) );
+	}
+
+	/**
 	 * Test get_all_entry_ids_for_form returns array.
 	 */
 	public function test_get_all_entry_ids_for_form() {
@@ -313,10 +349,12 @@ class Test_Entries_Table extends TestCase {
 
 	/**
 	 * Test get_new_columns_definition includes the upgrade columns added across
-	 * SureForms versions, including the `language` column added for the WPML
-	 * compatibility work.
+	 * SureForms versions.
 	 *
-	 * @since 2.11.0
+	 * The `language` column is intentionally NOT part of the schema: its combined
+	 * "ADD COLUMN language + ADD INDEX idx_form_id_language" ALTER failed on some
+	 * database engines (the index referenced the column being added in the same
+	 * statement), so the column was removed from the entries schema entirely.
 	 */
 	public function test_get_new_columns_definition() {
 		$new_columns = $this->entries_table->get_new_columns_definition();
@@ -328,14 +366,9 @@ class Test_Entries_Table extends TestCase {
 		$this->assertStringContainsString( 'type VARCHAR(20)', $blob );
 		$this->assertStringContainsString( 'extras LONGTEXT', $blob );
 		$this->assertStringContainsString( 'user_id BIGINT(20) UNSIGNED', $blob );
-		// Language column + composite index added by the multilingual feature.
-		$this->assertStringContainsString( 'language VARCHAR(20)', $blob );
-		$this->assertStringContainsString( 'INDEX idx_form_id_language (form_id, language)', $blob );
-		// The language column must NOT carry an `AFTER extras` clause: on a pre-0.0.13
-		// install upgrading straight to this version, `extras` is added in the SAME
-		// combined ALTER, and MySQL resolves `AFTER extras` against the pre-ALTER schema,
-		// failing the whole atomic ALTER with "Unknown column 'extras'".
-		$this->assertStringNotContainsString( 'language VARCHAR(20) AFTER', $blob );
+		// The language column and its index must NOT be part of the migration anymore.
+		$this->assertStringNotContainsString( 'language', $blob );
+		$this->assertStringNotContainsString( 'idx_form_id_language', $blob );
 	}
 
 	/**

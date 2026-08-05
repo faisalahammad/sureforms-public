@@ -832,7 +832,12 @@ abstract class Base {
 
 							switch ( $_value['compare'] ) {
 								case 'LIKE':
-									$clause_parts[] = $_value['key'] . ' ' . $_value['compare'] . ' "%%' . $this->get_format_by_datatype( Helper::get_string_value( $schema[ $_value['key'] ]['type'] ) ) . '%%"';
+									// Single quotes to match WP core. Under a MySQL session with
+									// ANSI_QUOTES set (not in WP's incompatible_modes list, which
+									// only names the compound ANSI mode) a double-quoted pattern
+									// parses as an identifier and the query hard-fails, taking out
+									// both the listing and its COUNT(*).
+									$clause_parts[] = $_value['key'] . ' ' . $_value['compare'] . " '%%" . $this->get_format_by_datatype( Helper::get_string_value( $schema[ $_value['key'] ]['type'] ) ) . "%%'";
 									$values[]       = $_value['value'];
 									break;
 

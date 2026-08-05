@@ -20,7 +20,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Get_Entry ability class.
  *
  * Retrieves detailed information about a specific form submission entry,
- * including parsed form data with decrypted labels.
+ * including parsed form data with decoded labels.
  *
  * @since 2.5.2
  */

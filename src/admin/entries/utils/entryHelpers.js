@@ -108,10 +108,6 @@ export const transformEntry = ( entry, formsMap = {} ) => {
 		statusLabel: getStatusLabel( entry.status ),
 		firstField: getFirstFieldValue( entry.form_data ),
 		dateTime: formatEntryListDate( entry.created_at ),
-		language:
-			typeof entry.language === 'string' && entry.language !== ''
-				? entry.language.toUpperCase()
-				: '',
 		rawData: entry, // Keep original data for reference
 	};
 };

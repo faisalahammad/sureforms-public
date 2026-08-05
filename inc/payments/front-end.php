@@ -10,6 +10,7 @@ namespace SRFM\Inc\Payments;
 
 use SRFM\Inc\Database\Tables\Payments;
 use SRFM\Inc\Field_Validation;
+use SRFM\Inc\Helper;
 use SRFM\Inc\Payments\Stripe\Stripe_Helper;
 use SRFM\Inc\Submit_Token;
 use SRFM\Inc\Traits\Get_Instance;
@@ -481,6 +482,9 @@ class Front_End {
 
 		$payment_response = [];
 
+		// Block IDs that produced a verified payment on this submission.
+		$verified_block_ids = [];
+
 		// Loop through form data to find payment fields.
 		foreach ( $form_data as $field_name => $field_value ) {
 			// Check if field name contains "-lbl-" pattern.
@@ -546,14 +550,16 @@ class Front_End {
 			if ( ! empty( $payment_response ) && isset( $payment_response['payment_id'] ) ) {
 				// Modify the form data with the payment ID.
 				$form_data[ $field_name ] = $payment_response['payment_id'];
+
+				$verified_block_ids[ Helper::get_string_value( $block_id ) ] = true;
 			}
 		}
 
 		if ( ! empty( $payment_response ) && isset( $payment_response['error'] ) ) {
-			$form_data = array_merge( $form_data, $payment_response );
+			return array_merge( $form_data, $payment_response );
 		}
 
-		return $form_data;
+		return $this->require_verified_payments( $form_data, $verified_block_ids );
 	}
 
 	/**
@@ -1131,6 +1137,42 @@ class Front_End {
 		}
 
 		return $default_value;
+	}
+
+	/**
+	 * Fail closed when a form's payment field carries no verified payment.
+	 *
+	 * SECURITY INVARIANT — the payment requirement must come from the stored form
+	 * config, never from the submitted payload. Verification driven by what the client
+	 * sent can only confirm the payments it was given; it cannot know about one that
+	 * was never presented. Deriving the requirement from the saved form keeps a
+	 * submission that carries no payment field from being treated as complete.
+	 *
+	 * @param array<mixed>       $form_data          Form data.
+	 * @param array<string,true> $verified_block_ids Payment block IDs verified on this submission.
+	 *
+	 * @since 2.12.3
+	 * @return array<mixed> Form data, carrying an `error` key when a payment is missing.
+	 */
+	private function require_verified_payments( $form_data, $verified_block_ids ) {
+		// absint() to match the normalisation the submit token was verified against.
+		$form_id = isset( $form_data['form-id'] ) ? absint( Helper::get_string_value( $form_data['form-id'] ) ) : 0;
+
+		if ( 0 === $form_id ) {
+			return $form_data;
+		}
+
+		foreach ( Payment_Helper::get_required_payment_block_ids( $form_id ) as $block_id ) {
+			if ( isset( $verified_block_ids[ Helper::get_string_value( $block_id ) ] ) ) {
+				continue;
+			}
+
+			$form_data['error'] = Payment_Helper::get_error_message_by_key( 'payment_required' );
+
+			break;
+		}
+
+		return $form_data;
 	}
 
 	/**
