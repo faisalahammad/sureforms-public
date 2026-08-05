@@ -836,7 +836,7 @@ export const prepareBlockSlugs = ( updateBlockAttributes, srfmBlocks ) => {
  * Called when the user manually edits a slug via the SlugControl component.
  *
  * @param {string} blockId - The block_id attribute of the block to lock.
- * @since x.x.x
+ * @since 2.12.3
  */
 export const lockBlockSlugByBlockId = ( blockId ) => {
 	_slugAutoLabels.delete( blockId );
@@ -850,7 +850,7 @@ export const lockBlockSlugByBlockId = ( blockId ) => {
  * regenerating the slug if the block's label changes later in the same session.
  *
  * @param {string} slug - The slug portion extracted from the {form:slug} shortcode.
- * @since x.x.x
+ * @since 2.12.3
  */
 export const lockBlockSlugBySlug = ( slug ) => {
 	const { getBlocks } = select( 'core/block-editor' );

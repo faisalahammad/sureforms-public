@@ -6,7 +6,7 @@
  * list) plus any skipped-field warnings. No raw block markup is shown. From
  * here the user commits the import or goes back to reselect.
  *
- * @since x.x.x
+ * @since 2.12.3
  */
 
 import { useEffect, useRef, useState } from '@wordpress/element';

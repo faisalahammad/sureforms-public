@@ -223,7 +223,7 @@ function handleQuillEditorA11Y( areaField ) {
  * Localizes the Quill editor toolbar labels using WordPress translations.
  *
  * @param {HTMLElement} areaField - The textarea element enhanced by Quill editor.
- * @since x.x.x
+ * @since 2.12.3
  */
 function localizeQuillToolbar( areaField ) {
 	if ( typeof srfm_quill_i18n === 'undefined' ) {

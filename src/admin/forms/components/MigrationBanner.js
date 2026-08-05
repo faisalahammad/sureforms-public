@@ -11,7 +11,7 @@
  * Click → Settings → Migration tab (existing landing). Dismiss → POST
  * user-meta endpoint; banner stays dismissed across reloads.
  *
- * @since x.x.x
+ * @since 2.12.3
  */
 
 import { __, sprintf, _n } from '@wordpress/i18n';

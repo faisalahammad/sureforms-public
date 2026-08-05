@@ -275,12 +275,23 @@ module.exports = function ( grunt ) {
 			},
 			plugin_function_comment: {
 				// JS is swept as well as PHP. The sweep used to glob PHP only, so
-				// `@since x.x.x` placeholders in src/**/*.js survived every release
-				// and were carried into the built bundles in assets/.
+				// `@since` version placeholders in JS survived every release.
+				// (Do not write the literal placeholder in these comments — this task
+				// rewrites its own file, and it would be substituted on the next bump.)
+				//
+				// `src` is the source of truth, but it is NOT sufficient on its own —
+				// two placeholders currently ship from trees `src/**/*.js` cannot reach:
+				//   inc/page-builders/elementor/assets/elementor-preview-styling.js:8
+				//   assets/js/payment-history.js:8
+				// `inc/` is not in .distignore at all, and .distignore excludes only
+				// `assets/js/unminified`, so `assets/js/*.js` goes to wordpress.org.
+				// Both are therefore in scope deliberately; narrowing to `src` would
+				// leave placeholders in the shipped ZIP.
 				src: [
 					'*.php',
 					'**/*.php',
 					'src/**/*.js',
+					'inc/**/*.js',
 					'assets/js/**/*.js',
 					'!node_modules/**',
 					'!php-tests/**',

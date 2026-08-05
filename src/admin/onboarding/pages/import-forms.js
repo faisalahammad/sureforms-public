@@ -13,7 +13,7 @@
  * (`src/admin/forms/components/MigrationBanner.js`) is the second touch-
  * point; the Settings → Migration tab remains the always-on surface.
  *
- * @since x.x.x
+ * @since 2.12.3
  */
 
 import { Container, Text, Title, Loader, Alert } from '@bsf/force-ui';

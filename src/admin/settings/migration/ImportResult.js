@@ -5,7 +5,7 @@
  * "Edit in SureForms" links), which ones failed, and any unsupported-field
  * warnings. Offers a "Import more" action to reset back to the source picker.
  *
- * @since x.x.x
+ * @since 2.12.3
  */
 
 import { __, sprintf, _n } from '@wordpress/i18n';

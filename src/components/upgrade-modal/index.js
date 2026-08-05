@@ -4,7 +4,7 @@
  * A reusable modal for Pro feature upgrade prompts.
  *
  * @package
- * @since x.x.x
+ * @since 2.12.3
  */
 
 import { Modal, Button } from '@wordpress/components';

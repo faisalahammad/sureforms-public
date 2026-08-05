@@ -4,7 +4,7 @@
  * Mirrors the QuizEmptyState layout with the shared dashboard Header
  * so the page feels like a first-class admin screen.
  *
- * @since x.x.x
+ * @since 2.12.3
  */
 
 import { createRoot } from '@wordpress/element';

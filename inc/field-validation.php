@@ -205,8 +205,11 @@ class Field_Validation {
 	 * `wp_block` post (so pattern-embedded fields are included too). A cycle guard on the
 	 * reference ids prevents infinite recursion.
 	 *
-	 * Used by {@see self::validate_form_data()} to reject submitted keys whose block id
-	 * is not part of the form. Note: this is deliberately NOT `prepared_validation_data()`
+	 * Used by {@see self::strip_unknown_field_keys()}, which DROPS submitted keys whose
+	 * block id is not part of the form rather than rejecting the submission — see the
+	 * note there for why rejecting made cached forms unsubmittable.
+	 *
+	 * Note: this is deliberately NOT `prepared_validation_data()`
 	 * — that map only holds blocks with extra validation config (dropdowns, payments,
 	 * textarea min-length) and omits plain inputs, so it is not a field allowlist.
 	 *

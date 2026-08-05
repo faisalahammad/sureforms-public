@@ -430,6 +430,7 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 * New: Added an "Entries" shortcut in the Instant Form admin bar to open a form's entries in one click.
 * Improvement: Enhanced WPML compatibility. [https://wpml.org/plugin/sureforms/](https://wpml.org/plugin/sureforms/)
 * Improvement: Hardened security across entries, form submissions, and payments.
+* Improvement: Deprecated Helper::encrypt() and Helper::decrypt() in favour of Helper::encode() and Helper::decode(), which reflect that these are base64 encoding, not encryption. The old names still work.
 * Fix: Fixed a stored cross-site scripting vulnerability in the entries view (CVE-2026-18406). Props to daroo and Wordfence for the responsible disclosure.
 * Fix: Cloudflare Turnstile no longer shows a warning on WordPress 7.0.
 * Fix: Enhanced entries search - includes submitted data too.

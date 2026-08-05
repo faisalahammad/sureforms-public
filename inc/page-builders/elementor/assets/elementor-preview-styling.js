@@ -5,7 +5,7 @@
  * Listens for control value changes and applies CSS variables directly to the DOM.
  *
  * @package
- * @since x.x.x
+ * @since 2.12.3
  */
 
 import {
