@@ -445,6 +445,79 @@ class Test_Entries extends TestCase {
 	}
 
 	/**
+	 * Test write_csv_header neutralizes formula injection in column labels.
+	 *
+	 * Labels are decoded out of stored form_data keys, so an anonymous submitter can
+	 * influence them — see #2996. Data cells were already escaped; the header was not.
+	 */
+	public function test_write_csv_header_escapes_formula_in_labels() {
+		$stream = fopen( 'php://temp', 'r+' );
+
+		$this->call_private_method_static(
+			Entries::class,
+			'write_csv_header',
+			[ $stream, [ 'abc123' => "=cmd|'/c calc'!A1" ] ]
+		);
+
+		rewind( $stream );
+		$csv = stream_get_contents( $stream );
+		fclose( $stream );
+
+		// Parse the row back rather than substring-matching: the payload contains a
+		// space, so fputcsv() quotes the field either way and a naive ",=cmd" negative
+		// assertion would pass even with the fix reverted.
+		$cells = str_getcsv( trim( $csv ) );
+
+		$this->assertSame( "'=cmd|'/c calc'!A1", end( $cells ), 'Formula label must be quote-prefixed in the header cell.' );
+	}
+
+	/**
+	 * Test escape_csv_formula neutralizes each dangerous leading character and leaves
+	 * ordinary and numeric values alone.
+	 *
+	 * Now public so Pro's separate partial-entries writer can share it instead of
+	 * carrying its own weaker copy.
+	 */
+	public function test_escape_csv_formula() {
+		foreach ( [ '=', '+', '-', '@', "\t", "\r" ] as $trigger ) {
+			$this->assertSame(
+				"'" . $trigger . 'HYPERLINK("http://evil")',
+				Entries::escape_csv_formula( $trigger . 'HYPERLINK("http://evil")' ),
+				'Leading ' . wp_json_encode( $trigger ) . ' must be neutralized.'
+			);
+		}
+
+		// Ordinary text is untouched.
+		$this->assertSame( 'Full Name', Entries::escape_csv_formula( 'Full Name' ) );
+		$this->assertSame( '', Entries::escape_csv_formula( '' ) );
+
+		// Numeric columns must stay numeric in the spreadsheet.
+		foreach ( [ '42', '-5', '3.14', '-0.5', '1e3' ] as $number ) {
+			$this->assertSame( $number, Entries::escape_csv_formula( $number ), $number . ' must remain numeric.' );
+		}
+	}
+
+	/**
+	 * Test write_csv_header leaves ordinary labels untouched.
+	 */
+	public function test_write_csv_header_keeps_plain_labels_unchanged() {
+		$stream = fopen( 'php://temp', 'r+' );
+
+		$this->call_private_method_static(
+			Entries::class,
+			'write_csv_header',
+			[ $stream, [ 'abc123' => 'Full Name' ] ]
+		);
+
+		rewind( $stream );
+		$csv = stream_get_contents( $stream );
+		fclose( $stream );
+
+		$this->assertStringContainsString( 'Full Name', $csv );
+		$this->assertStringNotContainsString( "'Full Name", $csv );
+	}
+
+	/**
 	 * Helper method to call private static methods for testing.
 	 */
 	private function call_private_method_static( $class, $method_name, $parameters = [] ) {

@@ -499,34 +499,9 @@ class Payment_Markup extends Base {
 	 * @since 2.4.0
 	 */
 	private function get_registered_payment_methods() {
-		$methods = [];
-
-		// Get enabled payment methods from block attributes.
-		$enabled_methods = $this->payment_methods;
-
-		// Filter to get method configurations - start with Stripe as default.
-		$available_methods = apply_filters(
-			'srfm_payment_methods_registry',
-			[
-				'stripe' => [
-					'id'              => 'stripe',
-					'label'           => __( 'Stripe', 'sureforms' ),
-					'description'     => __( 'Pay with credit or debit card', 'sureforms' ),
-					'icon'            => 'credit-card',
-					'enabled'         => $this->stripe_connected,
-					'container_class' => 'srfm-stripe-payment-element',
-				],
-			]
-		);
-
-		// Filter enabled methods.
-		foreach ( $enabled_methods as $method_id ) {
-			if ( isset( $available_methods[ $method_id ] ) && $available_methods[ $method_id ]['enabled'] ) {
-				$methods[ $method_id ] = $available_methods[ $method_id ];
-			}
-		}
-
-		return $methods;
+		// Shared with the submission-side guard (Front_End::validate_payment_fields), so
+		// the renderer and the guard can never disagree about whether this field is usable.
+		return Payment_Helper::get_registered_payment_methods( [ 'paymentMethods' => $this->payment_methods ] );
 	}
 
 	// BOTH MODE: start — helper renderers for the dual-mode chooser and amount displays.

@@ -7,6 +7,7 @@
 
 use Yoast\PHPUnitPolyfills\TestCases\TestCase;
 use SRFM\Inc\Fields\Base;
+use SRFM\Inc\Helper;
 
 class Test_Base extends TestCase {
 
@@ -62,6 +63,43 @@ class Test_Base extends TestCase {
 		$this->assertSame( 'true', $this->get_private_property( $this->base, 'aria_unique' ) );
 		$this->assertSame( '2', $this->get_private_property( $this->base, 'min_selection' ) );
 		$this->assertSame( '10', $this->get_private_property( $this->base, 'max_selection' ) );
+	}
+
+	/**
+	 * Test set_input_label builds the -lbl- segment with Helper::encode().
+	 *
+	 * The label is carried inside the field name as unkeyed base64 (padding stripped),
+	 * and the field name is the label segment plus the block slug.
+	 */
+	public function test_set_input_label() {
+		$this->call_private_method( $this->base, 'set_properties', [
+			[
+				'label' => 'Full Name',
+				'slug'  => 'name',
+			],
+		] );
+		$this->call_private_method( $this->base, 'set_input_label', [ 'Fallback' ] );
+
+		$this->assertSame( 'Full Name', $this->get_private_property( $this->base, 'input_label_fallback' ) );
+		$this->assertSame( '-lbl-' . Helper::encode( 'Full Name' ), $this->get_private_property( $this->base, 'input_label' ) );
+		$this->assertSame( '-lbl-' . Helper::encode( 'Full Name' ) . '-name', $this->get_private_property( $this->base, 'field_name' ) );
+
+		// The encoding is plain base64 with padding stripped — no key, no integrity.
+		$this->assertSame(
+			'Full Name',
+			Helper::decode( explode( '-', $this->get_private_property( $this->base, 'input_label' ) )[2] )
+		);
+	}
+
+	/**
+	 * Test set_input_label falls back to the passed value when no label is set.
+	 */
+	public function test_set_input_label_uses_fallback_without_label() {
+		$this->call_private_method( $this->base, 'set_properties', [ [ 'slug' => 'payment' ] ] );
+		$this->call_private_method( $this->base, 'set_input_label', [ 'Payment' ] );
+
+		$this->assertSame( 'Payment', $this->get_private_property( $this->base, 'input_label_fallback' ) );
+		$this->assertSame( '-lbl-' . Helper::encode( 'Payment' ), $this->get_private_property( $this->base, 'input_label' ) );
 	}
 
 	private function call_private_method( $object, $method_name, $parameters = [] ) {

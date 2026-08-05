@@ -253,10 +253,79 @@ class Generate_Form_Markup {
 			'/generate-form-markup',
 			[
 				'methods'             => 'GET',
-				'callback'            => [ $this, 'get_form_markup' ],
-				'permission_callback' => '__return_true',
+				'callback'            => [ $this, 'render_form_markup_endpoint' ],
+				'permission_callback' => [ $this, 'render_form_markup_permissions_check' ],
+				'args'                => [
+					'id' => [
+						'required'          => true,
+						'type'              => 'integer',
+						'sanitize_callback' => 'absint',
+						'validate_callback' => static function ( $value ) {
+							return absint( $value ) > 0;
+						},
+					],
+				],
 			]
 		);
+	}
+
+	/**
+	 * Permission check for the form-markup endpoint.
+	 *
+	 * The endpoint exists for one purpose: rendering the editor preview when a user
+	 * picks a form in the srfm/form block. So the caller must at least be able to
+	 * edit content. A nonce is not sufficient — `srfm_form_markup` is minted in
+	 * enqueue_block_editor_assets, so passing it proves only that the caller reached
+	 * the editor, never what they are allowed to read.
+	 *
+	 * @since x.x.x
+	 * @return bool|\WP_Error True when allowed, WP_Error otherwise.
+	 */
+	public function render_form_markup_permissions_check() {
+		if ( ! current_user_can( 'edit_posts' ) ) {
+			return new \WP_Error(
+				'srfm_rest_cannot_render_form',
+				__( 'Sorry, you are not allowed to render form markup.', 'sureforms' ),
+				[ 'status' => rest_authorization_required_code() ]
+			);
+		}
+
+		return true;
+	}
+
+	/**
+	 * Render the requested form for the block-editor preview.
+	 *
+	 * Constrains the requested ID to a SureForms form, and to one the caller is
+	 * allowed to see: published forms are already public, anything else (draft,
+	 * pending, private, trashed) needs the SureForms forms capability.
+	 *
+	 * @param \WP_REST_Request<array<string,mixed>> $request REST request.
+	 *
+	 * @since x.x.x
+	 * @return string|\WP_Error Form markup, or WP_Error when the form is not renderable for this caller.
+	 */
+	public function render_form_markup_endpoint( $request ) {
+		$form_id = Helper::get_integer_value( $request->get_param( 'id' ) );
+		$form    = $form_id > 0 ? get_post( $form_id ) : null;
+
+		if ( ! $form instanceof \WP_Post || SRFM_FORMS_POST_TYPE !== $form->post_type ) {
+			return new \WP_Error(
+				'srfm_rest_form_not_found',
+				__( 'No form was found with the given ID.', 'sureforms' ),
+				[ 'status' => 404 ]
+			);
+		}
+
+		if ( 'publish' !== $form->post_status && ! Helper::current_user_can() ) {
+			return new \WP_Error(
+				'srfm_rest_cannot_render_form',
+				__( 'Sorry, you are not allowed to render this form.', 'sureforms' ),
+				[ 'status' => rest_authorization_required_code() ]
+			);
+		}
+
+		return Helper::get_string_value( self::get_form_markup( $form_id ) );
 	}
 
 	/**
@@ -273,12 +342,11 @@ class Generate_Form_Markup {
 	 * @since 0.0.1
 	 */
 	public static function get_form_markup( $id, $show_title_current_page = true, $sf_classname = '', $post_type = 'post', $do_blocks = false, $block_attrs = [] ) {
-		if ( isset( $_GET['id'] ) && isset( $_GET['srfm_form_markup_nonce'] ) ) {
-			$nonce = isset( $_GET['srfm_form_markup_nonce'] ) ? sanitize_text_field( wp_unslash( $_GET['srfm_form_markup_nonce'] ) ) : '';
-			$id    = wp_verify_nonce( $nonce, 'srfm_form_markup' ) && ! empty( $_GET['srfm_form_markup_nonce'] ) ? Helper::get_integer_value( sanitize_text_field( wp_unslash( $_GET['id'] ) ) ) : '';
-		} else {
-			$id = Helper::get_integer_value( $id );
-		}
+		// A renderer must never read the request for its target. The REST route owns
+		// that (see render_form_markup_endpoint), and the query-string override used
+		// to let ?id=&srfm_form_markup_nonce= short-circuit the caller's own ID on
+		// any page embedding a form.
+		$id = Helper::get_integer_value( $id );
 
 		// Check for any form restrictions.
 		$form_id = Helper::get_integer_value( $id );
