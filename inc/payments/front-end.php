@@ -1142,15 +1142,16 @@ class Front_End {
 	/**
 	 * Fail closed when a form's payment field carries no verified payment.
 	 *
-	 * Payment verification above is driven entirely by what the client submitted: strip
-	 * the srfm-payment-* field from the POST body and every branch simply `continue`d,
-	 * so the entry was created, notifications fired and nothing was paid. The
-	 * requirement therefore has to come from the stored form config instead.
+	 * SECURITY INVARIANT — the payment requirement must come from the stored form
+	 * config, never from the submitted payload. Verification driven by what the client
+	 * sent can only confirm the payments it was given; it cannot know about one that
+	 * was never presented. Deriving the requirement from the saved form keeps a
+	 * submission that carries no payment field from being treated as complete.
 	 *
 	 * @param array<mixed>       $form_data          Form data.
 	 * @param array<string,true> $verified_block_ids Payment block IDs verified on this submission.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return array<mixed> Form data, carrying an `error` key when a payment is missing.
 	 */
 	private function require_verified_payments( $form_data, $verified_block_ids ) {

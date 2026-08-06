@@ -43,7 +43,7 @@ class Generate_Form_Markup {
 	 * alone would be empty when the node is built.
 	 *
 	 * @var array<int,bool>
-	 * @since x.x.x
+	 * @since 2.12.3
 	 */
 	private static $rendered_form_ids = [];
 
@@ -73,11 +73,19 @@ class Generate_Form_Markup {
 	 * shared Form_Styling helper) covers those; get_form_markup() then adds anything
 	 * a static parse can't see (page builders, FSE template parts).
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return void
 	 */
 	public function collect_queried_form_ids() {
 		if ( is_admin() || ! is_singular() ) {
+			return;
+		}
+
+		// The only consumer is the admin-bar node, which bails for anyone without
+		// manage_options. Without this guard every anonymous front-end request ran
+		// parse_blocks() plus recursive get_post() expansion of synced patterns for a
+		// feature it could never see. The current user is already resolved at `wp`.
+		if ( ! is_admin_bar_showing() || ! Helper::current_user_can() ) {
 			return;
 		}
 
@@ -86,7 +94,10 @@ class Generate_Form_Markup {
 			return;
 		}
 
-		$content = Helper::get_string_value( get_post_field( 'post_content', $post_id ) );
+		// 'raw' context: the default 'display' context applies the post_content filter,
+		// so the parsed list could disagree with Form_Styling::should_skip_frontend_styles(),
+		// which reads raw.
+		$content = Helper::get_string_value( get_post_field( 'post_content', $post_id, 'raw' ) );
 		foreach ( Form_Styling::get_form_ids_from_content( $content ) as $form_id ) {
 			$fid = absint( $form_id );
 			if ( $fid > 0 ) {
@@ -109,9 +120,18 @@ class Generate_Form_Markup {
 	 * Add an "Entries" node to the frontend admin bar on any page that contains a
 	 * SureForms form, deep-linking to the Entries admin page pre-filtered to that
 	 * form. The form list comes from collect_queried_form_ids() (seeded at `wp`)
-	 * plus the render-time registry — covering the block, [sureforms] shortcode,
-	 * Elementor, Bricks and FSE paths — and a `srfm_admin_bar_entries_form_ids`
-	 * filter lets other sources contribute. With multiple forms the node becomes a
+	 * plus the render-time registry.
+	 *
+	 * ACTUAL COVERAGE: srfm/form blocks, synced/reusable patterns (core/block) and
+	 * [sureforms] shortcodes in the queried post's content, plus a singular form CPT
+	 * page. Page builders that store layout outside post_content (Elementor in
+	 * _elementor_data, Bricks in _bricks_page_content_*) and FSE template parts are
+	 * NOT covered: the render-time registry is written during the_content, which on
+	 * block themes runs after wp_admin_bar_render() at wp_body_open, so the node is
+	 * already built. On classic themes those paths happen to work via core's wp_footer
+	 * fallback, which makes the feature silently theme-dependent. Use the
+	 * `srfm_admin_bar_entries_form_ids` filter to contribute builder-sourced IDs until
+	 * early builder detection lands. With multiple forms the node becomes a
 	 * submenu (one child per form); the parent then links to the unfiltered page.
 	 *
 	 * Runs on admin_bar_menu, which fires as the bar renders (wp_body_open on modern
@@ -119,7 +139,7 @@ class Generate_Form_Markup {
 	 * `manage_options` capability the admin page and entries REST endpoints use).
 	 *
 	 * @param \WP_Admin_Bar $wp_admin_bar The admin bar instance.
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return void
 	 */
 	public function add_entries_admin_bar_node( $wp_admin_bar ) {
@@ -149,7 +169,7 @@ class Generate_Form_Markup {
 		 * Bricks (_bricks_page_content_*), FSE template parts, or Pro's
 		 * [srfm_show_entries] shortcode.
 		 *
-		 * @since x.x.x
+		 * @since 2.12.3
 		 * @param array<int> $form_ids Form IDs detected on the current request.
 		 */
 		$form_ids = array_map( 'absint', (array) apply_filters( 'srfm_admin_bar_entries_form_ids', $form_ids ) );
@@ -258,7 +278,7 @@ class Generate_Form_Markup {
 	 * enqueue_block_editor_assets, so passing it proves only that the caller reached
 	 * the editor, never what they are allowed to read.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return bool|\WP_Error True when allowed, WP_Error otherwise.
 	 */
 	public function render_form_markup_permissions_check() {
@@ -282,7 +302,7 @@ class Generate_Form_Markup {
 	 *
 	 * @param \WP_REST_Request<array<string,mixed>> $request REST request.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return string|\WP_Error Form markup, or WP_Error when the form is not renderable for this caller.
 	 */
 	public function render_form_markup_endpoint( $request ) {
@@ -322,10 +342,10 @@ class Generate_Form_Markup {
 	 * @since 0.0.1
 	 */
 	public static function get_form_markup( $id, $show_title_current_page = true, $sf_classname = '', $post_type = 'post', $do_blocks = false, $block_attrs = [] ) {
-		// A renderer must never read the request for its target. The REST route owns
-		// that (see render_form_markup_endpoint), and the query-string override used
-		// to let ?id=&srfm_form_markup_nonce= short-circuit the caller's own ID on
-		// any page embedding a form.
+		// SECURITY INVARIANT — a renderer must never read the request to decide what to
+		// render. The caller's `$id` is the only source of truth here; the REST route
+		// owns request parsing (see render_form_markup_endpoint). Reintroducing any
+		// query-string override would let a URL change which form a page renders.
 		$id = Helper::get_integer_value( $id );
 
 		// Check for any form restrictions.

@@ -179,7 +179,7 @@ class Null_Provider implements Provider {
 	 * Delete a string package. No-op for the Null provider.
 	 *
 	 * @param array<string,string> $package Package descriptor.
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return void
 	 */
 	public function delete_package( array $package ): void {

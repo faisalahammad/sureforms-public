@@ -542,7 +542,7 @@ class Helper {
 	 * - Falsy input (including the string '0') returns '', not base64.
 	 *
 	 * @param string $input The input string to encode.
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return string The base64-encoded string (padding removed).
 	 */
 	public static function encode( $input ) {
@@ -562,7 +562,7 @@ class Helper {
 	/**
 	 * Base64-encode a string.
 	 *
-	 * @deprecated x.x.x Use {@see self::encode()}. The name wrongly implied a security
+	 * @deprecated 2.12.3 Use {@see self::encode()}. The name wrongly implied a security
 	 *             boundary — this is unkeyed base64, not encryption.
 	 *
 	 * @param string $input The input string to encode.
@@ -584,7 +584,7 @@ class Helper {
 	 * submitted bytes: no tag stripping, no sanitising. Escape it at the sink.
 	 *
 	 * @param string $input The input string to decode.
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return string The decoded string.
 	 */
 	public static function decode( $input ) {
@@ -601,7 +601,7 @@ class Helper {
 	/**
 	 * Base64-decode a string.
 	 *
-	 * @deprecated x.x.x Use {@see self::decode()}. The name wrongly implied a security
+	 * @deprecated 2.12.3 Use {@see self::decode()}. The name wrongly implied a security
 	 *             boundary — this is unkeyed base64, not decryption.
 	 *
 	 * @param string $input The input string to decode.
