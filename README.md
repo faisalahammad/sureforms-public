@@ -429,7 +429,6 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 ### 2.12.3 - 6th August 2026 ###
 * New: Added an "Entries" shortcut in the Instant Form admin bar to open a form's entries in one click.
 * Improvement: Enhanced WPML compatibility. [https://wpml.org/plugin/sureforms/](https://wpml.org/plugin/sureforms/)
-* Improvement: Hardened security across entries, form submissions, and payments.
 * Fix: This update addressed a security bug. Props to daroo and Wordfence for reporting it responsibly to our team.
 * Fix: Cloudflare Turnstile no longer shows a warning on WordPress 7.0.
 * Fix: Enhanced entries search - includes submitted data too.
