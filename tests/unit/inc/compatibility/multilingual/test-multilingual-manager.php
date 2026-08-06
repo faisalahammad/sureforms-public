@@ -66,6 +66,10 @@ class Srfm_Stub_Multilingual_Provider implements Provider {
 		unset( $package, $name );
 		return $value;
 	}
+
+	public function delete_package( array $package ): void {
+		unset( $package );
+	}
 }
 
 /**

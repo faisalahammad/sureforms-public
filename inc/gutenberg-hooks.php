@@ -203,7 +203,10 @@ class Gutenberg_Hooks {
 				'current_screen'                    => $screen,
 				'smart_tags_array'                  => Smart_Tags::smart_tag_list(),
 				'smart_tags_array_email'            => Smart_Tags::email_smart_tag_list(),
-				'srfm_form_markup_nonce'            => wp_create_nonce( 'srfm_form_markup' ),
+				// No srfm_form_markup nonce: the generate-form-markup route is gated by a
+				// capability check, not by holding a nonce. It used to be minted here for
+				// every editor user and read from the query string, which is precisely how
+				// that route ended up with no real authorization (#2995).
 				'get_form_markup_url'               => 'sureforms/v1/generate-form-markup',
 				'is_pro_active'                     => Helper::has_pro(),
 				'srfm_default_dynamic_block_option' => wp_parse_args( Helper::get_array_value( get_option( 'srfm_default_dynamic_block_option', [] ) ), Helper::default_dynamic_block_option() ),

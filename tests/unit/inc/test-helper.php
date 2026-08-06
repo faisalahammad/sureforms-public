@@ -2998,4 +2998,69 @@ class Test_Helper extends TestCase {
         self::$mock_plugins = [];
     }
 
+
+	/**
+	 * encode() is the renamed encrypt(); it base64-encodes with padding stripped and
+	 * strips HTML tags first.
+	 */
+	public function test_encode() {
+		$this->assertSame( 'aGVsbG8', Helper::encode( 'hello' ), 'base64 with padding stripped' );
+		$this->assertSame( rtrim( base64_encode( 'hello' ), '=' ), Helper::encode( '<b>hello</b>' ), 'HTML tags stripped before encoding' );
+		$this->assertSame( '', Helper::encode( '' ), 'empty input returns empty' );
+		$this->assertSame( '', Helper::encode( null ), 'non-string input returns empty' );
+	}
+
+	/**
+	 * decode() reverses encode(), tolerating the stripped padding.
+	 */
+	public function test_decode() {
+		$this->assertSame( 'hello', Helper::decode( 'aGVsbG8' ), 'decodes a padding-stripped value' );
+		$this->assertSame( 'hello@world!123', Helper::decode( Helper::encode( 'hello@world!123' ) ), 'round-trips special chars' );
+		$this->assertSame( '', Helper::decode( '' ), 'empty input returns empty' );
+	}
+
+	/**
+	 * The deprecated encrypt()/decrypt() aliases must behave identically to encode()/decode()
+	 * so existing callers (and the Pro plugin) keep working.
+	 */
+	public function test_encrypt_decrypt_aliases_match_encode_decode() {
+		foreach ( [ 'hello', 'héllo wörld', 'a-b-c', 'label with spaces' ] as $v ) {
+			$this->assertSame( Helper::encode( $v ), Helper::encrypt( $v ), 'encrypt() alias equals encode()' );
+			$this->assertSame( Helper::decode( Helper::encode( $v ) ), Helper::decrypt( Helper::encrypt( $v ) ), 'decrypt() alias equals decode()' );
+		}
+	}
+
+	/**
+	 * The deprecated decrypt() alias delegates to decode() unchanged.
+	 */
+	public function test_decrypt_alias_delegates_to_decode() {
+		$this->assertSame( 'hello', Helper::decrypt( 'aGVsbG8' ), 'decodes a padding-stripped value' );
+		$this->assertSame( Helper::decode( 'aGVsbG8' ), Helper::decrypt( 'aGVsbG8' ) );
+		$this->assertSame( '', Helper::decrypt( '' ), 'empty input returns empty' );
+		$this->assertSame( '', Helper::decrypt( null ), 'non-string input returns empty' );
+
+		// Round-trips through the alias pair, and through mixed old/new names.
+		$this->assertSame( 'Full Name', Helper::decrypt( Helper::encode( 'Full Name' ) ) );
+		$this->assertSame( 'Full Name', Helper::decode( Helper::encrypt( 'Full Name' ) ) );
+	}
+
+	/**
+	 * fetch_svg() wraps a known icon in the srfm-icon span, merges the extra class and
+	 * raw attributes, and degrades to an empty span for an unknown icon.
+	 */
+	public function test_fetch_svg() {
+		$markup = Helper::fetch_svg( 'circle-checked', 'srfm-payment-icon', 'aria-hidden="true"' );
+
+		$this->assertStringContainsString( 'class="srfm-icon srfm-payment-icon"', $markup );
+		$this->assertStringContainsString( 'aria-hidden="true"', $markup );
+		$this->assertStringContainsString( '<svg', $markup );
+
+		// No class / no attributes still produces the wrapper.
+		$this->assertStringContainsString( 'class="srfm-icon"', Helper::fetch_svg( 'circle-checked' ) );
+
+		// Unknown icon: wrapper only, no SVG.
+		$unknown = Helper::fetch_svg( 'no-such-icon-12345' );
+		$this->assertStringContainsString( 'class="srfm-icon"', $unknown );
+		$this->assertStringNotContainsString( '<svg', $unknown );
+	}
 }

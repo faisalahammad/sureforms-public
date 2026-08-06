@@ -157,4 +157,20 @@ interface Provider {
 	 * @return string Translated value, or the original when no translation exists.
 	 */
 	public function translate_package_string( array $package, string $name, string $value ): string;
+
+	/*
+	 * NOTE: delete_package( array $package ): void is deliberately NOT declared here.
+	 *
+	 * This interface is a public extension point — Multilingual_Manager::resolve_provider()
+	 * accepts any object via the `srfm_multilingual_provider` filter (@since 2.11.0) and
+	 * instanceof-checks it. Adding a bodyless method to a shipped interface is a
+	 * fatal-error BC break: a third-party provider written against 2.11.0-2.12.2 would
+	 * fail at class-declaration time on update, producing a white screen rather than a
+	 * degraded feature. Guarding the call site does not help, because the fatal happens
+	 * when the implementor's class is declared, not when the method is called.
+	 *
+	 * Both first-party providers implement delete_package(), and String_Collector
+	 * feature-detects it before calling. If it is ever promoted into this contract, that
+	 * must be a major release with a migration note for custom providers.
+	 */
 }

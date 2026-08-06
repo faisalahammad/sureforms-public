@@ -283,6 +283,11 @@ class Form_Submit {
 			);
 		}
 
+		// Drop submitted keys this form does not define before anything consumes them.
+		// Runs on SUBMISSION only, so historical entries whose keys no longer match a
+		// rebuilt form (see #2665) stay fully readable on the read/export paths.
+		$form_data = Field_Validation::strip_unknown_field_keys( $form_data, $current_form_id );
+
 		$validated_form_data = Field_Validation::validate_form_data( $form_data, $current_form_id );
 
 		if ( ! empty( $validated_form_data ) ) {
@@ -601,14 +606,16 @@ class Form_Submit {
 			'device_name'    => $device_name,
 			'submission_url' => $submission_url,
 		];
-		// Prefer the language the visitor saw at form-render time (captured in a
-		// hidden srfm-form-language input), since WPML's language detection on the
-		// REST submit endpoint frequently falls back to the default. The hidden
-		// input is client-supplied, so:
+		// Resolve the language the visitor saw at form-render time (captured in a
+		// hidden srfm-form-language input) so the confirmation message and email
+		// notifications below can be rendered in it — WPML's language detection on
+		// the REST submit endpoint frequently falls back to the default. This value
+		// is used only to switch_language() at submit time; it is not persisted. The
+		// hidden input is client-supplied, so:
 		// 1. Validate shape with a BCP-47 regex.
 		// 2. Cross-check against the active multilingual provider's known
-		// languages (active + default) so a crafted request can't pollute
-		// the column with codes the site doesn't support.
+		// languages (active + default) so a crafted request can't switch rendering
+		// to a code the site doesn't support.
 		// 3. Fall back to the provider's current_language() on either failure.
 		$entry_language     = Multilingual_Manager::get_instance()->provider()->current_language();
 		$submitted_language = isset( $form_data['srfm-form-language'] ) ? sanitize_text_field( Helper::get_string_value( $form_data['srfm-form-language'] ) ) : '';
@@ -620,7 +627,6 @@ class Form_Submit {
 			'form_id'         => $id,
 			'form_data'       => $submission_data,
 			'submission_info' => $submission_info,
-			'language'        => $entry_language,
 			'created_at'      => current_time( 'mysql' ),
 		];
 		if ( is_user_logged_in() ) {
@@ -647,7 +653,7 @@ class Form_Submit {
 			// in the language the visitor saw at submit time. The REST submit
 			// endpoint doesn't carry the ?lang= URL parameter, so without this
 			// switch the provider would return strings in its default language
-			// even though the entry itself is correctly tagged.
+			// even though the visitor filled the form in another language.
 			$provider = Multilingual_Manager::get_instance()->provider();
 			if ( $provider->is_active() && '' !== $entry_language ) {
 				$provider->switch_language( $entry_language );
@@ -1029,6 +1035,13 @@ class Form_Submit {
 			wp_send_json_error( [ 'error' => __( 'Too many requests. Please try again shortly.', 'sureforms' ) ], 429 );
 		}
 
+		// SECURITY INVARIANT — only the fields the form itself marks unique may be
+		// probed through this unauthenticated handler. The allowlist is what keeps the
+		// lookup scoped to values a site owner opted into checking, rather than to
+		// stored submission data generally. A form with no unique fields therefore
+		// matches nothing and always answers with an empty set.
+		$unique_block_ids = $this->get_unique_field_block_ids( $form_id );
+
 		// Extract and validate field values from POST data.
 		$skip_keys  = [ 'action', 'token', 'id' ];
 		$duplicates = [];
@@ -1047,6 +1060,13 @@ class Form_Submit {
 			}
 
 			if ( '' === $value ) {
+				continue;
+			}
+
+			// The key must resolve to a block this form configured as unique.
+			$block_id = Helper::get_block_id_from_key( $field_key );
+
+			if ( '' === $block_id || ! isset( $unique_block_ids[ $block_id ] ) ) {
 				continue;
 			}
 
@@ -1321,6 +1341,130 @@ class Form_Submit {
 		// defaults $entry_language to current_language(), so this keeps mis-tagging
 		// to the server's own determination instead of the (cacheable) client value.
 		return $language === $provider->current_language();
+	}
+
+	/**
+	 * Collect the block IDs of the fields a form configures as unique.
+	 *
+	 * Derived from the stored form, never from the request — the whole point is that
+	 * the client cannot nominate which fields are probeable. The frontend already
+	 * sends only inputs rendered with data-unique="true", which comes from the same
+	 * isUnique attribute, so this is the server-side mirror of what the client does.
+	 *
+	 * @param int $form_id Form ID.
+	 *
+	 * @since 2.12.3
+	 * @return array<string,true> Unique field block IDs, keyed by block ID.
+	 */
+	private function get_unique_field_block_ids( $form_id ) {
+		$form = get_post( $form_id );
+
+		if ( ! $form instanceof \WP_Post || '' === $form->post_content ) {
+			return [];
+		}
+
+		$visited_refs = [];
+		$block_ids    = $this->collect_unique_field_block_ids( parse_blocks( $form->post_content ), $visited_refs );
+
+		/**
+		 * Filters the block IDs treated as unique fields for the AJAX uniqueness check.
+		 *
+		 * Lets add-ons whose fields a static parse of the form cannot see contribute
+		 * their own unique fields.
+		 *
+		 * @since 2.12.3
+		 *
+		 * @param array<string,true> $block_ids Unique field block IDs, keyed by block ID.
+		 *                                     A plain list of IDs is accepted too and is
+		 *                                     normalised to this shape.
+		 * @param int                $form_id   Form ID.
+		 */
+		$filtered = apply_filters( 'srfm_unique_field_block_ids', $block_ids, $form_id );
+
+		// Normalise rather than trust: the lookup is isset( $set[ $block_id ] ), so an
+		// add-on returning a plain list would silently disable uniqueness for the form
+		// instead of adding to it. A non-array return keeps the derived set.
+		return is_array( $filtered ) ? self::normalize_block_id_set( $filtered ) : $block_ids;
+	}
+
+	/**
+	 * Normalise a block-ID collection to a block ID => true map.
+	 *
+	 * Accepts both the documented map shape and a plain list of IDs.
+	 *
+	 * @param array<mixed> $block_ids Block IDs as a map or a list.
+	 *
+	 * @since 2.12.3
+	 * @return array<string,true> Block IDs keyed by block ID.
+	 */
+	private static function normalize_block_id_set( $block_ids ) {
+		$normalized = [];
+
+		foreach ( $block_ids as $key => $value ) {
+			// List entry: the ID is the value. Map entry: the ID is the key.
+			$block_id = is_int( $key ) ? $value : $key;
+
+			if ( is_string( $block_id ) && '' !== $block_id ) {
+				$normalized[ $block_id ] = true;
+			}
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * Recursively collect block IDs of blocks whose isUnique attribute is enabled.
+	 *
+	 * Recurses into innerBlocks (repeater/container children) and expands
+	 * reusable/synced patterns, mirroring Form_Styling::collect_form_block_ids().
+	 *
+	 * Note: parse_blocks() does NOT apply block.json defaults, unlike the render path.
+	 * Every field block therefore has to keep isUnique defaulting to false — a block
+	 * that defaults it to true would be serialised without the attribute and would be
+	 * missed here while still rendering data-unique="true".
+	 *
+	 * @param array<mixed>     $blocks       Parsed blocks from parse_blocks().
+	 * @param array<int, true> $visited_refs Reusable-block post IDs already expanded,
+	 *                                       keyed by ID — guards against reference cycles.
+	 *
+	 * @since 2.12.3
+	 * @return array<string,true> Unique field block IDs, keyed by block ID.
+	 */
+	private function collect_unique_field_block_ids( $blocks, &$visited_refs = [] ) {
+		$block_ids = [];
+
+		foreach ( $blocks as $block ) {
+			if ( ! is_array( $block ) ) {
+				continue;
+			}
+
+			$attrs = isset( $block['attrs'] ) && is_array( $block['attrs'] ) ? $block['attrs'] : [];
+
+			if ( ! empty( $attrs['isUnique'] ) && ! empty( $attrs['block_id'] ) && is_scalar( $attrs['block_id'] ) ) {
+				$block_ids[ Helper::get_string_value( $attrs['block_id'] ) ] = true;
+			}
+
+			// Reusable/synced pattern: expand the referenced wp_block post so a field
+			// living inside a pattern is seen like an inline block.
+			if ( isset( $block['blockName'] ) && 'core/block' === $block['blockName'] && ! empty( $attrs['ref'] ) && is_scalar( $attrs['ref'] ) ) {
+				$ref = absint( $attrs['ref'] );
+
+				if ( $ref && ! isset( $visited_refs[ $ref ] ) ) {
+					$visited_refs[ $ref ] = true;
+					$ref_post             = get_post( $ref );
+
+					if ( $ref_post instanceof \WP_Post && 'wp_block' === $ref_post->post_type && 'publish' === $ref_post->post_status && '' !== $ref_post->post_content ) {
+						$block_ids += $this->collect_unique_field_block_ids( parse_blocks( $ref_post->post_content ), $visited_refs );
+					}
+				}
+			}
+
+			if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
+				$block_ids += $this->collect_unique_field_block_ids( $block['innerBlocks'], $visited_refs );
+			}
+		}
+
+		return $block_ids;
 	}
 
 	/**

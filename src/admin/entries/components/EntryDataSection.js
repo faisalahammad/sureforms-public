@@ -3,8 +3,11 @@ import { sprintf, _n, __ } from '@wordpress/i18n';
 import { applyFilters } from '@wordpress/hooks';
 import EntryEdit from './EntryEdit';
 import { decodeHTMLEntities } from '../utils/entryHelpers';
-import domPurify from 'dompurify';
-import parse from 'html-react-parser';
+import {
+	isRichTextField,
+	sanitizeFieldValue,
+	withBlockName,
+} from '../utils/sanitizeEntryValue';
 
 /**
  * Render field value - handles both regular and repeater fields
@@ -13,13 +16,21 @@ import parse from 'html-react-parser';
  * @return {string} Rendered value
  */
 const formatField = ( field ) => {
+	// Implementations of this filter should return a VALUE (string, array or a
+	// React element). If one returns markup, it renders as escaped text unless
+	// its block is listed in SERVER_MARKUP_BLOCKS in sanitizeEntryValue.js — see
+	// the `srfm-payment` anchor from inc/payments/stripe/payments-settings.php.
+	// The only HTML sink in this component is RenderField's markup branch, which
+	// runs its input through sanitizeFieldValue() first.
 	const renderProFields = applyFilters(
 		'srfm-pro.entry-details.render-pro-fields'
 	);
 
 	// Handle repeater fields and other PRO fields
 	if ( typeof renderProFields === 'function' ) {
-		return renderProFields( field );
+		// Pro's formatter drops `block_name`, which RenderField needs to tell a
+		// textarea from a plain answer. See withBlockName() for why.
+		return withBlockName( field, renderProFields( field ) );
 	}
 	const { value, label } = field;
 
@@ -89,20 +100,35 @@ export const RenderField = ( props ) => {
 					) }
 					{ ! Array.isArray( field.value ) && (
 						<div className="flex-1">
-							{ typeof field?.value === 'string' &&
-							field.value.match( /<[^>]+>/g ) ? (
-								// Render HTML content for fields that contain HTML tags
-									<span className="text-sm font-medium text-text-secondary [overflow-wrap:anywhere] whitespace-pre-wrap">
-										{ parse(
-											domPurify.sanitize( field.value )
-										) }
-									</span>
-								) : (
-								// Render plain text for regular fields
-									<span className="text-sm font-medium text-text-secondary [overflow-wrap:anywhere] whitespace-pre-wrap">
-										{ field?.value ?? '-' }
-									</span>
-								) }
+							{ isRichTextField( field ) ? (
+							/*
+							 * Values that legitimately contain markup (rich text, and the
+							 * server-rendered payment link) must render formatted, so
+							 * DOMPurify's output is inserted DIRECTLY — its supported,
+							 * mXSS-safe contract. Never route it through a second HTML
+							 * parser; that was the CVE-2026-18406 sink. The per-block
+							 * policy lives in sanitizeFieldValue().
+							 */
+								<span
+									// `class` is stripped from the sanitized markup, so the
+									// server-rendered payment anchor arrives unstyled. Style it
+									// from the wrapper we control instead of allowing `class`
+									// through the policy — a stored `class` attribute is the
+									// Tailwind overlay vector FORBID_ATTR exists to block.
+									className="text-sm font-medium text-text-secondary [overflow-wrap:anywhere] whitespace-pre-wrap [&_a]:text-link-primary [&_a]:no-underline [&_a:hover]:text-link-primary-hover [&_a:hover]:underline"
+									// eslint-disable-next-line react/no-danger -- value is DOMPurify-sanitized and inserted directly (no second HTML parse); see CVE-2026-18406.
+									dangerouslySetInnerHTML={ {
+										__html:
+												sanitizeFieldValue( field ) ||
+												'-',
+									} }
+								/>
+							) : (
+								// Plain fields are text: render as a React text child, which escapes on output.
+								<span className="text-sm font-medium text-text-secondary [overflow-wrap:anywhere] whitespace-pre-wrap">
+									{ field?.value ?? '-' }
+								</span>
+							) }
 						</div>
 					) }
 				</div>

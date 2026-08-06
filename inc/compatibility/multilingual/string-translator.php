@@ -189,7 +189,7 @@ class String_Translator {
 	 *
 	 * @param int $form_id Form post ID.
 	 * @since 2.11.0
-	 * @return array<string,string> { kind, name, title, edit_link }.
+	 * @return array<string,string> { kind, name, title, edit_link, post_id }.
 	 */
 	public static function form_package( int $form_id ): array {
 		$title = get_the_title( $form_id );
@@ -205,6 +205,12 @@ class String_Translator {
 			'name'      => (string) $form_id,
 			'title'     => $title,
 			'edit_link' => is_string( $edit_link ) ? $edit_link : '',
+			// Associate the package with its form post so WPML's "Translate
+			// Everything Automatically" queues the package alongside the post.
+			// NOTE: pending live-WPML confirmation of the exact key WPML reads
+			// for post association — `cms_id` is the documented fallback if
+			// `post_id` isn't consumed. Tracked in issue #2942.
+			'post_id'   => (string) $form_id,
 		];
 	}
 
@@ -218,6 +224,18 @@ class String_Translator {
 	 */
 	public static function submit_button_name(): string {
 		return 'submit_button';
+	}
+
+	/**
+	 * Package-scoped form-title string name. The form's post title is shown as a
+	 * heading on the form (and as the instant-form banner), so it needs to be
+	 * registered and translated like any other user-facing string.
+	 *
+	 * @since 2.12.3
+	 * @return string
+	 */
+	public static function title_name(): string {
+		return 'form_title';
 	}
 
 	/**
@@ -291,6 +309,22 @@ class String_Translator {
 		}
 
 		return $this->dispatch_package( $form_id, self::submit_button_name(), $value );
+	}
+
+	/**
+	 * Translate a form's title (post title).
+	 *
+	 * @param int    $form_id Form post ID.
+	 * @param string $value   Original title (used as fallback when no translation exists).
+	 * @since 2.12.3
+	 * @return string Translated title, or the original when no provider/translation is available.
+	 */
+	public function translate_form_title( int $form_id, string $value ): string {
+		if ( '' === $value ) {
+			return $value;
+		}
+
+		return $this->dispatch_package( $form_id, self::title_name(), $value );
 	}
 
 	/**

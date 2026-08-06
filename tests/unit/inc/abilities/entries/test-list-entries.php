@@ -104,23 +104,21 @@ class Test_List_Entries extends TestCase {
 	}
 
 	/**
-	 * Test that 'language' is an allowed orderby value (so the entries admin
-	 * UI can sort by submission language).
+	 * The submission `language` column was removed from the entries schema, so it
+	 * must no longer be offered as an orderby value nor appear in the output shape.
 	 */
-	public function test_orderby_enum_includes_language() {
+	public function test_language_removed_from_orderby_enum() {
 		$schema = $this->ability->get_input_schema();
-		$this->assertContains( 'language', $schema['properties']['orderby']['enum'] );
+		$this->assertNotContains( 'language', $schema['properties']['orderby']['enum'] );
 	}
 
 	/**
-	 * Test that the per-entry output shape includes the 'language' key so the
-	 * React table can render a Language column.
+	 * The per-entry output shape must not expose the removed `language` key.
 	 */
-	public function test_output_schema_entry_includes_language() {
+	public function test_output_schema_entry_excludes_language() {
 		$schema      = $this->ability->get_output_schema();
 		$entry_props = $schema['properties']['entries']['items']['properties'];
-		$this->assertArrayHasKey( 'language', $entry_props );
-		$this->assertSame( 'string', $entry_props['language']['type'] );
+		$this->assertArrayNotHasKey( 'language', $entry_props );
 	}
 
 }

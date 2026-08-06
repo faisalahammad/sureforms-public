@@ -94,4 +94,11 @@ class Test_Provider extends TestCase {
 	public function test_translate_package_string() {
 		$this->assert_signature( 'translate_package_string', 3, 'string' );
 	}
+
+	// NOTE: there is intentionally no test asserting delete_package() on the Provider
+	// interface. It was deliberately removed from the contract (see the NOTE block in
+	// inc/compatibility/multilingual/providers/provider.php) because a bodyless method on
+	// a shipped interface is a fatal-error BC break for third-party providers. Both
+	// first-party providers still implement it and String_Collector feature-detects it;
+	// do not reinstate an interface-signature assertion here.
 }

@@ -64,6 +64,14 @@ class Test_Elementor_Payment_History_Widget extends TestCase {
 	}
 
 	/**
+	 * Declares the payment-history stylesheet as a style dependency so Elementor
+	 * loads it in the <head> (FOUC fix for the postmeta-stored widget).
+	 */
+	public function test_get_style_depends() {
+		$this->assertContains( 'srfm-payment-history', $this->widget()->get_style_depends() );
+	}
+
+	/**
 	 * register_controls() is the protected Elementor control hook.
 	 */
 	public function test_register_controls() {

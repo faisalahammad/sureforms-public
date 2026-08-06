@@ -74,7 +74,7 @@ class List_Entries extends Abstract_Ability {
 				],
 				'search'    => [
 					'type'        => 'string',
-					'description' => __( 'Search entries by entry ID.', 'sureforms' ),
+					'description' => __( 'Search entries by entry ID, form title, or submitted form data. Text search requires at least 3 characters; numeric terms match the entry ID exactly.', 'sureforms' ),
 				],
 				'date_from' => [
 					'type'        => 'string',
@@ -97,7 +97,7 @@ class List_Entries extends Abstract_Ability {
 				'orderby'   => [
 					'type'        => 'string',
 					'description' => __( 'Column to order results by.', 'sureforms' ),
-					'enum'        => [ 'created_at', 'ID', 'form_id', 'status', 'language' ],
+					'enum'        => [ 'created_at', 'ID', 'id', 'form_id', 'status' ],
 					'default'     => 'created_at',
 				],
 				'order'     => [
@@ -128,7 +128,6 @@ class List_Entries extends Abstract_Ability {
 							'form_id'    => [ 'type' => 'integer' ],
 							'form_title' => [ 'type' => 'string' ],
 							'status'     => [ 'type' => 'string' ],
-							'language'   => [ 'type' => 'string' ],
 							'created_at' => [ 'type' => 'string' ],
 						],
 					],
@@ -155,7 +154,9 @@ class List_Entries extends Abstract_Ability {
 		$args = [
 			'form_id'   => Helper::get_integer_value( $input['form_id'] ?? 0 ),
 			'status'    => ! empty( $input['status'] ) ? sanitize_text_field( Helper::get_string_value( $input['status'] ) ) : 'all',
-			'search'    => ! empty( $input['search'] ) ? sanitize_text_field( Helper::get_string_value( $input['search'] ) ) : '',
+			// isset(), not ! empty(): a literal "0" search is a valid term and must not be
+			// dropped (which would return every entry). Mirrors the REST path.
+			'search'    => isset( $input['search'] ) ? sanitize_text_field( Helper::get_string_value( $input['search'] ) ) : '',
 			'date_from' => ! empty( $input['date_from'] ) ? sanitize_text_field( Helper::get_string_value( $input['date_from'] ) ) : '',
 			'date_to'   => ! empty( $input['date_to'] ) ? sanitize_text_field( Helper::get_string_value( $input['date_to'] ) ) : '',
 			'per_page'  => $per_page,
@@ -182,7 +183,6 @@ class List_Entries extends Abstract_Ability {
 					'form_id'    => $form_id,
 					'form_title' => $form_title,
 					'status'     => $entry['status'] ?? '',
-					'language'   => Helper::get_string_value( $entry['language'] ?? '' ),
 					'created_at' => $entry['created_at'] ?? '',
 				];
 			}

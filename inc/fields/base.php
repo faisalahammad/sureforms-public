@@ -441,7 +441,7 @@ class Base {
 	 */
 	protected function set_input_label( $value ) {
 		$this->input_label_fallback = $this->label ? $this->label : $value;
-		$this->input_label          = '-lbl-' . Helper::encrypt( $this->input_label_fallback );
+		$this->input_label          = '-lbl-' . Helper::encode( $this->input_label_fallback );
 		$this->set_field_name( $this->input_label );
 	}
 

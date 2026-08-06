@@ -265,6 +265,259 @@ class Test_Entries extends TestCase {
 	}
 
 	/**
+	 * Test build_where_conditions search includes submitted form data (form_data LIKE).
+	 *
+	 * Regression: search previously matched only numeric entry IDs and form titles —
+	 * form_data was never in the WHERE, so text a respondent submitted could never be
+	 * found; a non-numeric term matching no form title even forced an always-empty
+	 * `ID = 0` condition.
+	 */
+	public function test_build_where_conditions_search_includes_form_data() {
+		$args   = [
+			'form_id'   => 0,
+			'status'    => 'all',
+			'search'    => 'jane@example.com',
+			'date_from' => '',
+			'date_to'   => '',
+			'entry_ids' => [],
+		];
+		$result = $this->call_private_method_static( Entries::class, 'build_where_conditions', [ $args ] );
+
+		$found_form_data_like = false;
+		$found_forced_empty   = false;
+		foreach ( $result as $group ) {
+			foreach ( $group as $condition ) {
+				if ( ! is_array( $condition ) || ! isset( $condition['key'] ) ) {
+					continue;
+				}
+				if ( 'form_data' === $condition['key'] && 'LIKE' === $condition['compare'] ) {
+					$found_form_data_like = true;
+					$this->assertSame( 'jane@example.com', $condition['value'] );
+				}
+				if ( 'ID' === $condition['key'] && '=' === $condition['compare'] && 0 === $condition['value'] ) {
+					$found_forced_empty = true;
+				}
+			}
+		}
+
+		$this->assertTrue( $found_form_data_like, 'Search must include a form_data LIKE condition.' );
+		$this->assertFalse( $found_forced_empty, 'Non-numeric search must not force an empty (ID = 0) result.' );
+	}
+
+	/**
+	 * Test build_where_conditions numeric search matches both entry ID and form data.
+	 *
+	 * A numeric term can be submitted data too (phone number, zip code), so it must
+	 * produce the form_data LIKE condition alongside the exact ID match.
+	 */
+	public function test_build_where_conditions_numeric_search_includes_form_data() {
+		$args   = [
+			'form_id'   => 0,
+			'status'    => 'all',
+			'search'    => '9876543210',
+			'date_from' => '',
+			'date_to'   => '',
+			'entry_ids' => [],
+		];
+		$result = $this->call_private_method_static( Entries::class, 'build_where_conditions', [ $args ] );
+
+		$found_id_match  = false;
+		$found_form_data = false;
+		foreach ( $result as $group ) {
+			foreach ( $group as $condition ) {
+				if ( ! is_array( $condition ) || ! isset( $condition['key'] ) ) {
+					continue;
+				}
+				if ( 'ID' === $condition['key'] && '=' === $condition['compare'] ) {
+					$found_id_match = true;
+				}
+				if ( 'form_data' === $condition['key'] && 'LIKE' === $condition['compare'] ) {
+					$found_form_data = true;
+				}
+			}
+		}
+
+		$this->assertTrue( $found_id_match );
+		$this->assertTrue( $found_form_data );
+	}
+
+	/**
+	 * Test build_where_conditions skips form_data LIKE for short text terms.
+	 *
+	 * The LIKE cannot use an index, so text terms under 3 characters must not trigger
+	 * the form_data scan; with no other usable condition the search must force an
+	 * empty result (never fall through to returning all entries).
+	 */
+	public function test_build_where_conditions_short_text_search_skips_form_data() {
+		$args   = [
+			'form_id'   => 0,
+			'status'    => 'all',
+			'search'    => 'ab',
+			'date_from' => '',
+			'date_to'   => '',
+			'entry_ids' => [],
+		];
+		$result = $this->call_private_method_static( Entries::class, 'build_where_conditions', [ $args ] );
+
+		$found_form_data    = false;
+		$found_forced_empty = false;
+		foreach ( $result as $group ) {
+			foreach ( $group as $condition ) {
+				if ( ! is_array( $condition ) || ! isset( $condition['key'] ) ) {
+					continue;
+				}
+				if ( 'form_data' === $condition['key'] ) {
+					$found_form_data = true;
+				}
+				if ( 'ID' === $condition['key'] && '=' === $condition['compare'] && 0 === $condition['value'] ) {
+					$found_forced_empty = true;
+				}
+			}
+		}
+
+		$this->assertFalse( $found_form_data, 'Terms under 3 characters must not scan form_data.' );
+		$this->assertTrue( $found_forced_empty, 'A short term with no other match must force an empty result.' );
+	}
+
+	/**
+	 * Test build_where_conditions short numeric term still searches by entry ID.
+	 */
+	public function test_build_where_conditions_short_numeric_search_keeps_id_match() {
+		$args   = [
+			'form_id'   => 0,
+			'status'    => 'all',
+			'search'    => '55',
+			'date_from' => '',
+			'date_to'   => '',
+			'entry_ids' => [],
+		];
+		$result = $this->call_private_method_static( Entries::class, 'build_where_conditions', [ $args ] );
+
+		$found_id_match  = false;
+		$found_form_data = false;
+		foreach ( $result as $group ) {
+			foreach ( $group as $condition ) {
+				if ( ! is_array( $condition ) || ! isset( $condition['key'] ) ) {
+					continue;
+				}
+				if ( 'ID' === $condition['key'] && '=' === $condition['compare'] && 55 === $condition['value'] ) {
+					$found_id_match = true;
+				}
+				if ( 'form_data' === $condition['key'] ) {
+					$found_form_data = true;
+				}
+			}
+		}
+
+		$this->assertTrue( $found_id_match, 'Short numeric terms must still match the entry ID.' );
+		$this->assertFalse( $found_form_data, 'Short numeric terms must not scan form_data.' );
+	}
+
+	/**
+	 * Test build_where_conditions escapes LIKE wildcards in the search term.
+	 *
+	 * The query compiler wraps the value in "%...%" itself; user-typed "%" and "_"
+	 * must be escaped so they match literally instead of acting as wildcards.
+	 */
+	public function test_build_where_conditions_search_escapes_like_wildcards() {
+		global $wpdb;
+
+		$args   = [
+			'form_id'   => 0,
+			'status'    => 'all',
+			'search'    => '100%_done',
+			'date_from' => '',
+			'date_to'   => '',
+			'entry_ids' => [],
+		];
+		$result = $this->call_private_method_static( Entries::class, 'build_where_conditions', [ $args ] );
+
+		$like_value = null;
+		foreach ( $result as $group ) {
+			foreach ( $group as $condition ) {
+				if ( is_array( $condition ) && isset( $condition['key'] ) && 'form_data' === $condition['key'] ) {
+					$like_value = $condition['value'];
+				}
+			}
+		}
+
+		$this->assertSame( $wpdb->esc_like( '100%_done' ), $like_value );
+	}
+
+	/**
+	 * Test write_csv_header neutralizes formula injection in column labels.
+	 *
+	 * Labels are decoded out of stored form_data keys, so an anonymous submitter can
+	 * influence them — see #2996. Data cells were already escaped; the header was not.
+	 */
+	public function test_write_csv_header_escapes_formula_in_labels() {
+		$stream = fopen( 'php://temp', 'r+' );
+
+		$this->call_private_method_static(
+			Entries::class,
+			'write_csv_header',
+			[ $stream, [ 'abc123' => "=cmd|'/c calc'!A1" ] ]
+		);
+
+		rewind( $stream );
+		$csv = stream_get_contents( $stream );
+		fclose( $stream );
+
+		// Parse the row back rather than substring-matching: the payload contains a
+		// space, so fputcsv() quotes the field either way and a naive ",=cmd" negative
+		// assertion would pass even with the fix reverted.
+		$cells = str_getcsv( trim( $csv ) );
+
+		$this->assertSame( "'=cmd|'/c calc'!A1", end( $cells ), 'Formula label must be quote-prefixed in the header cell.' );
+	}
+
+	/**
+	 * Test escape_csv_formula neutralizes each dangerous leading character and leaves
+	 * ordinary and numeric values alone.
+	 *
+	 * Now public so Pro's separate partial-entries writer can share it instead of
+	 * carrying its own weaker copy.
+	 */
+	public function test_escape_csv_formula() {
+		foreach ( [ '=', '+', '-', '@', "\t", "\r" ] as $trigger ) {
+			$this->assertSame(
+				"'" . $trigger . 'HYPERLINK("http://evil")',
+				Entries::escape_csv_formula( $trigger . 'HYPERLINK("http://evil")' ),
+				'Leading ' . wp_json_encode( $trigger ) . ' must be neutralized.'
+			);
+		}
+
+		// Ordinary text is untouched.
+		$this->assertSame( 'Full Name', Entries::escape_csv_formula( 'Full Name' ) );
+		$this->assertSame( '', Entries::escape_csv_formula( '' ) );
+
+		// Numeric columns must stay numeric in the spreadsheet.
+		foreach ( [ '42', '-5', '3.14', '-0.5', '1e3' ] as $number ) {
+			$this->assertSame( $number, Entries::escape_csv_formula( $number ), $number . ' must remain numeric.' );
+		}
+	}
+
+	/**
+	 * Test write_csv_header leaves ordinary labels untouched.
+	 */
+	public function test_write_csv_header_keeps_plain_labels_unchanged() {
+		$stream = fopen( 'php://temp', 'r+' );
+
+		$this->call_private_method_static(
+			Entries::class,
+			'write_csv_header',
+			[ $stream, [ 'abc123' => 'Full Name' ] ]
+		);
+
+		rewind( $stream );
+		$csv = stream_get_contents( $stream );
+		fclose( $stream );
+
+		$this->assertStringContainsString( 'Full Name', $csv );
+		$this->assertStringNotContainsString( "'Full Name", $csv );
+	}
+
+	/**
 	 * Helper method to call private static methods for testing.
 	 */
 	private function call_private_method_static( $class, $method_name, $parameters = [] ) {

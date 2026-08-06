@@ -29,7 +29,7 @@ trait Entry_Parser {
 	/**
 	 * Parse a raw entry array into the standard response shape.
 	 *
-	 * Handles form data decryption, form title lookup,
+	 * Handles form data decoding, form title lookup,
 	 * submission info building (with IP masking), and user info.
 	 *
 	 * @param array<string,mixed> $entry Raw entry from the database.
@@ -37,7 +37,7 @@ trait Entry_Parser {
 	 * @return array<string,mixed> Parsed entry data (without entry_id — caller prepends it).
 	 */
 	protected function parse_entry( array $entry ) {
-		// Parse form data with decrypted labels.
+		// Parse form data with decoded labels (submitter-controlled; escape at the sink).
 		$form_data       = [];
 		$excluded_fields = Helper::get_excluded_fields();
 		$entry_form_data = $entry['form_data'] ?? [];
@@ -53,7 +53,7 @@ trait Entry_Parser {
 
 				$label_parts      = explode( '-lbl-', $field_name );
 				$label            = isset( $label_parts[1] ) ? explode( '-', $label_parts[1] )[0] : '';
-				$label            = $label ? Helper::decrypt( $label ) : '';
+				$label            = $label ? Helper::decode( $label ) : '';
 				$field_block_name = Helper::get_block_name_from_field( $field_name );
 
 				$form_data[] = [
