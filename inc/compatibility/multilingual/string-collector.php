@@ -105,7 +105,7 @@ class String_Collector {
 	 * packages (no hardcoded slug that could drift from the kind label).
 	 *
 	 * @param mixed $kinds Associative map of kind slug => { title, slug, plural }.
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return mixed The kinds map with the SureForms Form kind added.
 	 */
 	public function declare_package_kind( $kinds ) {
@@ -160,7 +160,7 @@ class String_Collector {
 	 * is active.
 	 *
 	 * @param int $form_id The post ID being deleted.
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return void
 	 */
 	public function on_form_delete( int $form_id ): void {
@@ -171,6 +171,14 @@ class String_Collector {
 		$provider = Multilingual_Manager::get_instance()->provider();
 
 		if ( ! $provider->is_active() ) {
+			return;
+		}
+
+		// delete_package() is intentionally absent from the Provider interface (see the
+		// note there): declaring it would fatal any third-party provider written against
+		// 2.11.0-2.12.2. Feature-detect instead, so a custom provider without it simply
+		// skips cleanup rather than crashing.
+		if ( ! method_exists( $provider, 'delete_package' ) ) {
 			return;
 		}
 
@@ -194,13 +202,17 @@ class String_Collector {
 	 *
 	 * @param int $form_id The form post ID.
 	 * @since 2.11.0
-	 * @return void
+	 * @since 2.12.3 Returns whether collection actually ran, so callers (notably the
+	 *               backfill) can distinguish "collected" from "silently skipped because
+	 *               the provider went inactive" and avoid recording false progress.
+	 * @return bool True when the form's strings were registered, false when the provider
+	 *              was unavailable and nothing was done.
 	 */
-	public function collect( int $form_id ): void {
+	public function collect( int $form_id ): bool {
 		$provider = Multilingual_Manager::get_instance()->provider();
 
 		if ( ! $provider->is_active() ) {
-			return;
+			return false;
 		}
 
 		// Group every per-form string into a single WPML String Package so they
@@ -311,6 +323,8 @@ class String_Collector {
 			$provider->finish_package( $package );
 		}
 		$this->active_package = null;
+
+		return true;
 	}
 
 	/**

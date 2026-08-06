@@ -1,7 +1,7 @@
 /**
  * Payment History Block — Edit.
  *
- * @since x.x.x
+ * @since 2.8.0
  */
 
 import { __ } from '@wordpress/i18n';

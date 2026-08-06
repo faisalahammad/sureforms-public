@@ -1035,10 +1035,11 @@ class Form_Submit {
 			wp_send_json_error( [ 'error' => __( 'Too many requests. Please try again shortly.', 'sureforms' ) ], 429 );
 		}
 
-		// Only the fields the form itself marks unique may be probed. Without this the
-		// handler answers "does an entry exist whose field X equals Y?" for arbitrary
-		// X and Y — an existence oracle over every stored submission value. A form with
-		// no unique fields therefore matches nothing and always answers with an empty set.
+		// SECURITY INVARIANT — only the fields the form itself marks unique may be
+		// probed through this unauthenticated handler. The allowlist is what keeps the
+		// lookup scoped to values a site owner opted into checking, rather than to
+		// stored submission data generally. A form with no unique fields therefore
+		// matches nothing and always answers with an empty set.
 		$unique_block_ids = $this->get_unique_field_block_ids( $form_id );
 
 		// Extract and validate field values from POST data.
@@ -1352,7 +1353,7 @@ class Form_Submit {
 	 *
 	 * @param int $form_id Form ID.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return array<string,true> Unique field block IDs, keyed by block ID.
 	 */
 	private function get_unique_field_block_ids( $form_id ) {
@@ -1371,7 +1372,7 @@ class Form_Submit {
 		 * Lets add-ons whose fields a static parse of the form cannot see contribute
 		 * their own unique fields.
 		 *
-		 * @since x.x.x
+		 * @since 2.12.3
 		 *
 		 * @param array<string,true> $block_ids Unique field block IDs, keyed by block ID.
 		 *                                     A plain list of IDs is accepted too and is
@@ -1393,7 +1394,7 @@ class Form_Submit {
 	 *
 	 * @param array<mixed> $block_ids Block IDs as a map or a list.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return array<string,true> Block IDs keyed by block ID.
 	 */
 	private static function normalize_block_id_set( $block_ids ) {
@@ -1426,7 +1427,7 @@ class Form_Submit {
 	 * @param array<int, true> $visited_refs Reusable-block post IDs already expanded,
 	 *                                       keyed by ID — guards against reference cycles.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return array<string,true> Unique field block IDs, keyed by block ID.
 	 */
 	private function collect_unique_field_block_ids( $blocks, &$visited_refs = [] ) {

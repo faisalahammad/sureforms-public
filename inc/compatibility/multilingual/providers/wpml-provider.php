@@ -317,7 +317,7 @@ class WPML_Provider implements Provider {
 	 * `wpml_delete_package` action, keyed by the package name + kind.
 	 *
 	 * @param array<string,string> $package Package descriptor.
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return void
 	 */
 	public function delete_package( array $package ): void {

@@ -62,7 +62,7 @@ class Service_Provider {
 	 * element in the head the same way Bricks detects its own setting-specific assets:
 	 * sniff the serialised template data of each area for the element name.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return void
 	 */
 	public function maybe_enqueue_payment_history_assets() {

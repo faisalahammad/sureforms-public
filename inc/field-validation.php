@@ -205,13 +205,16 @@ class Field_Validation {
 	 * `wp_block` post (so pattern-embedded fields are included too). A cycle guard on the
 	 * reference ids prevents infinite recursion.
 	 *
-	 * Used by {@see self::validate_form_data()} to reject submitted keys whose block id
-	 * is not part of the form. Note: this is deliberately NOT `prepared_validation_data()`
+	 * Used by {@see self::strip_unknown_field_keys()}, which DROPS submitted keys whose
+	 * block id is not part of the form rather than rejecting the submission — see the
+	 * note there for why rejecting made cached forms unsubmittable.
+	 *
+	 * Note: this is deliberately NOT `prepared_validation_data()`
 	 * — that map only holds blocks with extra validation config (dropdowns, payments,
 	 * textarea min-length) and omits plain inputs, so it is not a field allowlist.
 	 *
 	 * @param int|mixed $form_id The form post id.
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return array<string,true> Map of known block id => true. Empty when the form's
 	 *                            blocks could not be derived (callers should fail open).
 	 */
@@ -249,7 +252,7 @@ class Field_Validation {
 		 * Expects a map of `block_id => true`. A plain list of ids is accepted and
 		 * converted; any other return value is ignored in favour of the walked set.
 		 *
-		 * @since x.x.x
+		 * @since 2.12.3
 		 * @param array<string,true> $ids     Map of known block id => true.
 		 * @param int                $form_id The form post id.
 		 */
@@ -269,10 +272,10 @@ class Field_Validation {
 	/**
 	 * Remove submitted field keys the form does not define.
 	 *
-	 * The `-lbl-` substring proves only that a key LOOKS like a SureForms field, not that
-	 * this form actually has it. Without this an unauthenticated submitter can add
-	 * arbitrary `srfm-<type>-<id>-lbl-...` keys to any published form and have them
-	 * stored and later rendered in the admin, in emails and in exports.
+	 * SECURITY INVARIANT — every submitted key must be checked against the form's own
+	 * definition. The `-lbl-` substring proves only that a key LOOKS like a SureForms
+	 * field, not that this form actually defines it, so shape alone is never sufficient:
+	 * only keys the form declares may reach storage, email or export.
 	 *
 	 * Unknown keys are dropped rather than rejected. Rejecting looked safer but behaved
 	 * badly: the allowlist is derived from `post_content` at submit time while the
@@ -289,7 +292,7 @@ class Field_Validation {
 	 *
 	 * @param array<mixed> $form_data The submitted form data (sanitized).
 	 * @param int|mixed    $form_id   The ID of the form being submitted.
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return array<mixed> The form data with unknown field keys removed.
 	 */
 	public static function strip_unknown_field_keys( $form_data, $form_id ) {
@@ -499,7 +502,7 @@ class Field_Validation {
 	 *
 	 * @param array<mixed>       $rows            The repeater's submitted rows.
 	 * @param array<string,true> $known_block_ids Map of block ids belonging to the form.
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return array<mixed> The rows with unknown child keys removed.
 	 */
 	private static function strip_unknown_repeater_keys( $rows, $known_block_ids ) {
@@ -531,7 +534,7 @@ class Field_Validation {
 	 * @param array<string,true> $ids     Accumulator of block id => true (by reference).
 	 * @param array<int,true>    $visited Expanded reusable-block post ids, guards cycles.
 	 * @param int                $depth   Current recursion depth, guards pathological trees.
-	 * @since x.x.x
+	 * @since 2.12.3
 	 * @return void
 	 */
 	private static function collect_field_block_ids( $blocks, &$ids, &$visited, $depth = 0 ) {
