@@ -40,7 +40,7 @@ class Entries {
 	 *
 	 *     @type int          $form_id     Form ID to filter entries. Default 0 (all forms).
 	 *     @type string       $status      Entry status: 'all', 'read', 'unread', 'trash'. Default 'all'.
-	 *     @type string       $search      Search term to filter entries by entry ID. Default empty.
+	 *     @type string       $search      Search term matching entry ID (numeric terms), form title, or submitted form data (3+ characters). Default empty.
 	 *     @type string       $date_from   Start date for filtering entries (YYYY-MM-DD format). Default empty.
 	 *     @type string       $date_to     End date for filtering entries (YYYY-MM-DD format). Default empty.
 	 *     @type string       $orderby     Column to order by. Default 'created_at'.
@@ -84,8 +84,36 @@ class Entries {
 		// Build where conditions.
 		$where_conditions = self::build_where_conditions( $args );
 
-		// Get total count for pagination.
-		$total = EntriesTable::get_instance()->get_total_count( $where_conditions );
+		// Get total count for pagination. When a search term is active the WHERE includes
+		// an unindexed form_data LIKE, so the COUNT is a full scan of the candidate rows —
+		// and it re-runs on every pagination click for an answer that cannot change between
+		// clicks. Cache it briefly (30s) keyed on the exact conditions; ≤30s staleness in a
+		// pager total is harmless for an admin screen. Unsearched listings stay uncached so
+		// totals reflect trash/delete/read mutations immediately.
+		if ( ! empty( $args['search'] ) ) {
+			// wp_json_encode() returns false on failure, and (string) false is '' — which
+			// would make every search share md5('') and serve one search's total for all
+			// others. Skip the cache entirely rather than key it ambiguously.
+			$encoded_conditions = wp_json_encode( $where_conditions );
+			$count_cache_key    = is_string( $encoded_conditions )
+				? 'srfm_entries_search_count_' . md5( $encoded_conditions )
+				: '';
+			$cached_total       = '' !== $count_cache_key ? get_transient( $count_cache_key ) : false;
+
+			if ( is_numeric( $cached_total ) ) {
+				$total = absint( $cached_total );
+			} else {
+				$total = EntriesTable::get_instance()->get_total_count( $where_conditions );
+				// Honor the skip-on-encode-failure decision above: only cache when we have
+				// an unambiguous key. Otherwise set_transient( '', … ) would write a single
+				// global transient shared across all searches.
+				if ( '' !== $count_cache_key ) {
+					set_transient( $count_cache_key, $total, 30 );
+				}
+			}
+		} else {
+			$total = EntriesTable::get_instance()->get_total_count( $where_conditions );
+		}
 
 		// Calculate offset.
 		$offset = ( absint( $args['page'] ) - 1 ) * absint( $args['per_page'] );
@@ -120,7 +148,7 @@ class Entries {
 			'total'        => $total,
 			'per_page'     => absint( $args['per_page'] ),
 			'current_page' => absint( $args['page'] ),
-			'total_pages'  => ceil( $total / absint( $args['per_page'] ) ),
+			'total_pages'  => ceil( $total / max( 1, absint( $args['per_page'] ) ) ),
 			'emptyTrash'   => 0 === $trash_count,
 		];
 	}
@@ -501,6 +529,43 @@ class Entries {
 	}
 
 	/**
+	 * Neutralize CSV formula/macro injection in an exported cell.
+	 *
+	 * Spreadsheet applications (Excel, Google Sheets, LibreOffice) interpret a
+	 * cell whose value begins with `=`, `+`, `-`, `@`, a tab, or a carriage
+	 * return as a formula and may execute it when an admin opens the export.
+	 * A submitter could store `=HYPERLINK(...)` or `=cmd|...` in a field and
+	 * have it run on the admin's machine. Prefixing such values with a single
+	 * quote forces the spreadsheet to treat them as literal text.
+	 *
+	 * Well-formed numbers (including negative and decimal values) are returned
+	 * unchanged so numeric columns remain numeric in the spreadsheet.
+	 *
+	 * Public so every CSV writer in the product can share one implementation rather
+	 * than carrying its own copy — SureForms Pro exports partial entries through a
+	 * separate writer and needs the same guard.
+	 *
+	 * @param string $value Cell value (already normalized for CSV).
+	 *
+	 * @since 2.10.0
+	 * @since 2.12.3 Promoted from private to public so other export writers can reuse it.
+	 * @return string Safe cell value.
+	 */
+	public static function escape_csv_formula( $value ) {
+		$value = Helper::get_string_value( $value );
+
+		if ( '' === $value || is_numeric( $value ) ) {
+			return $value;
+		}
+
+		if ( in_array( $value[0], [ '=', '+', '-', '@', "\t", "\r" ], true ) ) {
+			return "'" . $value;
+		}
+
+		return $value;
+	}
+
+	/**
 	 * Build where conditions for entry queries.
 	 *
 	 * @param array<string, int|string|array<int>> $args Query arguments.
@@ -580,8 +645,13 @@ class Entries {
 			}
 		}
 
-		// Filter by search (entry ID + form title).
-		if ( ! empty( $args['search'] ) && is_string( $args['search'] ) ) {
+		// Filter by search (entry ID + form title + submitted form data).
+		// Use an explicit empty-string test rather than ! empty(): empty( '0' ) is true in
+		// PHP, so searching "0" silently dropped the entire search group and returned every
+		// entry while the UI still showed the term.
+		if ( isset( $args['search'] ) && is_string( $args['search'] ) && '' !== $args['search'] ) {
+			global $wpdb;
+
 			$search_term  = sanitize_text_field( $args['search'] );
 			$search_group = [ 'RELATION' => 'OR' ];
 
@@ -604,7 +674,29 @@ class Entries {
 				];
 			}
 
-			// Only add if we have search conditions, otherwise force empty result.
+			// Match submitted form data. The form_data column stores plain JSON
+			// (Helper::encode_json() uses JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+			// so a LIKE matches submitted values textually — including emails, URLs and
+			// non-ASCII input. The query compiler (Base::prepare_where_clauses()) wraps
+			// the value in "%...%" itself; esc_like() here neutralizes user-typed wildcard
+			// characters ("%", "_") so they match literally.
+			// Performance guard: the LIKE cannot use an index (full scan of the LONGTEXT
+			// column within the other filters), so require at least 3 characters before
+			// matching form data. Shorter terms would match almost every row anyway while
+			// costing the most. Numeric terms are exempt above (exact, indexed ID lookup),
+			// and form-title matching is a cheap separate posts query.
+			if ( mb_strlen( $search_term ) >= 3 ) {
+				$search_group[] = [
+					'key'     => 'form_data',
+					'compare' => 'LIKE',
+					'value'   => $wpdb->esc_like( $search_term ),
+				];
+			}
+
+			// Guard: a short non-numeric term that matches no form title produces no
+			// usable condition — force an empty result instead of silently returning
+			// every entry (an OR-group with no conditions would be dropped by the
+			// query compiler).
 			if ( count( $search_group ) > 1 ) {
 				$where_conditions[] = $search_group;
 			} else {
@@ -725,9 +817,18 @@ class Entries {
 	 * @return void
 	 */
 	private static function write_csv_header( $stream, $block_labels ) {
+		// Labels are decoded out of stored form_data keys, so they are submitter-influenced
+		// and need the same formula escaping as the data cells — see write_csv_rows().
+		$labels = array_map(
+			static function ( $label ) {
+				return self::escape_csv_formula( Helper::get_string_value( $label ) );
+			},
+			array_values( $block_labels )
+		);
+
 		$header = array_merge(
 			[ __( 'Entry ID', 'sureforms' ), __( 'Date', 'sureforms' ), __( 'Status', 'sureforms' ) ],
-			array_values( $block_labels )
+			$labels
 		);
 		fputcsv( $stream, $header ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fputcsv
 	}
@@ -817,37 +918,5 @@ class Entries {
 		}
 
 		return sanitize_text_field( Helper::get_string_value( $field_value ) );
-	}
-
-	/**
-	 * Neutralize CSV formula/macro injection in an exported cell.
-	 *
-	 * Spreadsheet applications (Excel, Google Sheets, LibreOffice) interpret a
-	 * cell whose value begins with `=`, `+`, `-`, `@`, a tab, or a carriage
-	 * return as a formula and may execute it when an admin opens the export.
-	 * A submitter could store `=HYPERLINK(...)` or `=cmd|...` in a field and
-	 * have it run on the admin's machine. Prefixing such values with a single
-	 * quote forces the spreadsheet to treat them as literal text.
-	 *
-	 * Well-formed numbers (including negative and decimal values) are returned
-	 * unchanged so numeric columns remain numeric in the spreadsheet.
-	 *
-	 * @param string $value Cell value (already normalized for CSV).
-	 *
-	 * @since 2.10.0
-	 * @return string Safe cell value.
-	 */
-	private static function escape_csv_formula( $value ) {
-		$value = Helper::get_string_value( $value );
-
-		if ( '' === $value || is_numeric( $value ) ) {
-			return $value;
-		}
-
-		if ( in_array( $value[0], [ '=', '+', '-', '@', "\t", "\r" ], true ) ) {
-			return "'" . $value;
-		}
-
-		return $value;
 	}
 }

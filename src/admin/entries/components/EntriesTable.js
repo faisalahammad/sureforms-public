@@ -163,18 +163,6 @@ const EntriesTable = ( {
 			},
 		},
 		{
-			label: __( 'Language', 'sureforms' ),
-			key: 'language',
-			sortable: true,
-			sortBy: 'language',
-			headerClassName: 'w-[8%]',
-			render: ( entry ) => (
-				<span className="line-clamp-1 break-all overflow-hidden text-sm font-normal text-text-secondary">
-					{ entry.language || '-' }
-				</span>
-			),
-		},
-		{
 			label: __( 'Actions', 'sureforms' ),
 			key: 'actions',
 			align: 'right',

@@ -110,11 +110,6 @@ class Entries extends Base {
 				'type'    => 'array',
 				'default' => [],
 			],
-			// Submission language code (e.g. 'en', 'de'). Empty when no multilingual provider is active.
-			'language'        => [
-				'type'    => 'string',
-				'default' => '',
-			],
 		];
 	}
 
@@ -133,13 +128,11 @@ class Entries extends Base {
 			'status VARCHAR(10)',
 			'type VARCHAR(20)', // Note: @since 0.0.13 -- We have added type column, it will have entry's form type eg quiz, standard etc.
 			'extras LONGTEXT',
-			'language VARCHAR(20)', // Note: @since 2.11.0 -- Submission language code, captured from the active multilingual provider. Nullable to match status/type column convention; INSERT path always supplies a value or empty string. Width matches the `type` column precedent and covers extended BCP-47 codes (e.g. `ca-valencia`).
 			'created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP',
 			'updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
 			'INDEX idx_form_id (form_id)', // Indexing for the performance improvements.
 			'INDEX idx_user_id (user_id)',
 			'INDEX idx_form_id_created_at_status (form_id, created_at, status)', // Composite index for performance improvements.
-			'INDEX idx_form_id_language (form_id, language)', // Composite index for per-language entry filtering.
 		];
 	}
 
@@ -153,13 +146,6 @@ class Entries extends Base {
 			'extras LONGTEXT AFTER status',
 			'user_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0 AFTER form_id',
 			'INDEX idx_user_id (user_id)',
-			// Note: @since 2.11.0 -- Added language column for multilingual submission tracking.
-			// No `AFTER` clause: on a pre-0.0.13 install upgrading straight to this version,
-			// `extras` is added in the SAME combined ALTER, and MySQL resolves `AFTER extras`
-			// against the pre-ALTER schema, throwing "Unknown column 'extras'" and failing the
-			// whole atomic ALTER. Column ordinal position is cosmetic and addressed by name everywhere.
-			'language VARCHAR(20)',
-			'INDEX idx_form_id_language (form_id, language)',
 		];
 	}
 
@@ -498,6 +484,14 @@ class Entries extends Base {
 	 * Uses a single SQL query with JSON_EXTRACT on the form_data column
 	 * instead of loading all entries into PHP. Stops at the first match.
 	 *
+	 * SECURITY INVARIANT — do not relax the key matching. The only caller is the
+	 * unauthenticated uniqueness check (Form_Submit::field_unique_validation()), which
+	 * allows a probe only for fields the form marks unique. That restriction holds
+	 * because the lookup is anchored to the EXACT submitted key: a stored form_data key
+	 * always embeds its own block ID, so a key that resolves to field X can only carry
+	 * X's block ID. Matching on block ID instead, or switching to LIKE / JSON_SEARCH,
+	 * would break that anchoring and widen the probe beyond the allowlisted field.
+	 *
 	 * @param int    $form_id     The form ID to search within.
 	 * @param string $field_key   The form_data JSON key to match against.
 	 * @param string $field_value The value to check for uniqueness.
@@ -511,7 +505,12 @@ class Entries extends Base {
 
 		global $wpdb;
 		$table_name = self::get_instance()->get_tablename();
-		$json_path  = '$."' . $field_key . '"';
+
+		// $wpdb->prepare() escapes this for SQL, but the key is interpolated into a JSON
+		// path string, where a quote or backslash would change the path's meaning rather
+		// than break the query. Neutralise both so the path can only ever be a single
+		// quoted member access.
+		$json_path = '$."' . str_replace( [ '\\', '"' ], [ '\\\\', '\\"' ], $field_key ) . '"';
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter -- One-off existence check; table name from get_tablename() (not user input); caching not beneficial for uniqueness validation.
 		$exists = $wpdb->get_var(
@@ -596,6 +595,6 @@ class Entries extends Base {
 	 * @return array<string>
 	 */
 	protected function get_allowed_orderby_columns() {
-		return [ 'ID', 'id', 'form_id', 'user_id', 'status', 'type', 'language', 'created_at', 'updated_at' ];
+		return [ 'ID', 'id', 'form_id', 'user_id', 'status', 'type', 'created_at', 'updated_at' ];
 	}
 }

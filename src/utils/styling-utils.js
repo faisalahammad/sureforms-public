@@ -5,7 +5,7 @@
  * and elementor-preview-styling.js for consistent styling behavior.
  *
  * @package
- * @since x.x.x
+ * @since 2.7.0
  */
 
 /**

@@ -392,6 +392,47 @@ class Test_Wpml_Provider extends TestCase {
 		);
 	}
 
+	public function test_delete_package() {
+		// Package support required: an inactive/no-package provider fires nothing.
+		$before = did_action( 'wpml_delete_package' );
+		$this->provider->delete_package(
+			[
+				'kind' => 'SureForms Form',
+				'name' => '7',
+			]
+		);
+		$this->assertSame( $before, did_action( 'wpml_delete_package' ), 'No package support -> no deletion action.' );
+
+		// Active provider with the package API present -> fires wpml_delete_package
+		// with the package name + kind.
+		$noop = static function () {};
+		add_action( 'wpml_register_string', $noop );
+
+		$captured = [];
+		$spy      = static function ( $name, $kind ) use ( &$captured ) {
+			$captured[] = [ $name, $kind ];
+		};
+		add_action( 'wpml_delete_package', $spy, 10, 2 );
+
+		$provider = new Srfm_Active_Wpml_Provider();
+		$provider->delete_package(
+			[
+				'kind' => 'SureForms Form',
+				'name' => '7',
+			]
+		);
+
+		// A descriptor missing name must not fire the action.
+		$provider->delete_package( [ 'kind' => 'SureForms Form' ] );
+		// A descriptor missing kind must not fire the action either.
+		$provider->delete_package( [ 'name' => '7' ] );
+
+		remove_action( 'wpml_delete_package', $spy, 10 );
+		remove_action( 'wpml_register_string', $noop );
+
+		$this->assertSame( [ [ '7', 'SureForms Form' ] ], $captured );
+	}
+
 	public function test_guess_current_url() {
 		$active = new Srfm_Active_Wpml_Provider();
 		$method = new \ReflectionMethod( $active, 'guess_current_url' );

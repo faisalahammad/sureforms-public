@@ -38,7 +38,7 @@ export const fetchFormsList = () => {
  * @param {Object} params           - Query parameters
  * @param {number} params.form_id   - Form ID to filter (0 for all forms)
  * @param {string} params.status    - Entry status: 'all', 'read', 'unread', 'trash'
- * @param {string} params.search    - Search term for entry ID
+ * @param {string} params.search    - Search term matching entry ID (numeric), form title, or submitted form data (3+ characters)
  * @param {string} params.date_from - Start date filter in YYYY-MM-DD format
  * @param {string} params.date_to   - End date filter in YYYY-MM-DD format
  * @param {string} params.orderby   - Column to order by

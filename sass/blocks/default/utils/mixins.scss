@@ -308,7 +308,10 @@
 		background-color: var( --srfm-color-input-background );
 		height: var( --srfm-input-height );
 		outline: 0;
-		margin-top: var( --srfm-input-field-margin-top );
+		// Match srfm-input-margin-styles: pick up the form's label gap when set, else
+		// the size preset's field-margin-top. (This mixin is the number field's only
+		// top-margin source — it's excluded from the shared .srfm-input-common rule.)
+		margin-top: var( --srfm-input-label-gap, var( --srfm-input-field-margin-top ) );
 		margin-bottom: var( --srfm-input-field-margin-bottom );
 		margin-left: 0;
 		margin-right: 0;

@@ -815,7 +815,7 @@ class Rest_Api {
 
 				$label_parts      = explode( '-lbl-', $field_name );
 				$label            = isset( $label_parts[1] ) ? explode( '-', $label_parts[1] )[0] : '';
-				$label            = $label ? Helper::decrypt( $label ) : '';
+				$label            = $label ? Helper::decode( $label ) : '';
 				$field_block_name = Helper::get_block_name_from_field( $field_name );
 
 				/**
@@ -823,7 +823,9 @@ class Rest_Api {
 				 *
 				 * This filter is used to allow 3rd party plugins or custom code to modify
 				 * the entry field value in the entry details REST API response, if required.
-				 * For example, you may want to decrypt, format, or mask sensitive data before output.
+				 * For example, you may want to format, mask, or otherwise transform sensitive
+				 * data before output. Note the value reaching this filter is not encrypted by
+				 * SureForms — labels and values are carried as unkeyed base64 at most.
 				 *
 				 * @since 2.0.0
 				 *
@@ -1239,7 +1241,7 @@ class Rest_Api {
 					$base_field_name = '';
 
 					if ( ! empty( $label ) && ! empty( $slug ) && ! empty( $block_id ) ) {
-						$input_label     = '-lbl-' . Helper::encrypt( $label );
+						$input_label     = '-lbl-' . Helper::encode( $label );
 						$base_field_name = $input_label . '-' . $slug;
 
 						// Handle special case for dropdown with instance counter.

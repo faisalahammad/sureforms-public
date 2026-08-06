@@ -46,6 +46,160 @@ class Test_Generate_Form_Markup extends TestCase {
 		wp_delete_post( $form_id, true );
 	}
 
+	public function test_add_entries_admin_bar_node() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || ! defined( 'SRFM_ENTRIES' ) ) {
+			$this->markTestSkipped( 'SureForms constants not defined' );
+		}
+
+		// Only users who can view entries (manage_options) get the node.
+		$admin = wp_insert_user(
+			[
+				'user_login' => 'srfm_entries_admin_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_entries_admin_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $admin ) ? 0 : (int) $admin );
+		add_filter( 'show_admin_bar', '__return_true' );
+
+		// Drive the node from the rendered-form registry directly (set via
+		// reflection) — this is what get_form_markup() populates for every embed
+		// path, and avoids mutating query globals.
+		$registry = new ReflectionProperty( Generate_Form_Markup::class, 'rendered_form_ids' );
+		$registry->setAccessible( true );
+		$registry->setValue( null, [] );
+
+		require_once ABSPATH . 'wp-includes/class-wp-admin-bar.php';
+
+		$form_id  = wp_insert_post(
+			[
+				'post_title'  => 'Admin Bar Entries Form',
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_status' => 'publish',
+			]
+		);
+		$form_id2 = wp_insert_post(
+			[
+				// Author-controlled title with HTML — must be escaped in the node.
+				'post_title'  => '<b>XSS</b> Form',
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_status' => 'publish',
+			]
+		);
+
+		// One form on the page → a single node linking to its filtered entries.
+		$registry->setValue( null, [ $form_id => true ] );
+		$bar  = new WP_Admin_Bar();
+		$this->generate_form_markup->add_entries_admin_bar_node( $bar );
+		$node = $bar->get_node( 'srfm-entries' );
+		$this->assertNotNull( $node, 'Entries node should be added when a form is on the page.' );
+		$this->assertStringContainsString( 'page=' . SRFM_ENTRIES, $node->href );
+		$this->assertStringContainsString( 'form=' . $form_id, $node->href );
+
+		// Two forms → a submenu: parent unfiltered, one child per form. The child
+		// title is escaped (WP_Admin_Bar does not escape node titles).
+		$registry->setValue( null, [ $form_id => true, $form_id2 => true ] );
+		$bar_multi = new WP_Admin_Bar();
+		$this->generate_form_markup->add_entries_admin_bar_node( $bar_multi );
+		$parent = $bar_multi->get_node( 'srfm-entries' );
+		$this->assertNotNull( $parent );
+		$this->assertStringNotContainsString( 'form=', $parent->href, 'Parent links to unfiltered Entries.' );
+		$child = $bar_multi->get_node( 'srfm-entries-' . $form_id2 );
+		$this->assertNotNull( $child, 'Each form gets a submenu child.' );
+		$this->assertStringContainsString( 'form=' . $form_id2, $child->href );
+		// Pin the exact escaping contract: strip tags, then esc_html. Swapping
+		// either step (e.g. for wp_kses_post or strip_tags alone) fails this.
+		$this->assertSame(
+			esc_html( wp_strip_all_tags( get_the_title( $form_id2 ) ) ),
+			(string) $child->title,
+			'Form titles must be tag-stripped and escaped in the node.'
+		);
+		$this->assertStringNotContainsString( '<b>', (string) $child->title, 'Form titles must be escaped in the node.' );
+
+		// Subscriber (no manage_options) → no node.
+		$subscriber = wp_insert_user(
+			[
+				'user_login' => 'srfm_entries_sub_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_entries_sub_' . wp_rand() . '@example.com',
+				'role'       => 'subscriber',
+			]
+		);
+		wp_set_current_user( is_wp_error( $subscriber ) ? 0 : (int) $subscriber );
+		$bar_sub = new WP_Admin_Bar();
+		$this->generate_form_markup->add_entries_admin_bar_node( $bar_sub );
+		$this->assertNull( $bar_sub->get_node( 'srfm-entries' ), 'Users without the entries capability must not see the node.' );
+
+		// Cleanup.
+		$registry->setValue( null, [] );
+		remove_filter( 'show_admin_bar', '__return_true' );
+		wp_delete_post( $form_id, true );
+		wp_delete_post( $form_id2, true );
+		wp_set_current_user( 0 );
+		if ( ! is_wp_error( $admin ) ) {
+			wp_delete_user( (int) $admin );
+		}
+		if ( ! is_wp_error( $subscriber ) ) {
+			wp_delete_user( (int) $subscriber );
+		}
+	}
+
+	public function test_collect_queried_form_ids() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+
+		$registry = new ReflectionProperty( Generate_Form_Markup::class, 'rendered_form_ids' );
+		$registry->setAccessible( true );
+		$registry->setValue( null, [] );
+
+		$form_id = wp_insert_post(
+			[
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_title'  => 'Collected Form',
+				'post_status' => 'publish',
+			]
+		);
+		// A page embedding the form via the srfm/form block (no shortcode-registration
+		// dependency — has_block() is a content scan).
+		$page_id = wp_insert_post(
+			[
+				'post_type'    => 'page',
+				'post_title'   => 'Has Form',
+				'post_status'  => 'publish',
+				'post_content' => '<!-- wp:srfm/form {"id":' . $form_id . '} /-->',
+			]
+		);
+
+		global $wp_query;
+		$prev_is_singular    = $wp_query->is_singular;
+		$prev_queried_object = $wp_query->get_queried_object();
+		$prev_queried_id     = $wp_query->get_queried_object_id();
+
+		// Simulate being on the page that embeds the form (the `wp`-hook context).
+		$wp_query->is_singular       = true;
+		$wp_query->queried_object    = get_post( $page_id );
+		$wp_query->queried_object_id = $page_id;
+
+		$this->generate_form_markup->collect_queried_form_ids();
+		$this->assertArrayHasKey( $form_id, $registry->getValue(), 'The embedded form ID should be collected from the queried post at `wp`.' );
+
+		// Not a singular view → no-op.
+		$registry->setValue( null, [] );
+		$wp_query->is_singular = false;
+		$this->generate_form_markup->collect_queried_form_ids();
+		$this->assertSame( [], $registry->getValue(), 'Nothing is collected outside a singular view.' );
+
+		// Restore query globals + clean up.
+		$wp_query->is_singular       = $prev_is_singular;
+		$wp_query->queried_object    = $prev_queried_object;
+		$wp_query->queried_object_id = $prev_queried_id;
+		$registry->setValue( null, [] );
+		wp_delete_post( $page_id, true );
+		wp_delete_post( $form_id, true );
+	}
+
 	public function test_register_custom_endpoint() {
 		do_action( 'rest_api_init' );
 		$routes = rest_get_server()->get_routes();
@@ -57,6 +211,193 @@ class Test_Generate_Form_Markup extends TestCase {
 			}
 		}
 		$this->assertTrue( $found, 'The generate-form-markup endpoint should be registered' );
+	}
+
+	/**
+	 * Create a user with the given role and make it the current user.
+	 *
+	 * @param string $role Role name.
+	 * @return int User ID.
+	 */
+	private function set_current_user_with_role( $role ) {
+		$user_id = wp_insert_user(
+			[
+				'user_login' => 'srfm_markup_' . $role . '_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_markup_' . $role . '_' . wp_rand() . '@example.com',
+				'role'       => $role,
+			]
+		);
+
+		$user_id = is_wp_error( $user_id ) ? 0 : (int) $user_id;
+		wp_set_current_user( $user_id );
+
+		return $user_id;
+	}
+
+	/**
+	 * Build a request for the form-markup endpoint.
+	 *
+	 * @param int $form_id Requested ID.
+	 * @return WP_REST_Request
+	 */
+	private function make_markup_request( $form_id ) {
+		$request = new WP_REST_Request( 'GET', '/sureforms/v1/generate-form-markup' );
+		$request->set_param( 'id', $form_id );
+
+		return $request;
+	}
+
+	/**
+	 * The endpoint requires a user who can edit content — a nonce is not authorization.
+	 *
+	 * See #2995: the route was registered with `__return_true` and gated only by the
+	 * `srfm_form_markup` nonce, which every user who can open the block editor holds.
+	 */
+	public function test_render_form_markup_permissions_check_requires_edit_posts() {
+		// Anonymous.
+		wp_set_current_user( 0 );
+		$this->assertInstanceOf( WP_Error::class, $this->generate_form_markup->render_form_markup_permissions_check() );
+
+		// Subscriber — cannot edit content.
+		$subscriber = $this->set_current_user_with_role( 'subscriber' );
+		$this->assertInstanceOf( WP_Error::class, $this->generate_form_markup->render_form_markup_permissions_check() );
+
+		// Editor — can edit content, so the preview endpoint is available.
+		$editor = $this->set_current_user_with_role( 'editor' );
+		$this->assertTrue( $this->generate_form_markup->render_form_markup_permissions_check() );
+
+		wp_set_current_user( 0 );
+		wp_delete_user( $subscriber );
+		wp_delete_user( $editor );
+	}
+
+	/**
+	 * The endpoint must refuse any post that is not a SureForms form.
+	 *
+	 * This was the disclosure: `get_post( $id )` was unconstrained, so drafts,
+	 * pending, private posts and private CPTs of any author rendered in full.
+	 */
+	public function test_render_form_markup_endpoint_rejects_non_form_post() {
+		$admin = $this->set_current_user_with_role( 'administrator' );
+
+		$private_post = wp_insert_post(
+			[
+				'post_title'   => 'Unpublished secret',
+				'post_type'    => 'post',
+				'post_status'  => 'draft',
+				'post_content' => 'CONFIDENTIAL-MARKER',
+			]
+		);
+
+		$result = $this->generate_form_markup->render_form_markup_endpoint( $this->make_markup_request( $private_post ) );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 'srfm_rest_form_not_found', $result->get_error_code() );
+
+		// A non-existent ID behaves the same way.
+		$missing = $this->generate_form_markup->render_form_markup_endpoint( $this->make_markup_request( 999999 ) );
+		$this->assertInstanceOf( WP_Error::class, $missing );
+
+		wp_delete_post( $private_post, true );
+		wp_set_current_user( 0 );
+		wp_delete_user( $admin );
+	}
+
+	/**
+	 * An unpublished form is only renderable by users with the SureForms forms capability.
+	 */
+	public function test_render_form_markup_endpoint_rejects_unpublished_form_for_editor() {
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$draft_form = wp_insert_post(
+			[
+				'post_title'   => 'Draft Form',
+				'post_type'    => SRFM_FORMS_POST_TYPE,
+				'post_status'  => 'draft',
+				'post_content' => 'simple content',
+			]
+		);
+
+		// Editor passes the endpoint capability but has no manage_options.
+		$editor = $this->set_current_user_with_role( 'editor' );
+		$result = $this->generate_form_markup->render_form_markup_endpoint( $this->make_markup_request( $draft_form ) );
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 'srfm_rest_cannot_render_form', $result->get_error_code() );
+
+		// Administrator can render it.
+		$admin = $this->set_current_user_with_role( 'administrator' );
+		$this->assertIsString( $this->generate_form_markup->render_form_markup_endpoint( $this->make_markup_request( $draft_form ) ) );
+
+		wp_delete_post( $draft_form, true );
+		wp_set_current_user( 0 );
+		wp_delete_user( $editor );
+		wp_delete_user( $admin );
+	}
+
+	/**
+	 * A published form still renders — the legitimate editor-preview path.
+	 */
+	public function test_render_form_markup_endpoint_renders_published_form() {
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$form_id = wp_insert_post(
+			[
+				'post_title'   => 'Published Form',
+				'post_type'    => SRFM_FORMS_POST_TYPE,
+				'post_status'  => 'publish',
+				'post_content' => 'simple content',
+			]
+		);
+
+		$editor = $this->set_current_user_with_role( 'editor' );
+		$result = $this->generate_form_markup->render_form_markup_endpoint( $this->make_markup_request( $form_id ) );
+
+		$this->assertIsString( $result );
+		$this->assertStringContainsString( 'srfm-form-container', $result );
+
+		wp_delete_post( $form_id, true );
+		wp_set_current_user( 0 );
+		wp_delete_user( $editor );
+	}
+
+	/**
+	 * get_form_markup() must render the ID it was given, never one from the query string.
+	 *
+	 * The query-string override let `?id=&srfm_form_markup_nonce=` on any page
+	 * embedding a form swap in a different post — see #2995.
+	 */
+	public function test_get_form_markup_ignores_query_string_id() {
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$form_id = wp_insert_post(
+			[
+				'post_title'   => 'Embedded Form',
+				'post_type'    => SRFM_FORMS_POST_TYPE,
+				'post_status'  => 'publish',
+				'post_content' => 'simple content',
+			]
+		);
+		$other   = wp_insert_post(
+			[
+				'post_title'   => 'Other post',
+				'post_type'    => 'post',
+				'post_status'  => 'draft',
+				'post_content' => 'CONFIDENTIAL-MARKER',
+			]
+		);
+
+		$_GET['id']                     = $other;
+		$_GET['srfm_form_markup_nonce'] = wp_create_nonce( 'srfm_form_markup' );
+
+		$markup = Generate_Form_Markup::get_form_markup( $form_id );
+
+		$this->assertStringNotContainsString( 'CONFIDENTIAL-MARKER', $markup, 'The query string must not redirect the render to another post.' );
+		$this->assertStringContainsString( 'srfm-form-container-' . $form_id, $markup );
+
+		unset( $_GET['id'], $_GET['srfm_form_markup_nonce'] );
+		wp_delete_post( $form_id, true );
+		wp_delete_post( $other, true );
 	}
 
 	/**
@@ -107,6 +448,15 @@ class Test_Generate_Form_Markup extends TestCase {
 
 		$result = Generate_Form_Markup::get_form_markup( $form_id );
 		$this->assertIsString( $result );
+
+		// The render-time path additively records the form ID in the admin-bar
+		// registry (covers page-builder / FSE embeds a content parse can't see).
+		$registry = new ReflectionProperty( Generate_Form_Markup::class, 'rendered_form_ids' );
+		$registry->setAccessible( true );
+		$registry->setValue( null, [] );
+		Generate_Form_Markup::get_form_markup( $form_id );
+		$this->assertArrayHasKey( $form_id, $registry->getValue(), 'get_form_markup() should record the form ID.' );
+		$registry->setValue( null, [] );
 
 		wp_delete_post( $form_id, true );
 	}
