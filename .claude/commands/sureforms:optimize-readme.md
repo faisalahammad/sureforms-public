@@ -39,23 +39,44 @@ Final score = **where the term matches** × **six quality signals**.
 |---|---|---|
 | Plugin name (a whole word) **or** slug | 5 | Title: yes. Slug (`sureforms`): **no — immutable** |
 | Author name | 3 | No |
-| Term as a substring inside a title word (`form` in `SureForms`) | 2 | Indirect |
-| Short description **or** Tags | 2 | **Yes — this is the main lever** |
-| Anywhere else in the readme (description, FAQ, features) | 0.1 | Not worth optimizing |
+| Term as a substring inside a title word (`form` in `SureForms`, via the `title.engram` analyzer) | 2 | Indirect |
+| Short description **or** Tags (`excerpt`, `description`, `tags`) | 2 | **Yes — this is the main lever** |
+| Anywhere else in the readme (description body, FAQ, features) | 0.1 | Not worth optimizing |
 
-**The six quality signals (multipliers) — none live in these three fields:**
-recent-update recency, `Tested up to` freshness, active installs (with a penalty under 1M),
-percent of support threads resolved, and star-rating average. This command does **not** move them —
-it only notes if `Tested up to` looks stale so a human can act.
+Search analyzers split the **slug on hyphens**, so `contact-form-7` indexes as `contact` · `form` ·
+`7` — each a whole-word ×5 match. `sureforms` is one indivisible token and can never produce a
+standalone `form`, so it only ever earns the ×2 `title.engram` substring credit. The slug is
+permanent on WordPress.org; do not plan around changing it.
 
-**The two consequences that drive every rewrite below:**
+**The six quality signals (multipliers) — none live in these three fields**, so this command never
+touches them. Kept here only so the analysis can explain *why* a readme edit can't move quality, and
+so a stale `Tested up to` gets flagged (not changed). Verbatim `function_score` params from the
+[ranking code](https://github.com/WordPress/wordpress.org/blob/trunk/wordpress.org/public_html/wp-content/plugins/plugin-directory/class-plugin-search.php#L313-L381):
+
+| Signal | Config | Rule of thumb |
+|---|---|---|
+| Last updated (`plugin_modified`) | decay, origin today, offset 180d, scale 360d, decay 0.5 | free for 6 months; ~×0.5 at ~18 months |
+| Tested up to (`tested`) | decay, origin current WP, offset 0.1, scale 0.4, decay 0.6 | half a major version behind ≈ ×0.6 |
+| Active installs (`active_installs`) | `log2p`, factor 0.375, missing 1 | log-scaled; 10k→100k ≈ 100k→1M |
+| Under-1M penalty | decay, filter ≤ 1,000,000, origin 1M, scale 900k, decay 0.75 | extra ~×0.85 handicap below 1M installs |
+| Support resolved (`support_threads_resolved`) | `log2p`, factor 0.25, missing 0.5 | resolved **percentage** scored directly |
+| Star rating (`rating`) | `sqrt`, factor 0.25, missing 2.5 | only the **average** counts, never the review count |
+
+**The three consequences that drive every rewrite below:**
 
 1. The slug is `sureforms` (one word), so a search for `form` never gets the 5-point whole-word name
    credit. The closest recoverable credit is a **standalone** high-value word in the *title*
    (`Contact Form Builder` → `form` is its own word), which beats the 2-point substring credit from
    `SureForms` alone.
-2. Score is **concentrated** across the words in a field. A shorter title and a tight short
-   description give each keyword a larger share. Padding words dilute every keyword in the field.
+2. Score is **concentrated per field** (Elasticsearch length-normalizes each field). A shorter title
+   and a tight short description give each keyword a larger share; padding words dilute *every*
+   keyword in the field. Past a point, adding a keyword to the title *lowers* the score of the ones
+   already there — keyword-stuffing the title is actively counterproductive.
+3. For a **multi-word** target (`contact form`, `form builder`, `payment form`), position and
+   adjacency matter, not just presence. The winners hold the phrase as **consecutive tokens early in
+   a short field** — e.g. `Contact Form` as tokens 2–3 of a 4-token title beats the same words
+   buried mid-way through a 14-token one. This is the single factor that lets a 20k-install, 2.7★
+   plugin outrank a 500k-install, 4.9★ one for "contact form".
 
 ---
 
@@ -91,16 +112,26 @@ short description (with its character count), and tags.
 ### 2 — Score the current fields
 
 For each target keyword, note where it currently lands (whole word in title = 5, substring = 2, in
-short description / tags = 2, or absent). List the gaps — a target keyword that only appears at 0.1
-weight, or not at all, is the opportunity.
+short description / tags = 2, or absent). For **multi-word** keywords, also record whether the words
+are adjacent and how early they sit — a phrase split apart or buried late is a weak match even if all
+its words are present. Count the title's token length: a long title (say > ~9 words) is itself a
+finding, because it dilutes every keyword in the ×5 field. List the gaps — a target keyword at 0.1
+weight, absent, non-adjacent, or stranded at the end of a long title is the opportunity.
 
 ### 3 — Propose the rewrite
 
 Produce candidate values for the three fields, applying the two consequences above:
 
 - **Title** — front-load the highest-value keywords as **standalone words**, drop filler, keep it
-  reading like a real product name. Aim for ≤ ~9 words. Example shape:
-  `SureForms – Contact Form Builder, Payment Form, Survey, Quiz & Calculator`.
+  reading like a real product name. Aim for ≤ ~9 words. Apply consequences 2 and 3:
+  - Put the **single most important target early** and as its own word (`Form Builder`, not only
+    `SureForms`).
+  - For a multi-word target, keep its words **adjacent and near the front** — e.g. lead with
+    `SureForms – Contact Form Builder` so `Contact Form` sits in tokens 2–3, then append the
+    lower-priority terms. Do not scatter the phrase across the title or repeat it.
+  - Stop adding keywords once the title reads like stuffing — each extra token shrinks the share of
+    the ones already there. Example shape:
+    `SureForms – Contact Form Builder, Payment Form, Survey, Quiz & Calculator`.
 - **Short description** — one natural sentence, ≤ 150 chars, carrying the top 2–3 keywords that the
   title couldn't. Report the exact character count.
 - **Tags** — exactly the 5 highest-value distinct keywords, no overlap-for-overlap's-sake, no
