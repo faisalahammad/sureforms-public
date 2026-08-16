@@ -638,15 +638,6 @@ class Generate_Form_Markup {
 			$embed_custom_css = 'sureforms_form' !== $current_post_type ? $custom_css : '';
 			?>
 			<div class="<?php echo esc_attr( implode( ' ', array_filter( $form_classes ) ) ); ?>">
-			<?php
-				// Admin-only shortcut into the form editor, shown on the embedded
-				// form. Rendered only for users who can edit THIS form, so it is
-				// fully absent from the DOM for everyone else and never affects the
-				// layout or submission for regular visitors. Works for every embed
-				// method (block, shortcode, widget, single) because they all render
-				// through this function.
-				self::render_edit_form_button( (int) $id );
-			?>
 			<?php if ( ! $disable_default_styles || '' !== $embed_custom_css ) { // Nothing to print otherwise — avoid an empty style block. ?>
 			<style>
 				/* Need to check and remove the input variables related to the Style Tab. */
@@ -989,6 +980,13 @@ class Generate_Form_Markup {
 				<div aria-live="polite" aria-atomic="true" role="alert" id="srfm-success-message-page-<?php echo esc_attr( Helper::get_string_value( $id ) ); ?>" class="srfm-success-box-description"></div>
 			</div>
 			<?php
+			// Admin-only shortcut into the form editor, shown below the embedded
+			// form. Rendered only for users who can edit THIS form, so it is fully
+			// absent from the DOM for everyone else and never affects the layout or
+			// submission for regular visitors. Works for every embed method (block,
+			// shortcode, widget, single) because they all render through this fn.
+			self::render_edit_form_button( (int) $id );
+
 			// Add preview script for real-time styling updates from block editor.
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- This is a preview context, nonce not required.
 			if ( isset( $_GET['form_preview'] ) && 'true' === $_GET['form_preview'] && isset( $container_id ) ) {
@@ -1361,16 +1359,16 @@ class Generate_Form_Markup {
 			$styles_printed = true;
 			?>
 			<style id="srfm-edit-form-btn-styles">
-				.srfm-form-container { position: relative; }
+				.srfm-edit-form-wrap {
+					display: flex;
+					justify-content: center;
+					margin-top: 16px;
+				}
 				.srfm-edit-form-btn {
-					position: absolute;
-					top: 12px;
-					right: 12px;
-					z-index: 5;
 					display: inline-flex;
 					align-items: center;
 					gap: 6px;
-					padding: 6px 12px;
+					padding: 8px 16px;
 					font-size: 13px;
 					font-weight: 500;
 					line-height: 1;
@@ -1380,23 +1378,20 @@ class Generate_Form_Markup {
 					border-radius: 9999px;
 					box-shadow: 0 1px 2px rgba( 0, 0, 0, 0.08 );
 					text-decoration: none;
-					opacity: 0;
-					transition: opacity 0.15s ease-in-out;
 				}
-				.srfm-form-container:hover .srfm-edit-form-btn,
-				.srfm-edit-form-btn:focus-visible {
-					opacity: 1;
-				}
-				.srfm-edit-form-btn:hover { border-color: #cbd5e1; color: #0f172a; }
+				.srfm-edit-form-btn:hover,
+				.srfm-edit-form-btn:focus-visible { border-color: #cbd5e1; color: #0f172a; }
 				.srfm-edit-form-btn svg { width: 14px; height: 14px; }
 			</style>
 			<?php
 		}
 		?>
-		<a class="srfm-edit-form-btn" href="<?php echo esc_url( $edit_link ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php esc_attr_e( 'Edit this form in SureForms', 'sureforms' ); ?>">
-			<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
-			<span><?php esc_html_e( 'Edit Form', 'sureforms' ); ?></span>
-		</a>
+		<div class="srfm-edit-form-wrap">
+			<a class="srfm-edit-form-btn" href="<?php echo esc_url( $edit_link ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php esc_attr_e( 'Edit this form in SureForms', 'sureforms' ); ?>">
+				<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+				<span><?php esc_html_e( 'Edit Form', 'sureforms' ); ?></span>
+			</a>
+		</div>
 		<?php
 	}
 }
