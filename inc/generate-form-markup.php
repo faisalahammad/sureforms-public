@@ -980,11 +980,12 @@ class Generate_Form_Markup {
 				<div aria-live="polite" aria-atomic="true" role="alert" id="srfm-success-message-page-<?php echo esc_attr( Helper::get_string_value( $id ) ); ?>" class="srfm-success-box-description"></div>
 			</div>
 			<?php
-			// Admin-only shortcut into the form editor, shown below the embedded
-			// form. Rendered only for users who can edit THIS form, so it is fully
-			// absent from the DOM for everyone else and never affects the layout or
-			// submission for regular visitors. Works for every embed method (block,
-			// shortcode, widget, single) because they all render through this fn.
+			// Admin-only shortcut into the form editor, overlaid at the top-right of
+			// the embedded form. Rendered only for users who can edit THIS form, so
+			// it is fully absent from the DOM for everyone else and, being absolutely
+			// positioned, never affects the layout or submission for regular
+			// visitors. Works for every embed method (block, shortcode, widget,
+			// single) because they all render through this function.
 			self::render_edit_form_button( (int) $id );
 
 			// Add preview script for real-time styling updates from block editor.
@@ -1325,8 +1326,10 @@ class Generate_Form_Markup {
 	/**
 	 * Print the admin-only "Edit Form" shortcut on an embedded form.
 	 *
-	 * Renders a small pill link into the form container that opens the block
-	 * editor for this form. It is emitted only for users who can edit the form,
+	 * Renders a small pill link overlaid at the top-right of the form container
+	 * (Elementor/Beaver-Builder style) that opens the block editor for this form.
+	 * Being absolutely positioned, it never affects the form's layout. It is
+	 * emitted only for users who can edit the form,
 	 * so it is entirely absent from the DOM for everyone else — a visitor never
 	 * receives the markup or its styles, and the form layout and submission are
 	 * untouched. The scoped stylesheet is printed once per request, no matter how
@@ -1359,16 +1362,16 @@ class Generate_Form_Markup {
 			$styles_printed = true;
 			?>
 			<style id="srfm-edit-form-btn-styles">
-				.srfm-edit-form-wrap {
-					display: flex;
-					justify-content: center;
-					margin-top: 16px;
-				}
+				.srfm-form-container { position: relative; }
 				.srfm-edit-form-btn {
+					position: absolute;
+					top: 12px;
+					right: 12px;
+					z-index: 5;
 					display: inline-flex;
 					align-items: center;
 					gap: 6px;
-					padding: 8px 16px;
+					padding: 6px 12px;
 					font-size: 13px;
 					font-weight: 500;
 					line-height: 1;
@@ -1386,12 +1389,10 @@ class Generate_Form_Markup {
 			<?php
 		}
 		?>
-		<div class="srfm-edit-form-wrap">
-			<a class="srfm-edit-form-btn" href="<?php echo esc_url( $edit_link ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php esc_attr_e( 'Edit this form in SureForms', 'sureforms' ); ?>">
-				<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
-				<span><?php esc_html_e( 'Edit Form', 'sureforms' ); ?></span>
-			</a>
-		</div>
+		<a class="srfm-edit-form-btn" href="<?php echo esc_url( $edit_link ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php esc_attr_e( 'Edit this form in SureForms', 'sureforms' ); ?>">
+			<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+			<span><?php esc_html_e( 'Edit Form', 'sureforms' ); ?></span>
+		</a>
 		<?php
 	}
 }
