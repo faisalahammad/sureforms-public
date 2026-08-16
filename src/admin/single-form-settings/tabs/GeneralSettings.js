@@ -15,6 +15,15 @@ import { prepareBlockSlugs } from '@Utils/Helpers';
 
 let prevMetaHash = '';
 
+// Capture the dashboard deep-link target (?srfm_focus=…) the moment this
+// bundle evaluates — the block editor strips unrecognised query args from the
+// URL shortly after it boots, so reading the param later (inside a mount
+// effect) finds it already gone. Snapshotting it here, before Gutenberg's URL
+// cleanup runs, is what makes the deep-link reliable.
+const srfmDeepLinkFocus = new URLSearchParams( window.location.search ).get(
+	'srfm_focus'
+);
+
 function GeneralSettings( props ) {
 	const { createNotice, removeNotice } = useDispatch( 'core/notices' );
 
@@ -237,6 +246,59 @@ function GeneralSettings( props ) {
 			);
 		};
 	}, [ sureformsKeys ] );
+
+	// Deep-link support: open a specific form-settings panel when the editor is
+	// reached with ?srfm_focus=... — the dashboard "Finish setting up" card CTAs
+	// use this so "Set where replies go" lands on the OttoKit (Automations)
+	// screen, and "Edit the thank-you message" on Form Confirmation. The target
+	// is read from `srfmDeepLinkFocus`, snapshotted at bundle-eval time because
+	// the block editor strips the query arg from the URL before this effect runs.
+	useEffect( () => {
+		const tabByFocus = {
+			ottokit: 'ottokit',
+			thankyou: 'form_confirmation',
+			notifications: 'email_notification',
+		};
+		const tabId = tabByFocus[ srfmDeepLinkFocus ];
+
+		if ( ! tabId ) {
+			return undefined;
+		}
+
+		// Open the form-settings dialog on the target tab via the same window
+		// event the "Form Settings" popover uses. The editor mounts/remounts the
+		// settings panels during initial load and the listener re-registers on
+		// every meta change, so a single dispatch can miss it, and the Force UI
+		// dialog's opacity fade-in can stall when toggled amid that churn. Poll
+		// every 300ms across the load window: dispatch the open request only while
+		// the dialog isn't up yet (so it re-opens if a load-time re-render drops
+		// it, without needlessly re-firing once open), and force the overlay
+		// visible while it is, so the dialog reliably lands open and painted.
+		let elapsed = 0;
+		const ensureOpen = setInterval( () => {
+			elapsed += 300;
+
+			const panel = document.querySelector( '.srfm-dialog-panel' );
+			if ( panel ) {
+				const overlay = panel.closest( '.fixed.inset-0' );
+				if ( overlay ) {
+					overlay.style.opacity = '1';
+				}
+			} else {
+				window.dispatchEvent(
+					new CustomEvent( 'srfm-open-form-settings', {
+						detail: { tabId },
+					} )
+				);
+			}
+
+			if ( elapsed >= 12000 ) {
+				clearInterval( ensureOpen );
+			}
+		}, 300 );
+
+		return () => clearInterval( ensureOpen );
+	}, [] );
 
 	return (
 		<>

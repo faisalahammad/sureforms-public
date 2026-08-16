@@ -359,8 +359,10 @@ class Admin {
 				'days_ago'     => max( 0, $days_ago ),
 				'steps'        => $steps,
 				'edit_url'     => $edit_link,
-				// The editor reads srfm_focus to open the matching settings panel.
-				'replies_url'  => add_query_arg( 'srfm_focus', 'notifications', $edit_link ),
+				// The editor reads srfm_focus to open the matching settings panel:
+				// "replies" lands on OttoKit (Automations), "thankyou" on Form
+				// Confirmation.
+				'replies_url'  => add_query_arg( 'srfm_focus', 'ottokit', $edit_link ),
 				'thankyou_url' => add_query_arg( 'srfm_focus', 'thankyou', $edit_link ),
 			];
 
