@@ -638,6 +638,15 @@ class Generate_Form_Markup {
 			$embed_custom_css = 'sureforms_form' !== $current_post_type ? $custom_css : '';
 			?>
 			<div class="<?php echo esc_attr( implode( ' ', array_filter( $form_classes ) ) ); ?>">
+			<?php
+				// Admin-only shortcut into the form editor, shown on the embedded
+				// form. Rendered only for users who can edit THIS form, so it is
+				// fully absent from the DOM for everyone else and never affects the
+				// layout or submission for regular visitors. Works for every embed
+				// method (block, shortcode, widget, single) because they all render
+				// through this function.
+				self::render_edit_form_button( (int) $id );
+			?>
 			<?php if ( ! $disable_default_styles || '' !== $embed_custom_css ) { // Nothing to print otherwise — avoid an empty style block. ?>
 			<style>
 				/* Need to check and remove the input variables related to the Style Tab. */
@@ -1313,5 +1322,81 @@ class Generate_Form_Markup {
 		}
 
 		return esc_url_raw( apply_filters( 'srfm_after_submit_redirect_url', $redirect_url ) );
+	}
+
+	/**
+	 * Print the admin-only "Edit Form" shortcut on an embedded form.
+	 *
+	 * Renders a small pill link into the form container that opens the block
+	 * editor for this form. It is emitted only for users who can edit the form,
+	 * so it is entirely absent from the DOM for everyone else — a visitor never
+	 * receives the markup or its styles, and the form layout and submission are
+	 * untouched. The scoped stylesheet is printed once per request, no matter how
+	 * many forms are embedded on the page.
+	 *
+	 * @param int $form_id Form post ID.
+	 *
+	 * @return void
+	 * @since x.x.x
+	 */
+	public static function render_edit_form_button( $form_id ) {
+		$form_id = absint( $form_id );
+
+		// Capability is checked against this specific form, so an editor only sees
+		// the shortcut on forms they may actually edit.
+		if ( $form_id <= 0 || ! current_user_can( 'edit_post', $form_id ) ) {
+			return;
+		}
+
+		$edit_link = get_edit_post_link( $form_id );
+
+		if ( empty( $edit_link ) ) {
+			return;
+		}
+
+		// Print the styles once per request, even with several forms on the page.
+		static $styles_printed = false;
+
+		if ( ! $styles_printed ) {
+			$styles_printed = true;
+			?>
+			<style id="srfm-edit-form-btn-styles">
+				.srfm-form-container { position: relative; }
+				.srfm-edit-form-btn {
+					position: absolute;
+					top: 12px;
+					right: 12px;
+					z-index: 5;
+					display: inline-flex;
+					align-items: center;
+					gap: 6px;
+					padding: 6px 12px;
+					font-size: 13px;
+					font-weight: 500;
+					line-height: 1;
+					color: #1e293b;
+					background: #ffffff;
+					border: 1px solid #e2e8f0;
+					border-radius: 9999px;
+					box-shadow: 0 1px 2px rgba( 0, 0, 0, 0.08 );
+					text-decoration: none;
+					opacity: 0;
+					transition: opacity 0.15s ease-in-out;
+				}
+				.srfm-form-container:hover .srfm-edit-form-btn,
+				.srfm-edit-form-btn:focus-visible {
+					opacity: 1;
+				}
+				.srfm-edit-form-btn:hover { border-color: #cbd5e1; color: #0f172a; }
+				.srfm-edit-form-btn svg { width: 14px; height: 14px; }
+			</style>
+			<?php
+		}
+		?>
+		<a class="srfm-edit-form-btn" href="<?php echo esc_url( $edit_link ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php esc_attr_e( 'Edit this form in SureForms', 'sureforms' ); ?>">
+			<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+			<span><?php esc_html_e( 'Edit Form', 'sureforms' ); ?></span>
+		</a>
+		<?php
 	}
 }
