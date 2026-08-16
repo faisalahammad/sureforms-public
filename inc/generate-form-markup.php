@@ -1365,8 +1365,8 @@ class Generate_Form_Markup {
 				.srfm-form-container { position: relative; }
 				.srfm-edit-form-btn {
 					position: absolute;
-					top: 12px;
-					right: 12px;
+					top: -14px;
+					right: -14px;
 					z-index: 5;
 					display: inline-flex;
 					align-items: center;
@@ -1379,11 +1379,14 @@ class Generate_Form_Markup {
 					background: #ffffff;
 					border: 1px solid #e2e8f0;
 					border-radius: 9999px;
-					box-shadow: 0 1px 2px rgba( 0, 0, 0, 0.08 );
+					box-shadow: 0 2px 6px rgba( 0, 0, 0, 0.12 );
 					text-decoration: none;
+					opacity: 0;
+					transition: opacity 0.15s ease-in-out;
 				}
-				.srfm-edit-form-btn:hover,
-				.srfm-edit-form-btn:focus-visible { border-color: #cbd5e1; color: #0f172a; }
+				.srfm-form-container:hover .srfm-edit-form-btn,
+				.srfm-edit-form-btn:focus-visible { opacity: 1; }
+				.srfm-edit-form-btn:hover { border-color: #cbd5e1; color: #0f172a; }
 				.srfm-edit-form-btn svg { width: 14px; height: 14px; }
 			</style>
 			<?php
