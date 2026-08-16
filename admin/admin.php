@@ -248,6 +248,226 @@ class Admin {
 	}
 
 	/**
+	 * Post meta: the "Finish setting up" card was dismissed for this form.
+	 *
+	 * @since x.x.x
+	 */
+	public const SETUP_CARD_DISMISSED_META = '_srfm_setup_card_dismissed';
+
+	/**
+	 * Post meta: unix time until which the "Finish setting up" card is snoozed.
+	 *
+	 * @since x.x.x
+	 */
+	public const SETUP_CARD_SNOOZE_META = '_srfm_setup_card_snooze_until';
+
+	/**
+	 * The "Finish setting up" card for the latest form that still needs setup (#3031).
+	 *
+	 * Surfaces the newest published form the current user can edit which still has
+	 * an unfinished setup step — its confirmation is the default, no enabled email
+	 * notification has a recipient, or it isn't embedded on a page — and which has
+	 * not been dismissed or snoozed. Returns the form, how long ago it was created,
+	 * and which steps remain, so the dashboard can render the contextual nudge and
+	 * its per-step CTAs. Null when there is nothing to prompt about.
+	 *
+	 * @since x.x.x
+	 * @return array<string,mixed>|null
+	 */
+	public static function get_form_setup_card() {
+		if ( ! post_type_exists( SRFM_FORMS_POST_TYPE ) ) {
+			return null;
+		}
+
+		$now = time();
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => SRFM_FORMS_POST_TYPE,
+				'post_status'    => 'publish',
+				'posts_per_page' => 10,
+				'orderby'        => 'date',
+				'order'          => 'DESC',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded to 10 recent forms; dashboard-only.
+					[
+						'key'     => self::SETUP_CARD_DISMISSED_META,
+						'compare' => 'NOT EXISTS',
+					],
+				],
+			]
+		);
+
+		foreach ( $query->posts as $form_id ) {
+			$form_id = (int) $form_id;
+
+			if ( ! current_user_can( 'edit_post', $form_id ) ) {
+				continue;
+			}
+
+			$snooze_until = (int) get_post_meta( $form_id, self::SETUP_CARD_SNOOZE_META, true );
+
+			if ( $snooze_until > $now ) {
+				continue;
+			}
+
+			$steps = [
+				// A destination for replies: an enabled notification with a recipient.
+				'replies'  => ! self::form_has_reply_destination( $form_id ),
+				// The thank-you message is still the shipped default.
+				'thankyou' => self::is_default_confirmation_message( $form_id ),
+				// The form is not embedded on any published page or post.
+				'page'     => ! self::form_is_embedded( $form_id ),
+			];
+
+			// Nothing left to finish — no card for this form.
+			if ( ! $steps['replies'] && ! $steps['thankyou'] && ! $steps['page'] ) {
+				continue;
+			}
+
+			$edit_link = get_edit_post_link( $form_id, 'raw' );
+
+			if ( empty( $edit_link ) ) {
+				continue;
+			}
+
+			$created  = get_post_time( 'U', true, $form_id );
+			$days_ago = is_int( $created ) ? (int) floor( ( $now - $created ) / DAY_IN_SECONDS ) : 0;
+
+			return [
+				'id'           => $form_id,
+				'title'        => get_the_title( $form_id ),
+				'days_ago'     => max( 0, $days_ago ),
+				'steps'        => $steps,
+				'edit_url'     => $edit_link,
+				'replies_url'  => add_query_arg( 'srfm_focus', 'notifications', $edit_link ),
+				'thankyou_url' => add_query_arg( 'srfm_focus', 'thankyou', $edit_link ),
+				// Where "Add to a page" sends the user: a fresh page to embed into.
+				'page_url'     => admin_url( 'post-new.php?post_type=page' ),
+			];
+		}
+
+		return null;
+	}
+
+	/**
+	 * Whether a form is embedded on at least one published page or post.
+	 *
+	 * A bounded LIKE over published content matches the two embed forms SureForms
+	 * emits — the `srfm/form` block (`"id":N`) and the `[sureforms id="N"]`
+	 * shortcode — stopping at the first hit. Heuristic by design: it errs toward
+	 * "embedded" so the card never nags about a form that is already placed.
+	 *
+	 * @param int $form_id Form post ID.
+	 *
+	 * @since x.x.x
+	 * @return bool
+	 */
+	public static function form_is_embedded( $form_id ) {
+		global $wpdb;
+
+		$form_id = (int) $form_id;
+
+		$block_like     = '%' . $wpdb->esc_like( 'srfm/form' ) . '%' . $wpdb->esc_like( '"id":' . $form_id ) . '%';
+		$shortcode_like = '%' . $wpdb->esc_like( '[sureforms id="' . $form_id . '"' ) . '%';
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded existence check for the dashboard setup card; no core API expresses a reverse "which pages embed form N" lookup.
+		$found = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT ID FROM {$wpdb->posts} WHERE post_status = 'publish' AND post_type IN ( 'post', 'page' ) AND ( post_content LIKE %s OR post_content LIKE %s ) LIMIT 1",
+				$block_like,
+				$shortcode_like
+			)
+		);
+
+		return ! empty( $found );
+	}
+
+	/**
+	 * Whether a form has somewhere to send replies (an enabled email notification
+	 * with a non-empty recipient).
+	 *
+	 * @param int $form_id Form post ID.
+	 *
+	 * @since x.x.x
+	 * @return bool
+	 */
+	public static function form_has_reply_destination( $form_id ) {
+		$notifications = get_post_meta( (int) $form_id, '_srfm_email_notification', true );
+
+		if ( ! is_array( $notifications ) ) {
+			return false;
+		}
+
+		foreach ( $notifications as $notification ) {
+			if ( is_array( $notification ) && ! empty( $notification['status'] ) && ! empty( $notification['email_to'] ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Whether a form's confirmation message is still the shipped default.
+	 *
+	 * Compared on tag-stripped text rather than raw HTML: the default is stored
+	 * with a base64 icon on creation but regenerated with a URL icon, so the markup
+	 * differs while the wording does not. Any real edit flips this to false.
+	 *
+	 * @param int $form_id Form post ID.
+	 *
+	 * @since x.x.x
+	 * @return bool
+	 */
+	public static function is_default_confirmation_message( $form_id ) {
+		$confirmation = get_post_meta( (int) $form_id, '_srfm_form_confirmation', true );
+
+		if ( ! is_array( $confirmation ) || ! isset( $confirmation[0]['message'] ) || ! is_string( $confirmation[0]['message'] ) ) {
+			return false;
+		}
+
+		if ( '' === trim( $confirmation[0]['message'] ) ) {
+			return false;
+		}
+
+		$normalize = static function ( $html ) {
+			return trim( (string) preg_replace( '/\s+/', ' ', wp_strip_all_tags( (string) $html ) ) );
+		};
+
+		return $normalize( $confirmation[0]['message'] ) === $normalize( Global_Settings::get_default_confirmation_message() );
+	}
+
+	/**
+	 * REST handler: dismiss or snooze the "Finish setting up" card (#3031).
+	 *
+	 * `action=snooze` hides the card for 14 days; anything else dismisses it for
+	 * good. Capability is re-checked against the specific form here, not just the
+	 * route's generic permission callback.
+	 *
+	 * @param \WP_REST_Request<array<string,mixed>> $request Request.
+	 *
+	 * @since x.x.x
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function dismiss_form_setup_card( $request ) {
+		$form_id = absint( $request->get_param( 'form_id' ) );
+
+		if ( $form_id <= 0 || ! defined( 'SRFM_FORMS_POST_TYPE' ) || SRFM_FORMS_POST_TYPE !== get_post_type( $form_id ) || ! current_user_can( 'edit_post', $form_id ) ) {
+			return new \WP_Error( 'srfm_setup_card_forbidden', __( 'You are not allowed to update this prompt.', 'sureforms' ), [ 'status' => 403 ] );
+		}
+
+		if ( 'snooze' === $request->get_param( 'action' ) ) {
+			update_post_meta( $form_id, self::SETUP_CARD_SNOOZE_META, time() + ( 14 * DAY_IN_SECONDS ) );
+		} else {
+			update_post_meta( $form_id, self::SETUP_CARD_DISMISSED_META, true );
+		}
+
+		return new \WP_REST_Response( [ 'success' => true ], 200 );
+	}
+
+	/**
 	 * Check and save the first form creation time stamp.
 	 * If not already saved.
 	 *
@@ -1049,6 +1269,10 @@ class Admin {
 			// Default confirmation message HTML (icon + heading + text) used as
 			// the initial React state before the settings API response arrives.
 			'default_confirmation_message' => Global_Settings::get_default_confirmation_message(),
+			// The latest form still needing setup — powers the "Finish setting up"
+			// dashboard card (#3031). Null when nothing needs finishing.
+			'form_setup_card'              => self::get_form_setup_card(),
+			'form_setup_card_nonce'        => wp_create_nonce( 'wp_rest' ),
 			'payments'                     => apply_filters(
 				'srfm_admin_localize_payments_data',
 				[
