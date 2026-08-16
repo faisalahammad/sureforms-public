@@ -44,34 +44,50 @@ const ThankYouPrompt = () => {
 			{ forms.map( ( form ) => (
 				<div
 					key={ form.id }
-					className="flex items-center justify-between gap-3 p-4 mb-4 rounded-lg shadow-sm bg-background-primary border border-solid border-border-subtle"
+					className="relative flex items-start gap-4 p-5 mb-4 rounded-xl bg-background-primary border-0.5 border-solid border-border-subtle shadow-sm-blur-1"
 				>
-					<div className="flex items-center gap-3 min-w-0">
-						<div className="flex items-center justify-center p-2 rounded-md bg-background-secondary shrink-0">
-							<MessageSquareText className="size-5 text-icon-primary" />
-						</div>
-						<div className="min-w-0">
-							<Title
-								tag="h3"
-								size="xs"
-								title={ __(
-									"Don't forget to personalize your Thank You message!",
-									'sureforms'
-								) }
-							/>
-							<p className="m-0 text-sm text-text-secondary">
-								{ sprintf(
-									/* translators: %s: form name. */
-									__(
-										'Your form “%s” is using the default Thank You message. Personalize it to improve the post-submission experience.',
-										'sureforms'
-									),
-									form.title
-								) }
-							</p>
-						</div>
+					<Button
+						variant="ghost"
+						size="sm"
+						icon={ <X className="size-4" /> }
+						onClick={ () => dismiss( form.id ) }
+						aria-label={ __( 'Dismiss', 'sureforms' ) }
+						className="absolute top-3 right-3"
+					/>
+
+					<div
+						className="flex items-center justify-center rounded-lg shrink-0"
+						style={ {
+							width: '2.5rem',
+							height: '2.5rem',
+							backgroundColor: '#FBEAE3',
+						} }
+					>
+						<MessageSquareText
+							className="size-5"
+							style={ { color: '#C15A3B' } }
+						/>
 					</div>
-					<div className="flex items-center gap-2 shrink-0">
+
+					<div className="min-w-0 pr-6">
+						<Title
+							tag="h3"
+							size="sm"
+							title={ __(
+								"Don't forget to personalize your Thank You message!",
+								'sureforms'
+							) }
+						/>
+						<p className="mt-1 mb-3 text-sm text-text-secondary">
+							{ sprintf(
+								/* translators: %s: form name. */
+								__(
+									'Your form “%s” is using the default Thank You message. Personalize it to improve the post-submission experience.',
+									'sureforms'
+								),
+								form.title
+							) }
+						</p>
 						<Button
 							variant="primary"
 							size="sm"
@@ -81,13 +97,6 @@ const ThankYouPrompt = () => {
 						>
 							{ __( 'Edit Thank You Message', 'sureforms' ) }
 						</Button>
-						<Button
-							variant="ghost"
-							size="sm"
-							icon={ <X className="size-4" /> }
-							onClick={ () => dismiss( form.id ) }
-							aria-label={ __( 'Dismiss', 'sureforms' ) }
-						/>
 					</div>
 				</div>
 			) ) }
