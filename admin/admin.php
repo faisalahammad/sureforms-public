@@ -248,6 +248,134 @@ class Admin {
 	}
 
 	/**
+	 * Post meta flag: the "personalise your Thank You message" prompt was dismissed.
+	 *
+	 * @since x.x.x
+	 */
+	public const THANKYOU_PROMPT_DISMISSED_META = '_srfm_thankyou_prompt_dismissed';
+
+	/**
+	 * Whether a form's confirmation message is still the shipped default.
+	 *
+	 * Compared on tag-stripped, whitespace-collapsed text rather than raw HTML:
+	 * the default is stored with a base64 icon on creation but regenerated with a
+	 * URL icon, so the markup differs while the wording does not. Any real edit to
+	 * the heading or body text changes the text and flips this to false, which is
+	 * exactly when the prompt should stop showing.
+	 *
+	 * @param int $form_id Form post ID.
+	 *
+	 * @since x.x.x
+	 * @return bool
+	 */
+	public static function is_default_confirmation_message( $form_id ) {
+		$confirmation = get_post_meta( (int) $form_id, '_srfm_form_confirmation', true );
+
+		if ( ! is_array( $confirmation ) || ! isset( $confirmation[0]['message'] ) || ! is_string( $confirmation[0]['message'] ) ) {
+			return false;
+		}
+
+		$message = $confirmation[0]['message'];
+
+		if ( '' === trim( $message ) ) {
+			return false;
+		}
+
+		$normalize = static function ( $html ) {
+			return trim( (string) preg_replace( '/\s+/', ' ', wp_strip_all_tags( (string) $html ) ) );
+		};
+
+		return $normalize( $message ) === $normalize( Global_Settings::get_default_confirmation_message() );
+	}
+
+	/**
+	 * The most recently created form still using the default Thank You message.
+	 *
+	 * Powers the dashboard prompt (#3030). Limited to the single latest such form
+	 * to avoid clutter, and to forms the current user may actually edit. A form is
+	 * a candidate only when its confirmation message is untouched (default) and
+	 * the prompt has not been dismissed for it.
+	 *
+	 * @since x.x.x
+	 * @return array<int,array{id:int,title:string,edit_url:string}> One entry, or none.
+	 */
+	public static function get_thankyou_prompt_forms() {
+		if ( ! post_type_exists( SRFM_FORMS_POST_TYPE ) ) {
+			return [];
+		}
+
+		$query = new \WP_Query(
+			[
+				'post_type'      => SRFM_FORMS_POST_TYPE,
+				'post_status'    => 'publish',
+				'posts_per_page' => 10,
+				'orderby'        => 'date',
+				'order'          => 'DESC',
+				'fields'         => 'ids',
+				'no_found_rows'  => true,
+				'meta_query'     => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded to 10 recent forms; the prompt is dashboard-only.
+					[
+						'key'     => self::THANKYOU_PROMPT_DISMISSED_META,
+						'compare' => 'NOT EXISTS',
+					],
+				],
+			]
+		);
+
+		$prompts = [];
+
+		foreach ( $query->posts as $form_id ) {
+			$form_id = (int) $form_id;
+
+			if ( ! current_user_can( 'edit_post', $form_id ) || ! self::is_default_confirmation_message( $form_id ) ) {
+				continue;
+			}
+
+			$edit_link = get_edit_post_link( $form_id, 'raw' );
+
+			if ( empty( $edit_link ) ) {
+				continue;
+			}
+
+			$prompts[] = [
+				'id'       => $form_id,
+				'title'    => get_the_title( $form_id ),
+				// The editor reads srfm_focus to open the Thank You message panel.
+				'edit_url' => add_query_arg( 'srfm_focus', 'thankyou', $edit_link ),
+			];
+
+			// One prompt is enough — surface only the latest such form.
+			break;
+		}
+
+		return $prompts;
+	}
+
+	/**
+	 * REST handler: dismiss the Thank You message prompt for a form (#3030).
+	 *
+	 * Capability is re-checked against this specific form here, not just the
+	 * route's generic permission callback, so a user can only dismiss the prompt
+	 * on a form they may edit.
+	 *
+	 * @param \WP_REST_Request<array<string,mixed>> $request Request.
+	 *
+	 * @since x.x.x
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function dismiss_thankyou_prompt( $request ) {
+		$form_id = absint( $request->get_param( 'form_id' ) );
+
+		if ( $form_id <= 0 || ! defined( 'SRFM_FORMS_POST_TYPE' ) || SRFM_FORMS_POST_TYPE !== get_post_type( $form_id ) || ! current_user_can( 'edit_post', $form_id ) ) {
+			return new \WP_Error( 'srfm_thankyou_prompt_forbidden', __( 'You are not allowed to dismiss this prompt.', 'sureforms' ), [ 'status' => 403 ] );
+		}
+
+		update_post_meta( $form_id, self::THANKYOU_PROMPT_DISMISSED_META, true );
+
+		return new \WP_REST_Response( [ 'success' => true ], 200 );
+	}
+
+	/**
 	 * Check and save the first form creation time stamp.
 	 * If not already saved.
 	 *
@@ -1049,6 +1177,10 @@ class Admin {
 			// Default confirmation message HTML (icon + heading + text) used as
 			// the initial React state before the settings API response arrives.
 			'default_confirmation_message' => Global_Settings::get_default_confirmation_message(),
+			// Latest form still on the default Thank You message — powers the
+			// dashboard prompt (#3030). Empty when there is nothing to nudge about.
+			'thankyou_prompt_forms'        => self::get_thankyou_prompt_forms(),
+			'thankyou_prompt_nonce'        => wp_create_nonce( 'wp_rest' ),
 			'payments'                     => apply_filters(
 				'srfm_admin_localize_payments_data',
 				[

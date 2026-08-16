@@ -1413,6 +1413,19 @@ class Rest_Api {
 					'callback'            => [ Field_Mapping::get_instance(), 'generate_gutenberg_fields_from_questions' ],
 					'permission_callback' => [ Helper::class, 'get_items_permissions_check' ],
 				],
+				// Dismiss the dashboard "personalise your Thank You message" prompt
+				// for a form (#3030). Per-form capability is re-checked in the handler.
+				'dismiss-thankyou-prompt'   => [
+					'methods'             => 'POST',
+					'callback'            => [ \SRFM\Admin\Admin::get_instance(), 'dismiss_thankyou_prompt' ],
+					'permission_callback' => [ Helper::class, 'get_items_permissions_check' ],
+					'args'                => [
+						'form_id' => [
+							'required'          => true,
+							'sanitize_callback' => 'absint',
+						],
+					],
+				],
 				// This route is used to initiate auth process when user tries to authenticate on billing portal.
 				'initiate-auth'             => [
 					'methods'             => 'GET',
