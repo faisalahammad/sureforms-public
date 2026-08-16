@@ -323,11 +323,26 @@ class Admin {
 		);
 
 		$prompts = [];
+		$now     = time();
 
 		foreach ( $query->posts as $form_id ) {
 			$form_id = (int) $form_id;
 
-			if ( ! current_user_can( 'edit_post', $form_id ) || ! self::is_default_confirmation_message( $form_id ) ) {
+			if ( ! current_user_can( 'edit_post', $form_id ) ) {
+				continue;
+			}
+
+			$steps = [
+				// A destination for replies: an enabled notification with a recipient.
+				'replies'  => ! self::form_has_reply_destination( $form_id ),
+				// The thank-you message is still the shipped default.
+				'thankyou' => self::is_default_confirmation_message( $form_id ),
+				// The form is not embedded on any published page or post.
+				'page'     => ! self::form_is_embedded( $form_id ),
+			];
+
+			// Nothing left to finish — no card for this form.
+			if ( ! $steps['replies'] && ! $steps['thankyou'] && ! $steps['page'] ) {
 				continue;
 			}
 
@@ -337,18 +352,85 @@ class Admin {
 				continue;
 			}
 
+			$created  = get_post_time( 'U', true, $form_id );
+			$days_ago = is_int( $created ) ? (int) floor( ( $now - $created ) / DAY_IN_SECONDS ) : 0;
+
 			$prompts[] = [
-				'id'       => $form_id,
-				'title'    => get_the_title( $form_id ),
-				// The editor reads srfm_focus to open the Thank You message panel.
-				'edit_url' => add_query_arg( 'srfm_focus', 'thankyou', $edit_link ),
+				'id'           => $form_id,
+				'title'        => get_the_title( $form_id ),
+				'days_ago'     => max( 0, $days_ago ),
+				'steps'        => $steps,
+				'edit_url'     => $edit_link,
+				// The editor reads srfm_focus to open the matching settings panel.
+				'replies_url'  => add_query_arg( 'srfm_focus', 'notifications', $edit_link ),
+				'thankyou_url' => add_query_arg( 'srfm_focus', 'thankyou', $edit_link ),
+				// Where "Add to a page" sends the user: a fresh page to embed into.
+				'page_url'     => admin_url( 'post-new.php?post_type=page' ),
 			];
 
-			// One prompt is enough — surface only the latest such form.
+			// One card is enough — surface only the latest form needing setup.
 			break;
 		}
 
 		return $prompts;
+	}
+
+	/**
+	 * Whether a form is embedded on at least one published page or post.
+	 *
+	 * A bounded LIKE over published content matches the two embed forms SureForms
+	 * emits — the `srfm/form` block (`"id":N`) and the `[sureforms id="N"]`
+	 * shortcode — stopping at the first hit. Heuristic by design: errs toward
+	 * "embedded" so the card never nags about a form that is already placed.
+	 *
+	 * @param int $form_id Form post ID.
+	 *
+	 * @since x.x.x
+	 * @return bool
+	 */
+	public static function form_is_embedded( $form_id ) {
+		global $wpdb;
+
+		$form_id = (int) $form_id;
+
+		$block_like     = '%' . $wpdb->esc_like( 'srfm/form' ) . '%' . $wpdb->esc_like( '"id":' . $form_id ) . '%';
+		$shortcode_like = '%' . $wpdb->esc_like( '[sureforms id="' . $form_id . '"' ) . '%';
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded existence check for the dashboard setup card; no core API expresses a reverse "which pages embed form N" lookup.
+		$found = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT ID FROM {$wpdb->posts} WHERE post_status = 'publish' AND post_type IN ( 'post', 'page' ) AND ( post_content LIKE %s OR post_content LIKE %s ) LIMIT 1",
+				$block_like,
+				$shortcode_like
+			)
+		);
+
+		return ! empty( $found );
+	}
+
+	/**
+	 * Whether a form has somewhere to send replies (an enabled email notification
+	 * with a non-empty recipient).
+	 *
+	 * @param int $form_id Form post ID.
+	 *
+	 * @since x.x.x
+	 * @return bool
+	 */
+	public static function form_has_reply_destination( $form_id ) {
+		$notifications = get_post_meta( (int) $form_id, '_srfm_email_notification', true );
+
+		if ( ! is_array( $notifications ) ) {
+			return false;
+		}
+
+		foreach ( $notifications as $notification ) {
+			if ( is_array( $notification ) && ! empty( $notification['status'] ) && ! empty( $notification['email_to'] ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**
