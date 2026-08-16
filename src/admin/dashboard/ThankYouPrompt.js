@@ -65,9 +65,6 @@ const ThankYouPrompt = () => {
 						__( 'replies have nowhere to go', 'sureforms' )
 					);
 				}
-				if ( steps.page ) {
-					clauses.push( __( "the form isn't on a page", 'sureforms' ) );
-				}
 				if ( steps.thankyou ) {
 					clauses.push(
 						__(
@@ -155,51 +152,31 @@ const ThankYouPrompt = () => {
 									{ __( 'Edit form', 'sureforms' ) }
 								</Button>
 
-								{ steps.replies && (
-									<Button
-										variant="link"
-										size="sm"
-										onClick={ () =>
-											window.location.assign(
-												form.replies_url
-											)
-										}
-									>
-										{ __(
-											'Set where replies go',
-											'sureforms'
-										) }
-									</Button>
-								) }
-								{ steps.thankyou && (
-									<Button
-										variant="link"
-										size="sm"
-										onClick={ () =>
-											window.location.assign(
-												form.thankyou_url
-											)
-										}
-									>
-										{ __(
-											'Edit the thank-you message',
-											'sureforms'
-										) }
-									</Button>
-								) }
-								{ steps.page && (
-									<Button
-										variant="link"
-										size="sm"
-										onClick={ () =>
-											window.location.assign(
-												form.page_url
-											)
-										}
-									>
-										{ __( 'Add to a page', 'sureforms' ) }
-									</Button>
-								) }
+								<Button
+									variant="link"
+									size="sm"
+									onClick={ () =>
+										window.location.assign(
+											form.replies_url
+										)
+									}
+								>
+									{ __( 'Set where replies go', 'sureforms' ) }
+								</Button>
+								<Button
+									variant="link"
+									size="sm"
+									onClick={ () =>
+										window.location.assign(
+											form.thankyou_url
+										)
+									}
+								>
+									{ __(
+										'Edit the thank-you message',
+										'sureforms'
+									) }
+								</Button>
 							</div>
 						</div>
 					</div>

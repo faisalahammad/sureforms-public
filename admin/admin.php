@@ -337,12 +337,10 @@ class Admin {
 				'replies'  => ! self::form_has_reply_destination( $form_id ),
 				// The thank-you message is still the shipped default.
 				'thankyou' => self::is_default_confirmation_message( $form_id ),
-				// The form is not embedded on any published page or post.
-				'page'     => ! self::form_is_embedded( $form_id ),
 			];
 
 			// Nothing left to finish — no card for this form.
-			if ( ! $steps['replies'] && ! $steps['thankyou'] && ! $steps['page'] ) {
+			if ( ! $steps['replies'] && ! $steps['thankyou'] ) {
 				continue;
 			}
 
@@ -364,8 +362,6 @@ class Admin {
 				// The editor reads srfm_focus to open the matching settings panel.
 				'replies_url'  => add_query_arg( 'srfm_focus', 'notifications', $edit_link ),
 				'thankyou_url' => add_query_arg( 'srfm_focus', 'thankyou', $edit_link ),
-				// Where "Add to a page" sends the user: a fresh page to embed into.
-				'page_url'     => admin_url( 'post-new.php?post_type=page' ),
 			];
 
 			// One card is enough — surface only the latest form needing setup.
@@ -373,39 +369,6 @@ class Admin {
 		}
 
 		return $prompts;
-	}
-
-	/**
-	 * Whether a form is embedded on at least one published page or post.
-	 *
-	 * A bounded LIKE over published content matches the two embed forms SureForms
-	 * emits — the `srfm/form` block (`"id":N`) and the `[sureforms id="N"]`
-	 * shortcode — stopping at the first hit. Heuristic by design: errs toward
-	 * "embedded" so the card never nags about a form that is already placed.
-	 *
-	 * @param int $form_id Form post ID.
-	 *
-	 * @since x.x.x
-	 * @return bool
-	 */
-	public static function form_is_embedded( $form_id ) {
-		global $wpdb;
-
-		$form_id = (int) $form_id;
-
-		$block_like     = '%' . $wpdb->esc_like( 'srfm/form' ) . '%' . $wpdb->esc_like( '"id":' . $form_id ) . '%';
-		$shortcode_like = '%' . $wpdb->esc_like( '[sureforms id="' . $form_id . '"' ) . '%';
-
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded existence check for the dashboard setup card; no core API expresses a reverse "which pages embed form N" lookup.
-		$found = $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT ID FROM {$wpdb->posts} WHERE post_status = 'publish' AND post_type IN ( 'post', 'page' ) AND ( post_content LIKE %s OR post_content LIKE %s ) LIMIT 1",
-				$block_like,
-				$shortcode_like
-			)
-		);
-
-		return ! empty( $found );
 	}
 
 	/**
