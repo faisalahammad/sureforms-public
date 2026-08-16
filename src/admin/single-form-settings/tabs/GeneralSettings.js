@@ -4,7 +4,7 @@ import { useDeviceType } from '@Controls/getPreviewType';
 import { ToggleControl } from '@wordpress/components';
 import { useDispatch, useSelect } from '@wordpress/data';
 import { store as editorStore } from '@wordpress/editor';
-import { useEffect, useState } from '@wordpress/element';
+import { useEffect, useRef, useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import { applyFilters } from '@wordpress/hooks';
 
@@ -40,6 +40,10 @@ function GeneralSettings( props ) {
 	const root = document.documentElement.querySelector( 'body' );
 	const [ isOpen, setOpen ] = useState( false );
 	const [ popupTab, setPopupTab ] = useState( false );
+	// Mirrors `isOpen` for the deep-link poll below, which reads it from a
+	// long-lived interval closure that would otherwise see a stale value.
+	const isOpenRef = useRef( isOpen );
+	isOpenRef.current = isOpen;
 	const [ hasValidationErrors, setHasValidationErrors ] = useState( false );
 
 	const closeModal = () => {
@@ -270,27 +274,45 @@ function GeneralSettings( props ) {
 		// settings panels during initial load and the listener re-registers on
 		// every meta change, so a single dispatch can miss it, and the Force UI
 		// dialog's opacity fade-in can stall when toggled amid that churn. Poll
-		// every 300ms across the load window: dispatch the open request only while
-		// the dialog isn't up yet (so it re-opens if a load-time re-render drops
-		// it, without needlessly re-firing once open), and force the overlay
-		// visible while it is, so the dialog reliably lands open and painted.
+		// every 300ms: dispatch the open request until the dialog appears, then
+		// stop dispatching and just hold the overlay visible.
+		//
+		// Once it has opened, halt the poll the moment `isOpen` goes back to false
+		// — that is the user closing it (Esc / backdrop / ✕), which flips state on
+		// this same live mount. A load-time remount instead tears this effect down
+		// (clearing the interval) and re-runs it fresh on the new mount, so churn
+		// still reopens while a deliberate close stays closed. Give up after the
+		// load window if it never opened so the interval can't run indefinitely.
 		let elapsed = 0;
+		let opened = false;
 		const ensureOpen = setInterval( () => {
 			elapsed += 300;
 
-			const panel = document.querySelector( '.srfm-dialog-panel' );
-			if ( panel ) {
-				const overlay = panel.closest( '.fixed.inset-0' );
+			// Dialog is open on this mount: mark it opened and hold the overlay
+			// painted (the fade-in can stall during load), then wait.
+			if ( isOpenRef.current ) {
+				opened = true;
+				const panel = document.querySelector( '.srfm-dialog-panel' );
+				const overlay = panel?.closest( '.fixed.inset-0' );
 				if ( overlay ) {
 					overlay.style.opacity = '1';
 				}
-			} else {
-				window.dispatchEvent(
-					new CustomEvent( 'srfm-open-form-settings', {
-						detail: { tabId },
-					} )
-				);
+				return;
 			}
+
+			// It was open and is now closed on this same live mount — the user
+			// dismissed it (✕ / Esc / backdrop). Stop; do not reopen.
+			if ( opened ) {
+				clearInterval( ensureOpen );
+				return;
+			}
+
+			// Not open yet — keep asking until the listener catches it.
+			window.dispatchEvent(
+				new CustomEvent( 'srfm-open-form-settings', {
+					detail: { tabId },
+				} )
+			);
 
 			if ( elapsed >= 12000 ) {
 				clearInterval( ensureOpen );
