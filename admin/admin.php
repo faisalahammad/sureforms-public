@@ -2468,7 +2468,7 @@ JS;
 
 		$progress = sprintf(
 			/* translators: 1: form title, 2: completed step count, 3: total step count. */
-			__( '“%1$s” is %2$d of %3$d steps done', 'sureforms' ),
+			__( '%1$s is %2$d of %3$d steps done', 'sureforms' ),
 			$card['title'],
 			$card['done_count'],
 			$card['total']
