@@ -2482,7 +2482,6 @@ JS;
 				<?php foreach ( $rows as $row ) { ?>
 					<?php $done = ! empty( $steps[ $row['key'] ] ); ?>
 					<li class="srfm-setup-checklist__step<?php echo $done ? ' is-done' : ''; ?>">
-						<span class="srfm-setup-checklist__status"><?php echo esc_html( $done ? __( 'Done', 'sureforms' ) : __( 'To do', 'sureforms' ) ); ?></span>
 						<span class="srfm-setup-checklist__label"><?php echo esc_html( $row['label'] ); ?></span>
 						<?php if ( ! $done && ! empty( $row['cta'] ) ) { ?>
 							<?php if ( ! empty( $row['is_embed'] ) ) { ?>
@@ -2538,10 +2537,6 @@ JS;
 .srfm-setup-checklist__step { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; }
 .srfm-setup-checklist__step + .srfm-setup-checklist__step { margin-top: 6px; }
 .srfm-setup-checklist__step:not(.is-done) { background: #f6f7f7; }
-.srfm-setup-checklist__status { flex: 0 0 auto; font-size: 14px; font-weight: 600; }
-.srfm-setup-checklist__status::after { content: ' \2014'; font-weight: 400; color: #787c82; }
-.srfm-setup-checklist__step:not(.is-done) .srfm-setup-checklist__status { color: #d54e21; }
-.srfm-setup-checklist__step.is-done .srfm-setup-checklist__status { color: #16a34a; }
 .srfm-setup-checklist__label { flex: 1 1 auto; font-size: 14px; color: #1e1e1e; }
 .srfm-setup-checklist__step.is-done .srfm-setup-checklist__label { color: #787c82; }
 .srfm-setup-checklist__cta { margin-left: auto; border: 0; background: transparent; padding: 0; font-size: 14px; font-weight: 600; color: #d54e21; text-decoration: underline; cursor: pointer; }
