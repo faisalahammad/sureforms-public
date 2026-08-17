@@ -144,9 +144,9 @@ class Admin {
 		add_action( 'admin_notices', [ $this, 'display_srfm_rating_notice' ] );
 		add_action( 'admin_notices', [ $this, 'display_srfm_getting_started_notice' ] );
 
-		// "Finish setting up" prompt, shown as a notice on the WP dashboard (#3030).
+		// "Finish setting up" prompt, shown as an Astra Notices admin notice on
+		// every admin screen except the dashboard (#3030).
 		add_action( 'admin_notices', [ $this, 'render_thankyou_prompt_notice' ] );
-		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_thankyou_prompt_assets' ] );
 
 		/**
 		 * Suppress foreign (third-party) admin notices on SureForms admin screens.
@@ -252,13 +252,6 @@ class Admin {
 	}
 
 	/**
-	 * Post meta flag: the "personalise your Thank You message" prompt was dismissed.
-	 *
-	 * @since x.x.x
-	 */
-	public const THANKYOU_PROMPT_DISMISSED_META = '_srfm_thankyou_prompt_dismissed';
-
-	/**
 	 * Whether a form's confirmation message is still the shipped default.
 	 *
 	 * Compared on tag-stripped, whitespace-collapsed text rather than raw HTML:
@@ -328,6 +321,10 @@ class Admin {
 			return [];
 		}
 
+		// Only forms created from an Astra Sites starter template — those carry the
+		// `_astra_sites_imported_post` marker Astra Sites stamps on imported posts.
+		// Dismissal is handled per-form by the Astra Notices library (via the
+		// per-form notice id), so this only needs the newest incomplete form.
 		$query = new \WP_Query(
 			[
 				'post_type'      => SRFM_FORMS_POST_TYPE,
@@ -337,10 +334,10 @@ class Admin {
 				'order'          => 'DESC',
 				'fields'         => 'ids',
 				'no_found_rows'  => true,
-				'meta_query'     => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded to 10 recent forms; the prompt is dashboard-only.
+				'meta_query'     => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded to 10 recent forms; admin-notice only.
 					[
-						'key'     => self::THANKYOU_PROMPT_DISMISSED_META,
-						'compare' => 'NOT EXISTS',
+						'key'     => '_astra_sites_imported_post',
+						'compare' => 'EXISTS',
 					],
 				],
 			]
@@ -423,30 +420,6 @@ class Admin {
 	}
 
 	/**
-	 * REST handler: dismiss the Thank You message prompt for a form (#3030).
-	 *
-	 * Capability is re-checked against this specific form here, not just the
-	 * route's generic permission callback, so a user can only dismiss the prompt
-	 * on a form they may edit.
-	 *
-	 * @param \WP_REST_Request<array<string,mixed>> $request Request.
-	 *
-	 * @since x.x.x
-	 * @return \WP_REST_Response|\WP_Error
-	 */
-	public function dismiss_thankyou_prompt( $request ) {
-		$form_id = absint( $request->get_param( 'form_id' ) );
-
-		if ( $form_id <= 0 || ! defined( 'SRFM_FORMS_POST_TYPE' ) || SRFM_FORMS_POST_TYPE !== get_post_type( $form_id ) || ! current_user_can( 'edit_post', $form_id ) ) {
-			return new \WP_Error( 'srfm_thankyou_prompt_forbidden', __( 'You are not allowed to dismiss this prompt.', 'sureforms' ), [ 'status' => 403 ] );
-		}
-
-		update_post_meta( $form_id, self::THANKYOU_PROMPT_DISMISSED_META, true );
-
-		return new \WP_REST_Response( [ 'success' => true ], 200 );
-	}
-
-	/**
 	 * Join clause fragments as "a", "a and b", or "a, b, and c".
 	 *
 	 * @param array<int,string> $clauses Clause fragments.
@@ -471,24 +444,26 @@ class Admin {
 	}
 
 	/**
-	 * Render the "Finish setting up" prompt as a dashboard notice (#3030).
+	 * Register the "Finish setting up" prompt as an Astra Notices admin notice (#3030).
 	 *
-	 * Shown only on the main WordPress dashboard, for the newest form the current
-	 * user can edit that still has an unfinished step (default thank-you message or
-	 * no reply destination). The ✕ persists a per-form dismissal through the REST
-	 * endpoint wired in enqueue_thankyou_prompt_assets().
+	 * Hooked to admin_notices so it registers before the Astra Notices library
+	 * renders (priority 30). Shown on every admin screen EXCEPT the main dashboard,
+	 * for the newest form the current user can edit that still has an unfinished
+	 * step (default thank-you message or no reply destination). The notice id is
+	 * per-form, so the library's built-in ✕ dismissal persists per form.
 	 *
 	 * @since x.x.x
 	 * @return void
 	 */
 	public function render_thankyou_prompt_notice() {
-		if ( ! Helper::current_user_can() ) {
+		if ( ! Helper::current_user_can() || ! class_exists( 'Astra_Notices' ) ) {
 			return;
 		}
 
+		// Everywhere in wp-admin except the main dashboard.
 		$screen = get_current_screen();
 
-		if ( ! $screen || 'dashboard' !== $screen->id ) {
+		if ( $screen && 'dashboard' === $screen->id ) {
 			return;
 		}
 
@@ -498,7 +473,111 @@ class Admin {
 			return;
 		}
 
-		$form     = $prompts[0];
+		$form      = $prompts[0];
+		$notice_id = 'srfm-thankyou-prompt-' . (int) $form['id'];
+
+		\Astra_Notices::add_notice(
+			[
+				'id'                         => $notice_id,
+				'type'                       => 'info',
+				'message'                    => self::build_thankyou_notice_markup( $form ),
+				'class'                      => 'srfm-thankyou-notice',
+				'is_dismissible'             => true,
+				'display-with-other-notices' => true,
+			]
+		);
+
+		// The message is wp_kses_post'd by the library, so the brand-orange styling
+		// is printed through the notice's pre-markup hook instead of inline.
+		add_action( 'astra_notice_before_markup_' . $notice_id, [ $this, 'print_thankyou_notice_styles' ] );
+
+		// Track clicks on the CTAs and the dismiss ✕ via the shared notice-response
+		// endpoint, enqueued only when the notice actually renders.
+		add_action( 'astra_notice_after_markup_' . $notice_id, [ $this, 'enqueue_thankyou_notice_tracking' ] );
+	}
+
+	/**
+	 * Enqueue the click-tracking for the Thank You notice (#3030).
+	 *
+	 * Sends an analytics beacon to the shared `srfm_notice_response` AJAX handler
+	 * when a CTA or the dismiss ✕ is clicked. Uses `keepalive` so the beacon
+	 * survives the navigation the CTA links trigger.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function enqueue_thankyou_notice_tracking() {
+		if ( wp_script_is( 'srfm-thankyou-notice-track', 'enqueued' ) ) {
+			return;
+		}
+
+		wp_register_script( 'srfm-thankyou-notice-track', '', [], SRFM_VER, true );
+		wp_enqueue_script( 'srfm-thankyou-notice-track' );
+
+		wp_localize_script(
+			'srfm-thankyou-notice-track',
+			'srfmThankYouNoticeTrack',
+			[
+				'ajaxurl' => admin_url( 'admin-ajax.php' ),
+				'nonce'   => wp_create_nonce( 'srfm_notice_response' ),
+			]
+		);
+
+		$inline_script = <<<'JS'
+( function () {
+	const cfg = window.srfmThankYouNoticeTrack || {};
+	const wrap = document.querySelector( '.srfm-thankyou-notice' );
+	if ( ! wrap ) {
+		return;
+	}
+	const noticeId = wrap.id || '';
+	const send = function ( button ) {
+		const body = new URLSearchParams();
+		body.append( 'action', 'srfm_notice_response' );
+		body.append( 'nonce', cfg.nonce );
+		body.append( 'notice_id', noticeId );
+		body.append( 'button', button );
+		fetch( cfg.ajaxurl, {
+			method: 'POST',
+			credentials: 'same-origin',
+			keepalive: true,
+			headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+			body: body.toString(),
+		} ).catch( function () {} );
+	};
+	[
+		[ '.srfm-ty-edit-form', 'edit_form' ],
+		[ '.srfm-ty-set-replies', 'set_replies' ],
+		[ '.srfm-ty-edit-thankyou', 'edit_thankyou' ],
+	].forEach( function ( pair ) {
+		const el = wrap.querySelector( pair[ 0 ] );
+		if ( el ) {
+			el.addEventListener( 'click', function () {
+				send( pair[ 1 ] );
+			} );
+		}
+	} );
+	const dismiss = wrap.querySelector( '.notice-dismiss' );
+	if ( dismiss ) {
+		dismiss.addEventListener( 'click', function () {
+			send( 'dismissed' );
+		} );
+	}
+}() );
+JS;
+
+		wp_add_inline_script( 'srfm-thankyou-notice-track', $inline_script );
+	}
+
+	/**
+	 * Build the Thank You notice's inner markup (title, sentence, action buttons).
+	 *
+	 * @param array<string,mixed> $form Prompt payload from get_thankyou_prompt_forms().
+	 *
+	 * @since x.x.x
+	 * @return string
+	 */
+	private static function build_thankyou_notice_markup( $form ) {
 		$steps    = isset( $form['steps'] ) && is_array( $form['steps'] ) ? $form['steps'] : [];
 		$days_ago = isset( $form['days_ago'] ) ? (int) $form['days_ago'] : 0;
 
@@ -524,107 +603,56 @@ class Admin {
 			$time_text,
 			self::join_clauses( $clauses )
 		);
+
+		ob_start();
 		?>
-		<div class="notice notice-info srfm-thankyou-notice" id="srfm-thankyou-notice">
-			<p class="srfm-thankyou-notice__title">
-				<?php
-				echo esc_html(
-					sprintf(
-						/* translators: %s: form name. */
-						__( 'Finish setting up “%s”', 'sureforms' ),
-						$form['title']
-					)
-				);
-				?>
-			</p>
-			<p class="srfm-thankyou-notice__text"><?php echo esc_html( $sentence ); ?></p>
-			<p class="srfm-thankyou-notice__actions">
-				<a class="button button-primary" href="<?php echo esc_url( $form['edit_url'] ); ?>"><?php esc_html_e( 'Edit form', 'sureforms' ); ?></a>
-				<a class="button" href="<?php echo esc_url( $form['replies_url'] ); ?>"><?php esc_html_e( 'Set where replies go', 'sureforms' ); ?></a>
-				<a class="button" href="<?php echo esc_url( $form['thankyou_url'] ); ?>"><?php esc_html_e( 'Edit the thank-you message', 'sureforms' ); ?></a>
-			</p>
-			<button type="button" class="notice-dismiss" id="srfm-thankyou-notice-dismiss">
-				<span class="screen-reader-text"><?php esc_html_e( 'Dismiss this notice.', 'sureforms' ); ?></span>
-			</button>
-		</div>
+		<p class="srfm-thankyou-notice__title">
+			<?php
+			echo esc_html(
+				sprintf(
+					/* translators: %s: form name. */
+					__( 'Finish setting up “%s”', 'sureforms' ),
+					$form['title']
+				)
+			);
+			?>
+		</p>
+		<p class="srfm-thankyou-notice__text"><?php echo esc_html( $sentence ); ?></p>
+		<p class="srfm-thankyou-notice__actions">
+			<a class="button button-primary srfm-ty-edit-form" href="<?php echo esc_url( $form['edit_url'] ); ?>"><?php esc_html_e( 'Edit form', 'sureforms' ); ?></a>
+			<a class="button srfm-ty-set-replies" href="<?php echo esc_url( $form['replies_url'] ); ?>"><?php esc_html_e( 'Set where replies go', 'sureforms' ); ?></a>
+			<a class="button srfm-ty-edit-thankyou" href="<?php echo esc_url( $form['thankyou_url'] ); ?>"><?php esc_html_e( 'Edit the thank-you message', 'sureforms' ); ?></a>
+		</p>
 		<?php
+		return (string) ob_get_clean();
 	}
 
 	/**
-	 * Enqueue the Thank You dashboard notice's styles and dismiss behavior (#3030).
+	 * Print the Thank You notice's brand-orange styling (#3030).
 	 *
-	 * Mirrors the plugin's other dashboard-widget assets: an inline-only handle
-	 * carries the CSS and the dismiss handler, with the REST URL, nonce and form id
-	 * passed via wp_localize_script rather than printed into the markup.
-	 *
-	 * @param string $hook_suffix Current admin page hook suffix.
+	 * Fired via astra_notice_before_markup_{id} so it lands right before the notice
+	 * and only when the notice actually renders.
 	 *
 	 * @since x.x.x
 	 * @return void
 	 */
-	public function enqueue_thankyou_prompt_assets( $hook_suffix ) {
-		if ( 'index.php' !== $hook_suffix || ! Helper::current_user_can() ) {
-			return;
-		}
-
-		$prompts = self::get_thankyou_prompt_forms();
-
-		if ( empty( $prompts ) ) {
-			return;
-		}
-
-		$form = $prompts[0];
-
-		$css = <<<'CSS'
-.srfm-thankyou-notice { position: relative; padding: 12px 38px 12px 12px; border-left-color: #D54407; }
-.srfm-thankyou-notice__title { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: #1d2327; }
-.srfm-thankyou-notice__text { margin: 0 0 10px; color: #50575e; }
-.srfm-thankyou-notice__actions { margin: 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.srfm-thankyou-notice .button-primary { background: #D54407; border-color: #D54407; color: #fff; box-shadow: none; text-shadow: none; }
-.srfm-thankyou-notice .button-primary:hover, .srfm-thankyou-notice .button-primary:focus { background: #C83B00; border-color: #C83B00; color: #fff; box-shadow: none; }
-.srfm-thankyou-notice .button:not(.button-primary) { background: transparent; border-color: transparent; color: #D54407; box-shadow: none; }
-.srfm-thankyou-notice .button:not(.button-primary):hover, .srfm-thankyou-notice .button:not(.button-primary):focus { background: transparent; border-color: transparent; color: #C83B00; box-shadow: none; }
-.srfm-thankyou-notice .button-primary:focus { outline: 2px solid #D54407; outline-offset: 1px; }
-CSS;
-
-		wp_register_style( 'srfm-thankyou-notice', false, [], SRFM_VER );
-		wp_enqueue_style( 'srfm-thankyou-notice' );
-		wp_add_inline_style( 'srfm-thankyou-notice', $css );
-
-		wp_register_script( 'srfm-thankyou-notice', '', [], SRFM_VER, true );
-		wp_enqueue_script( 'srfm-thankyou-notice' );
-
-		wp_localize_script(
-			'srfm-thankyou-notice',
-			'srfmThankYouNotice',
-			[
-				'restUrl' => esc_url_raw( rest_url( 'sureforms/v1/dismiss-thankyou-prompt' ) ),
-				'nonce'   => wp_create_nonce( 'wp_rest' ),
-				'formId'  => $form['id'],
-			]
-		);
-
-		$inline_script = <<<'JS'
-( function () {
-	const cfg = window.srfmThankYouNotice || {};
-	const notice = document.getElementById( 'srfm-thankyou-notice' );
-	const dismiss = document.getElementById( 'srfm-thankyou-notice-dismiss' );
-	if ( ! notice || ! dismiss ) {
-		return;
-	}
-	dismiss.addEventListener( 'click', function () {
-		fetch( cfg.restUrl, {
-			method: 'POST',
-			credentials: 'same-origin',
-			headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': cfg.nonce },
-			body: JSON.stringify( { form_id: cfg.formId } ),
-		} ).catch( function () {} );
-		notice.remove();
-	} );
-}() );
-JS;
-
-		wp_add_inline_script( 'srfm-thankyou-notice', $inline_script );
+	public function print_thankyou_notice_styles() {
+		?>
+		<style id="srfm-thankyou-notice-styles">
+			.srfm-thankyou-notice.notice { border-left-color: #D54407; }
+			/* The library lays the container out as a flex row; stack our blocks. */
+			.srfm-thankyou-notice .astra-notice-container { display: block; padding: 4px 0; }
+			.srfm-thankyou-notice .srfm-thankyou-notice__title { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: #1d2327; }
+			.srfm-thankyou-notice .srfm-thankyou-notice__text { margin: 0 0 10px; color: #50575e; }
+			.srfm-thankyou-notice .srfm-thankyou-notice__actions { margin: 12px 0 2px; display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; }
+			.srfm-thankyou-notice .button-primary { background: #D54407; border-color: #D54407; color: #fff; box-shadow: none; text-shadow: none; }
+			.srfm-thankyou-notice .button-primary:hover, .srfm-thankyou-notice .button-primary:focus { background: #C83B00; border-color: #C83B00; color: #fff; box-shadow: none; }
+			.srfm-thankyou-notice .button:not(.button-primary) { background: transparent; border-color: transparent; color: #D54407; box-shadow: none; }
+			.srfm-thankyou-notice .button:not(.button-primary):hover, .srfm-thankyou-notice .button:not(.button-primary):focus { background: transparent; border-color: transparent; color: #C83B00; box-shadow: none; }
+			.srfm-thankyou-notice .srfm-ty-edit-thankyou { padding: 0; }
+			.srfm-thankyou-notice .button-primary:focus { outline: 2px solid #D54407; outline-offset: 1px; }
+		</style>
+		<?php
 	}
 
 	/**
@@ -2148,6 +2176,25 @@ JS;
 
 		$notice_id = isset( $_POST['notice_id'] ) ? sanitize_text_field( wp_unslash( $_POST['notice_id'] ) ) : '';
 		$button    = isset( $_POST['button'] ) ? sanitize_text_field( wp_unslash( $_POST['button'] ) ) : '';
+
+		// The "Finish setting up" prompt (#3030) uses a per-form notice id, so it
+		// can't be an exact key in the map below — match it by prefix and validate
+		// the button against its own fixed set.
+		if ( 0 === strpos( $notice_id, 'srfm-thankyou-prompt-' ) ) {
+			$thankyou_events = [
+				'edit_form'     => 'thankyou_notice_edit_form',
+				'set_replies'   => 'thankyou_notice_set_replies',
+				'edit_thankyou' => 'thankyou_notice_edit_thankyou',
+				'dismissed'     => 'thankyou_notice_dismiss',
+			];
+
+			if ( ! isset( $thankyou_events[ $button ] ) ) {
+				wp_send_json_error( [ 'message' => __( 'Invalid parameters.', 'sureforms' ) ], 400 );
+			}
+
+			Analytics::events()->track( $thankyou_events[ $button ], $button );
+			wp_send_json_success();
+		}
 
 		$valid = [
 			'srfm-getting-started-notice' => [
