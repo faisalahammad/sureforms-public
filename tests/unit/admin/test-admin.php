@@ -935,4 +935,73 @@ class Test_Getting_Started_Notice extends TestCase {
 			'A null callback should not be recognised as owned.'
 		);
 	}
+
+	/**
+	 * The first-form-created flag resolves to a boolean.
+	 */
+	public function test_is_first_form_created() {
+		$this->assertIsBool( Admin::is_first_form_created() );
+	}
+
+	/**
+	 * A form with no stored confirmation is not the shipped default (#3030).
+	 */
+	public function test_is_default_confirmation_message() {
+		// No confirmation meta → nothing to compare → not the default.
+		$this->assertFalse( Admin::is_default_confirmation_message( 0 ) );
+		$this->assertIsBool( Admin::is_default_confirmation_message( 999999 ) );
+	}
+
+	/**
+	 * A form with no email notification has no reply destination (#3030).
+	 */
+	public function test_form_has_reply_destination() {
+		$this->assertFalse( Admin::form_has_reply_destination( 0 ) );
+		$this->assertIsBool( Admin::form_has_reply_destination( 999999 ) );
+	}
+
+	/**
+	 * The Thank You prompt query always returns an array (#3030).
+	 */
+	public function test_get_thankyou_prompt_forms() {
+		$this->assertIsArray( Admin::get_thankyou_prompt_forms() );
+	}
+
+	/**
+	 * The Thank You notice registrar emits nothing when there is no qualifying
+	 * Astra Sites starter-template form (#3030).
+	 */
+	public function test_render_thankyou_prompt_notice() {
+		$admin = Admin::get_instance();
+		$this->assertTrue( method_exists( $admin, 'render_thankyou_prompt_notice' ) );
+
+		ob_start();
+		$admin->render_thankyou_prompt_notice();
+		$output = (string) ob_get_clean();
+
+		// No starter-template form exists in the test DB, so nothing is printed.
+		$this->assertStringNotContainsString( 'srfm-thankyou-notice', $output );
+	}
+
+	/**
+	 * The Thank You notice styling prints the brand accent colour (#3030).
+	 */
+	public function test_print_thankyou_notice_styles() {
+		$admin = Admin::get_instance();
+
+		ob_start();
+		$admin->print_thankyou_notice_styles();
+		$output = (string) ob_get_clean();
+
+		$this->assertStringContainsString( 'srfm-thankyou-notice', $output );
+		$this->assertStringContainsString( '#D54407', $output );
+	}
+
+	/**
+	 * The Thank You notice click-tracking enqueue method exists (#3030).
+	 */
+	public function test_enqueue_thankyou_notice_tracking() {
+		$admin = Admin::get_instance();
+		$this->assertTrue( method_exists( $admin, 'enqueue_thankyou_notice_tracking' ) );
+	}
 }
