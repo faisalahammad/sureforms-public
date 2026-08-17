@@ -984,9 +984,13 @@ class Generate_Form_Markup {
 			// the embedded form. Rendered only for users who can edit THIS form, so
 			// it is fully absent from the DOM for everyone else and, being absolutely
 			// positioned, never affects the layout or submission for regular
-			// visitors. Works for every embed method (block, shortcode, widget,
-			// single) because they all render through this function.
-			self::render_edit_form_button( (int) $id );
+			// visitors. Works for every embed method (block, shortcode, widget)
+			// because they all render through this function. Gated on the same
+			// condition as the `.srfm-form-container` open above, so a zero-block
+			// form (no container) never emits an orphaned, unpositioned pill.
+			if ( '' !== $id && 0 !== $block_count ) {
+				self::render_edit_form_button( (int) $id );
+			}
 
 			// Add preview script for real-time styling updates from block editor.
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- This is a preview context, nonce not required.
@@ -1328,18 +1332,21 @@ class Generate_Form_Markup {
 	 *
 	 * Renders a small pill link overlaid at the top-right of the form container
 	 * (Elementor/Beaver-Builder style) that opens the block editor for this form.
-	 * Being absolutely positioned, it never affects the form's layout. It is
-	 * emitted only for a logged-in user who can edit this specific form, so for
-	 * every other viewer the markup and its styles are entirely absent from the
-	 * DOM and the form layout and submission are untouched.
+	 * Being absolutely positioned, it never affects the form's layout.
 	 *
-	 * Because `get_form_markup()` output is cache-friendly and can be served from a
-	 * shared full-page cache, this response must not be cached once it carries the
-	 * admin-only shortcut: when the pill renders we signal `DONOTCACHEPAGE` so the
-	 * common WordPress page caches skip it. (Edge caches that ignore that constant
-	 * are expected to exclude logged-in users themselves, per the standard WP cache
-	 * contract.) The scoped stylesheet is printed once per request, no matter how
-	 * many forms are embedded on the page.
+	 * Admin-only by construction: the `sureforms_form` CPT registers with
+	 * `map_meta_cap => false`, so `edit_post` collapses to a blanket
+	 * `manage_options` check with no per-post component — an editor never sees the
+	 * pill on any form. For every other viewer the markup and its styles are
+	 * entirely absent from the DOM.
+	 *
+	 * The stylesheet is attached to a registered inline-only handle so `WP_Styles`
+	 * dedupes it by handle (surviving a discarded `the_content` pass, e.g. an SEO
+	 * plugin building `og:description` during `wp_head`) and it survives a strict
+	 * `style-src` CSP. It is not cache-signalled here: the payload is only a
+	 * `wp-admin/post.php?post=N` link an anonymous visitor cannot act on, and a
+	 * `DONOTCACHEPAGE` define from a fragment renderer is both inert on the normal
+	 * (headers-already-sent) path and an irreversible process-global side effect.
 	 *
 	 * @param int $form_id Form post ID.
 	 *
@@ -1349,18 +1356,44 @@ class Generate_Form_Markup {
 	public static function render_edit_form_button( $form_id ) {
 		$form_id = absint( $form_id );
 
-		// Not inside the block editor's own preview (which renders through this
-		// same function over REST): the user is already editing the form there, so
-		// an "edit this form" shortcut would be redundant.
-		if ( defined( 'REST_REQUEST' ) && REST_REQUEST ) {
+		// Only for real SureForms forms — the [sureforms] shortcode accepts any
+		// post ID, and a non-form target would map `edit_post` normally and leak
+		// the pill to an ordinary editor.
+		if ( 0 === $form_id || ! defined( 'SRFM_FORMS_POST_TYPE' ) || SRFM_FORMS_POST_TYPE !== get_post_type( $form_id ) ) {
 			return;
 		}
 
-		// Not on the single-form / Instant Form page, where the form IS the whole
-		// page and the admin bar already links to its editor — the overlay pill
-		// would just be redundant there. It is meant for forms embedded within
-		// other content.
-		if ( defined( 'SRFM_FORMS_POST_TYPE' ) && is_singular( SRFM_FORMS_POST_TYPE ) ) {
+		// Capability gate first, before the suppression filter, so no work is done
+		// for the anonymous visitors who make up almost every page view.
+		if ( ! current_user_can( 'edit_post', $form_id ) ) {
+			return;
+		}
+
+		// Contexts where the pill is redundant or wrong:
+		// - the single-form / Instant Form page, where the form IS the whole page
+		// and the admin bar already links to its editor. This is also what
+		// suppresses the block editor's preview — that preview is an iframe to
+		// the form's own permalink (an ordinary front-end request), NOT a REST
+		// render, so `is_singular` is the load-bearing guard there;
+		// - any admin / AJAX / REST / JSON request, or a feed (the markup would
+		// otherwise land inside `content:encoded` CDATA).
+		if (
+			is_singular( SRFM_FORMS_POST_TYPE )
+			|| is_admin()
+			|| wp_doing_ajax()
+			|| wp_is_json_request()
+			|| ( defined( 'REST_REQUEST' ) && REST_REQUEST )
+			|| is_feed()
+		) {
+			return;
+		}
+
+		// Page-builder editor canvases render the form directly (not over REST),
+		// where their own element-edit handles would collide with the pill.
+		if ( class_exists( '\Elementor\Plugin' ) && \Elementor\Plugin::$instance->editor->is_edit_mode() ) {
+			return;
+		}
+		if ( function_exists( 'bricks_is_builder' ) && bricks_is_builder() ) {
 			return;
 		}
 
@@ -1373,13 +1406,6 @@ class Generate_Form_Markup {
 		 * @since x.x.x
 		 */
 		if ( ! apply_filters( 'srfm_show_edit_form_button', true, $form_id ) ) {
-			return;
-		}
-
-		// Capability is checked against this specific form, so an editor only sees
-		// the shortcut on forms they may actually edit. The explicit logged-in
-		// guard documents intent and pairs with the cache-bypass signal below.
-		if ( $form_id <= 0 || ! is_user_logged_in() || ! current_user_can( 'edit_post', $form_id ) ) {
 			return;
 		}
 
@@ -1397,54 +1423,67 @@ class Generate_Form_Markup {
 		 *
 		 * @since x.x.x
 		 */
-		$edit_link = apply_filters( 'srfm_edit_form_button_link', $edit_link, $form_id );
+		$edit_link = Helper::get_string_value( apply_filters( 'srfm_edit_form_button_link', $edit_link, $form_id ) );
 
-		// This response now carries admin-only markup, so keep it out of any shared
-		// full-page cache that would serve it to visitors.
-		if ( ! defined( 'DONOTCACHEPAGE' ) ) {
-			define( 'DONOTCACHEPAGE', true );
-		}
-		if ( ! headers_sent() ) {
-			nocache_headers();
+		if ( '' === $edit_link ) {
+			return;
 		}
 
-		// Print the styles once per request, even with several forms on the page.
-		static $styles_printed = false;
-
-		if ( ! $styles_printed ) {
-			$styles_printed = true;
-			?>
-			<style id="srfm-edit-form-btn-styles">
-				.srfm-form-container { position: relative; }
-				.srfm-edit-form-btn {
-					position: absolute;
-					top: -14px;
-					right: -14px;
-					z-index: 5;
-					display: inline-flex;
-					align-items: center;
-					gap: 6px;
-					padding: 6px 12px;
-					font-size: 13px;
-					font-weight: 500;
-					line-height: 1;
-					color: #1e293b;
-					background: #ffffff;
-					border: 1px solid #e2e8f0;
-					border-radius: 9999px;
-					box-shadow: 0 2px 6px rgba( 0, 0, 0, 0.12 );
-					text-decoration: none;
-				}
-				.srfm-edit-form-btn:hover { border-color: #cbd5e1; color: #0f172a; }
-				.srfm-edit-form-btn svg { width: 14px; height: 14px; }
-			</style>
-			<?php
+		// Registered inline-only handle: WP_Styles dedupes by handle across every
+		// embedded form and prints via print_late_styles() in the footer even when
+		// enqueued this late (during the_content).
+		$style_handle = 'srfm-edit-form-btn';
+		if ( ! wp_style_is( $style_handle, 'registered' ) ) {
+			wp_register_style( $style_handle, false, [], SRFM_VER );
+			wp_add_inline_style( $style_handle, self::get_edit_form_button_css() );
 		}
+		wp_enqueue_style( $style_handle );
 		?>
-		<a class="srfm-edit-form-btn" href="<?php echo esc_url( $edit_link ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php esc_attr_e( 'Edit Form in SureForms', 'sureforms' ); ?>">
+		<a class="srfm-edit-form-btn" href="<?php echo esc_url( $edit_link ); ?>" target="_blank" rel="noopener noreferrer">
 			<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
 			<span><?php esc_html_e( 'Edit Form', 'sureforms' ); ?></span>
+			<span class="screen-reader-text"><?php esc_html_e( '(opens in a new tab)', 'sureforms' ); ?></span>
 		</a>
 		<?php
+	}
+
+	/**
+	 * Stylesheet for the admin "Edit Form" pill (#3029).
+	 *
+	 * `position: relative` on the container is scoped to the `srfm-styling-none`
+	 * case: with default styling on, the shipped CSS already sets it, so a global
+	 * rule here would only risk overriding a site that deliberately set it static.
+	 * Offsets use a small positive inset (`inset-inline-end`) so the pill sits
+	 * inside the box — no mobile horizontal overflow — and is RTL-correct.
+	 *
+	 * @return string
+	 * @since x.x.x
+	 */
+	private static function get_edit_form_button_css() {
+		return '
+		.srfm-form-container.srfm-styling-none { position: relative; }
+		.srfm-edit-form-btn {
+			position: absolute;
+			top: 8px;
+			inset-inline-end: 8px;
+			z-index: 5;
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+			padding: 6px 12px;
+			font-size: 13px;
+			font-weight: 500;
+			line-height: 1;
+			color: #1e293b;
+			background: #ffffff;
+			border: 1px solid #e2e8f0;
+			border-radius: 9999px;
+			box-shadow: 0 2px 6px rgba( 0, 0, 0, 0.12 );
+			text-decoration: none;
+		}
+		.srfm-edit-form-btn:hover { border-color: #cbd5e1; color: #0f172a; }
+		.srfm-edit-form-btn:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+		.srfm-edit-form-btn svg { width: 14px; height: 14px; }
+		';
 	}
 }
