@@ -812,3 +812,18 @@ html[dir="rtl"] body.post-type-sureforms_form {
 .srfm-upgrade-prompt__link:focus {
 	color: #d54407;
 }
+
+/**
+ * WP 7.1 Distraction Free mode.
+ *
+ * SureForms injects its Instant Form button and the header title editor into
+ * core's editor header. When Distraction Free is enabled these should hide
+ * along with core's chrome instead of lingering as floating buttons; toggling
+ * the mode off restores them.
+ */
+.is-distraction-free {
+	.srfm-instant-form-root,
+	.srfm-header-title-input {
+		display: none !important;
+	}
+}

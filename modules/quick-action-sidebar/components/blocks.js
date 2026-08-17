@@ -6,6 +6,10 @@ import { createBlock, getBlockTypes } from '@wordpress/blocks';
 import DraggableBlock from './draggable-block';
 import DragAndDropComponent from './move-up-down';
 
+// Stable reference so `useSelect` doesn't return a fresh empty array on every
+// call when no allowed blocks are resolved, which would trigger needless re-renders.
+const EMPTY_ALLOWED_BLOCKS = [];
+
 const Blocks = ( {
 	defaultAllowedQuickSidebarBlocks,
 	updateDefaultAllowedQuickSidebarBlocks,
@@ -30,7 +34,7 @@ const Blocks = ( {
 			blockInsertionPoint: index,
 			getBlockRootClientId: rootClientId,
 			getSelectedBlockClientId: clientId,
-			getSelectedBlockAllowedBlocks: allowedBlocks || [],
+			getSelectedBlockAllowedBlocks: allowedBlocks || EMPTY_ALLOWED_BLOCKS,
 		};
 	} );
 	const srfmBlocks = blocks.filter( ( block ) => {
