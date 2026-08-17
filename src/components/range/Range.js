@@ -23,7 +23,8 @@ import SRFMHelpText from '@Components/help-text';
 
 const isNumberControlSupported = !! NumberControl;
 
-const Range = ( props ) => {
+const Range = ( rawProps ) => {
+	const props = { ...RANGE_DEFAULTS, ...rawProps };
 	const [ panelNameForHook, setPanelNameForHook ] = useState( null );
 	const panelRef = useRef( null );
 
@@ -243,7 +244,7 @@ const Range = ( props ) => {
 	);
 };
 
-Range.defaultProps = {
+const RANGE_DEFAULTS = {
 	label: __( 'Margin', 'sureforms' ),
 	className: '',
 	allowReset: true,

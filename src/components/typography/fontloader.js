@@ -11,7 +11,8 @@ const statuses = {
 };
 const noop = () => {};
 
-const WebfontLoader = ( props ) => {
+const WebfontLoader = ( rawProps ) => {
+	const props = { ...WEBFONT_LOADER_DEFAULTS, ...rawProps };
 	const [ value, setValue ] = useState( [] );
 
 	const status = undefined;
@@ -99,7 +100,7 @@ WebfontLoader.propTypes = {
 	onStatus: PropTypes.func?.isRequired,
 };
 
-WebfontLoader.defaultProps = {
+const WEBFONT_LOADER_DEFAULTS = {
 	onStatus: noop,
 };
 

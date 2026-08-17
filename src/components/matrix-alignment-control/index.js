@@ -14,10 +14,6 @@ const propTypes = {
 };
 
 // Set the Required Default Values.
-const defaultProps = {
-	label: __( 'Alignment', 'sureforms' ),
-};
-
 // Create the SRFM Control.
 const SRFMMatrixControl = ( props ) => {
 	// Add and remove the CSS on the drop and remove of the component.
@@ -29,7 +25,13 @@ const SRFMMatrixControl = ( props ) => {
 	}, [] );
 
 	// Extract all props.
-	const { label, data, onChange, setAttributes, help = false } = props;
+	const {
+		label = __( 'Alignment', 'sureforms' ),
+		data,
+		onChange,
+		setAttributes,
+		help = false,
+	} = props;
 
 	// Handle the Appropriate
 	const onChangeHandler = ( newValue ) => {
@@ -62,6 +64,5 @@ const SRFMMatrixControl = ( props ) => {
 };
 
 SRFMMatrixControl.propTypes = propTypes;
-SRFMMatrixControl.defaultProps = defaultProps;
 
 export default SRFMMatrixControl;

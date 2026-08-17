@@ -22,7 +22,8 @@ import Separator from '@Components/separator';
 import { applyFilters } from '@wordpress/hooks';
 import SRFMHelpText from '@Components/help-text';
 
-const SRFMNumberControl = ( props ) => {
+const SRFMNumberControl = ( rawProps ) => {
+	const props = { ...SRFM_NUMBER_CONTROL_DEFAULTS, ...rawProps };
 	const [ panelNameForHook, setPanelNameForHook ] = useState( null );
 	const panelRef = useRef( null );
 	// Add and remove the CSS on the drop and remove of the component.
@@ -259,7 +260,7 @@ const SRFMNumberControl = ( props ) => {
 	);
 };
 
-SRFMNumberControl.defaultProps = {
+const SRFM_NUMBER_CONTROL_DEFAULTS = {
 	label: __( 'Margin', 'sureforms' ),
 	className: '',
 	allowReset: true,

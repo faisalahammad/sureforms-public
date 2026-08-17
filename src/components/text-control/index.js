@@ -17,7 +17,8 @@ import SRFMHelpText from '@Components/help-text';
 import { applyFilters } from '@wordpress/hooks';
 import EditorSmartTagList from '@Components/misc/EditorSmartTagList';
 
-const SRFMTextControl = ( props ) => {
+const SRFMTextControl = ( rawProps ) => {
+	const props = { ...SRFM_TEXT_CONTROL_DEFAULTS, ...rawProps };
 	const [ panelNameForHook, setPanelNameForHook ] = useState( null );
 	const panelRef = useRef( null );
 	const [ inputData, setInputData ] = useState( props?.value );
@@ -225,7 +226,7 @@ const SRFMTextControl = ( props ) => {
 	);
 };
 
-SRFMTextControl.defaultProps = {
+const SRFM_TEXT_CONTROL_DEFAULTS = {
 	label: '',
 	type: 'text',
 	className: '',

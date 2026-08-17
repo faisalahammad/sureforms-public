@@ -24,18 +24,13 @@ const propTypes = {
 	help: PropTypes.string,
 };
 
-const defaultProps = {
-	layout: 'inline',
-	onChange: null,
-};
-
 export default function SRFMSelectControl( {
-	layout,
+	layout = 'inline',
 	label,
 	options,
 	data,
 	setAttributes,
-	onChange,
+	onChange = null,
 	help,
 	children,
 } ) {
@@ -125,4 +120,3 @@ export default function SRFMSelectControl( {
 }
 
 SRFMSelectControl.propTypes = propTypes;
-SRFMSelectControl.defaultProps = defaultProps;
