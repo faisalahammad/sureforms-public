@@ -8,7 +8,6 @@ import QuickAccessTab from './QuickAccessTab';
 import UpgradeToPro from './UpgradeToPro';
 import FormsOverview from './FormsOverview';
 import AdminNotice from '../components/AdminNotice';
-import ThankYouPrompt from './ThankYouPrompt';
 import { cn } from '@Utils/Helpers';
 
 export default () => {
@@ -45,8 +44,6 @@ export default () => {
 						<AdminNotice currentPage="sureforms_menu" />
 					</div>
 				) }
-				{ /* Nudge to personalise a new form's Thank You message (#3030). */ }
-				<ThankYouPrompt />
 				<Container
 					className={ cn(
 						! window.srfm_admin?.notices?.length && 'pt-5 xl:pt-8'

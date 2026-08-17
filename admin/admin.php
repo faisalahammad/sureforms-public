@@ -144,6 +144,10 @@ class Admin {
 		add_action( 'admin_notices', [ $this, 'display_srfm_rating_notice' ] );
 		add_action( 'admin_notices', [ $this, 'display_srfm_getting_started_notice' ] );
 
+		// "Finish setting up" prompt, shown as a notice on the WP dashboard (#3030).
+		add_action( 'admin_notices', [ $this, 'render_thankyou_prompt_notice' ] );
+		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_thankyou_prompt_assets' ] );
+
 		/**
 		 * Suppress foreign (third-party) admin notices on SureForms admin screens.
 		 *
@@ -300,6 +304,26 @@ class Admin {
 	 * @return array<int,array{id:int,title:string,edit_url:string}> One entry, or none.
 	 */
 	public static function get_thankyou_prompt_forms() {
+		// Memoized for the request: the dashboard notice's enqueue and render
+		// passes both ask for this, and the query is otherwise run twice.
+		static $cache = false;
+
+		if ( false !== $cache ) {
+			return $cache;
+		}
+
+		$cache = self::compute_thankyou_prompt_forms();
+
+		return $cache;
+	}
+
+	/**
+	 * Build the Thank You prompt payload (uncached). See get_thankyou_prompt_forms().
+	 *
+	 * @since x.x.x
+	 * @return array<int,array<string,mixed>> One entry, or none.
+	 */
+	private static function compute_thankyou_prompt_forms() {
 		if ( ! post_type_exists( SRFM_FORMS_POST_TYPE ) ) {
 			return [];
 		}
@@ -420,6 +444,187 @@ class Admin {
 		update_post_meta( $form_id, self::THANKYOU_PROMPT_DISMISSED_META, true );
 
 		return new \WP_REST_Response( [ 'success' => true ], 200 );
+	}
+
+	/**
+	 * Join clause fragments as "a", "a and b", or "a, b, and c".
+	 *
+	 * @param array<int,string> $clauses Clause fragments.
+	 *
+	 * @since x.x.x
+	 * @return string
+	 */
+	private static function join_clauses( $clauses ) {
+		$count = count( $clauses );
+
+		if ( $count <= 1 ) {
+			return implode( '', $clauses );
+		}
+
+		if ( 2 === $count ) {
+			return implode( __( ' and ', 'sureforms' ), $clauses );
+		}
+
+		$last = array_pop( $clauses );
+
+		return implode( ', ', $clauses ) . __( ', and ', 'sureforms' ) . $last;
+	}
+
+	/**
+	 * Render the "Finish setting up" prompt as a dashboard notice (#3030).
+	 *
+	 * Shown only on the main WordPress dashboard, for the newest form the current
+	 * user can edit that still has an unfinished step (default thank-you message or
+	 * no reply destination). The ✕ persists a per-form dismissal through the REST
+	 * endpoint wired in enqueue_thankyou_prompt_assets().
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function render_thankyou_prompt_notice() {
+		if ( ! Helper::current_user_can() ) {
+			return;
+		}
+
+		$screen = get_current_screen();
+
+		if ( ! $screen || 'dashboard' !== $screen->id ) {
+			return;
+		}
+
+		$prompts = self::get_thankyou_prompt_forms();
+
+		if ( empty( $prompts ) ) {
+			return;
+		}
+
+		$form     = $prompts[0];
+		$steps    = isset( $form['steps'] ) && is_array( $form['steps'] ) ? $form['steps'] : [];
+		$days_ago = isset( $form['days_ago'] ) ? (int) $form['days_ago'] : 0;
+
+		$clauses = [];
+		if ( ! empty( $steps['replies'] ) ) {
+			$clauses[] = __( 'replies have nowhere to go', 'sureforms' );
+		}
+		if ( ! empty( $steps['thankyou'] ) ) {
+			$clauses[] = __( 'the thank-you message is still the default', 'sureforms' );
+		}
+
+		$time_text = $days_ago > 0
+			? sprintf(
+				/* translators: %d: number of days. */
+				_n( 'You started this form %d day ago', 'You started this form %d days ago', $days_ago, 'sureforms' ),
+				$days_ago
+			)
+			: __( 'You started this form recently', 'sureforms' );
+
+		$sentence = sprintf(
+			/* translators: 1: "You started this form N days ago", 2: what is left, e.g. "replies have nowhere to go, and the thank-you message is still the default". */
+			__( '%1$s and haven\'t opened it since. It isn\'t collecting anything yet — %2$s.', 'sureforms' ),
+			$time_text,
+			self::join_clauses( $clauses )
+		);
+		?>
+		<div class="notice notice-info srfm-thankyou-notice" id="srfm-thankyou-notice">
+			<p class="srfm-thankyou-notice__title">
+				<?php
+				echo esc_html(
+					sprintf(
+						/* translators: %s: form name. */
+						__( 'Finish setting up “%s”', 'sureforms' ),
+						$form['title']
+					)
+				);
+				?>
+			</p>
+			<p class="srfm-thankyou-notice__text"><?php echo esc_html( $sentence ); ?></p>
+			<p class="srfm-thankyou-notice__actions">
+				<a class="button button-primary" href="<?php echo esc_url( $form['edit_url'] ); ?>"><?php esc_html_e( 'Edit form', 'sureforms' ); ?></a>
+				<a class="button" href="<?php echo esc_url( $form['replies_url'] ); ?>"><?php esc_html_e( 'Set where replies go', 'sureforms' ); ?></a>
+				<a class="button" href="<?php echo esc_url( $form['thankyou_url'] ); ?>"><?php esc_html_e( 'Edit the thank-you message', 'sureforms' ); ?></a>
+			</p>
+			<button type="button" class="notice-dismiss" id="srfm-thankyou-notice-dismiss">
+				<span class="screen-reader-text"><?php esc_html_e( 'Dismiss this notice.', 'sureforms' ); ?></span>
+			</button>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Enqueue the Thank You dashboard notice's styles and dismiss behavior (#3030).
+	 *
+	 * Mirrors the plugin's other dashboard-widget assets: an inline-only handle
+	 * carries the CSS and the dismiss handler, with the REST URL, nonce and form id
+	 * passed via wp_localize_script rather than printed into the markup.
+	 *
+	 * @param string $hook_suffix Current admin page hook suffix.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function enqueue_thankyou_prompt_assets( $hook_suffix ) {
+		if ( 'index.php' !== $hook_suffix || ! Helper::current_user_can() ) {
+			return;
+		}
+
+		$prompts = self::get_thankyou_prompt_forms();
+
+		if ( empty( $prompts ) ) {
+			return;
+		}
+
+		$form = $prompts[0];
+
+		$css = <<<'CSS'
+.srfm-thankyou-notice { position: relative; padding: 12px 38px 12px 12px; border-left-color: #D54407; }
+.srfm-thankyou-notice__title { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: #1d2327; }
+.srfm-thankyou-notice__text { margin: 0 0 10px; color: #50575e; }
+.srfm-thankyou-notice__actions { margin: 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.srfm-thankyou-notice .button-primary { background: #D54407; border-color: #D54407; color: #fff; box-shadow: none; text-shadow: none; }
+.srfm-thankyou-notice .button-primary:hover, .srfm-thankyou-notice .button-primary:focus { background: #C83B00; border-color: #C83B00; color: #fff; box-shadow: none; }
+.srfm-thankyou-notice .button:not(.button-primary) { background: transparent; border-color: transparent; color: #D54407; box-shadow: none; }
+.srfm-thankyou-notice .button:not(.button-primary):hover, .srfm-thankyou-notice .button:not(.button-primary):focus { background: transparent; border-color: transparent; color: #C83B00; box-shadow: none; }
+.srfm-thankyou-notice .button-primary:focus { outline: 2px solid #D54407; outline-offset: 1px; }
+CSS;
+
+		wp_register_style( 'srfm-thankyou-notice', false, [], SRFM_VER );
+		wp_enqueue_style( 'srfm-thankyou-notice' );
+		wp_add_inline_style( 'srfm-thankyou-notice', $css );
+
+		wp_register_script( 'srfm-thankyou-notice', '', [], SRFM_VER, true );
+		wp_enqueue_script( 'srfm-thankyou-notice' );
+
+		wp_localize_script(
+			'srfm-thankyou-notice',
+			'srfmThankYouNotice',
+			[
+				'restUrl' => esc_url_raw( rest_url( 'sureforms/v1/dismiss-thankyou-prompt' ) ),
+				'nonce'   => wp_create_nonce( 'wp_rest' ),
+				'formId'  => $form['id'],
+			]
+		);
+
+		$inline_script = <<<'JS'
+( function () {
+	const cfg = window.srfmThankYouNotice || {};
+	const notice = document.getElementById( 'srfm-thankyou-notice' );
+	const dismiss = document.getElementById( 'srfm-thankyou-notice-dismiss' );
+	if ( ! notice || ! dismiss ) {
+		return;
+	}
+	dismiss.addEventListener( 'click', function () {
+		fetch( cfg.restUrl, {
+			method: 'POST',
+			credentials: 'same-origin',
+			headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': cfg.nonce },
+			body: JSON.stringify( { form_id: cfg.formId } ),
+		} ).catch( function () {} );
+		notice.remove();
+	} );
+}() );
+JS;
+
+		wp_add_inline_script( 'srfm-thankyou-notice', $inline_script );
 	}
 
 	/**
@@ -1224,10 +1429,6 @@ class Admin {
 			// Default confirmation message HTML (icon + heading + text) used as
 			// the initial React state before the settings API response arrives.
 			'default_confirmation_message' => Global_Settings::get_default_confirmation_message(),
-			// Latest form still on the default Thank You message — powers the
-			// dashboard prompt (#3030). Empty when there is nothing to nudge about.
-			'thankyou_prompt_forms'        => self::get_thankyou_prompt_forms(),
-			'thankyou_prompt_nonce'        => wp_create_nonce( 'wp_rest' ),
 			'payments'                     => apply_filters(
 				'srfm_admin_localize_payments_data',
 				[
