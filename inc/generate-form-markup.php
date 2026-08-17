@@ -1381,11 +1381,7 @@ class Generate_Form_Markup {
 					border-radius: 9999px;
 					box-shadow: 0 2px 6px rgba( 0, 0, 0, 0.12 );
 					text-decoration: none;
-					opacity: 0;
-					transition: opacity 0.15s ease-in-out;
 				}
-				.srfm-form-container:hover .srfm-edit-form-btn,
-				.srfm-edit-form-btn:focus-visible { opacity: 1; }
 				.srfm-edit-form-btn:hover { border-color: #cbd5e1; color: #0f172a; }
 				.srfm-edit-form-btn svg { width: 14px; height: 14px; }
 			</style>
