@@ -302,6 +302,8 @@ class Admin {
 			return $cache;
 		}
 
+		// Only forms created from an Astra Sites starter template — those carry the
+		// `_astra_sites_imported_post` marker Astra Sites stamps on imported posts.
 		$query = new \WP_Query(
 			[
 				'post_type'      => SRFM_FORMS_POST_TYPE,
@@ -311,6 +313,12 @@ class Admin {
 				'order'          => 'DESC',
 				'fields'         => 'ids',
 				'no_found_rows'  => true,
+				'meta_query'     => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded to 10 recent forms; dashboard-only.
+					[
+						'key'     => '_astra_sites_imported_post',
+						'compare' => 'EXISTS',
+					],
+				],
 			]
 		);
 
