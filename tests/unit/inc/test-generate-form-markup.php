@@ -46,6 +46,63 @@ class Test_Generate_Form_Markup extends TestCase {
 		wp_delete_post( $form_id, true );
 	}
 
+	/**
+	 * The admin-only "Edit Form" pill (#3029) is capability-gated and deduped.
+	 *
+	 * It must be entirely absent from the rendered markup for anonymous visitors
+	 * and non-editors — the sureforms_form CPT maps edit_post to manage_options,
+	 * so only administrators qualify — present for an administrator and linked to
+	 * that form's editor, and its scoped stylesheet emitted at most once even when
+	 * several forms render in one request.
+	 */
+	public function test_render_edit_form_button() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$form_id = wp_insert_post( [
+			'post_title'   => 'Edit Pill Form',
+			'post_type'    => SRFM_FORMS_POST_TYPE,
+			'post_status'  => 'publish',
+			'post_content' => 'simple content',
+		] );
+
+		// Anonymous visitors never receive the shortcut.
+		wp_set_current_user( 0 );
+		$this->assertStringNotContainsString( 'srfm-edit-form-btn', Generate_Form_Markup::get_form_markup( $form_id ) );
+
+		// A subscriber cannot edit the form, so still no shortcut.
+		$subscriber = $this->set_current_user_with_role( 'subscriber' );
+		$this->assertStringNotContainsString( 'srfm-edit-form-btn', Generate_Form_Markup::get_form_markup( $form_id ) );
+
+		// An administrator gets the pill, pointing at this form's editor.
+		$admin  = $this->set_current_user_with_role( 'administrator' );
+		$markup = Generate_Form_Markup::get_form_markup( $form_id );
+		$this->assertStringContainsString( 'class="srfm-edit-form-btn"', $markup );
+		$this->assertStringContainsString( 'action=edit', $markup );
+
+		// Rendering two forms emits two anchors but the scoped stylesheet at most
+		// once (once-per-request dedup via the function-static guard).
+		ob_start();
+		Generate_Form_Markup::render_edit_form_button( $form_id );
+		Generate_Form_Markup::render_edit_form_button( $form_id );
+		$twice = ob_get_clean();
+		$this->assertSame( 2, substr_count( $twice, 'class="srfm-edit-form-btn"' ) );
+		$this->assertLessThanOrEqual( 1, substr_count( $twice, 'id="srfm-edit-form-btn-styles"' ) );
+
+		// A suppression filter removes it even for an administrator.
+		add_filter( 'srfm_show_edit_form_button', '__return_false' );
+		$this->assertStringNotContainsString( 'srfm-edit-form-btn', Generate_Form_Markup::get_form_markup( $form_id ) );
+		remove_filter( 'srfm_show_edit_form_button', '__return_false' );
+
+		wp_set_current_user( 0 );
+		wp_delete_user( $subscriber );
+		wp_delete_user( $admin );
+		wp_delete_post( $form_id, true );
+	}
+
 	public function test_add_entries_admin_bar_node() {
 		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || ! defined( 'SRFM_ENTRIES' ) ) {
 			$this->markTestSkipped( 'SureForms constants not defined' );

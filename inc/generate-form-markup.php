@@ -1329,10 +1329,16 @@ class Generate_Form_Markup {
 	 * Renders a small pill link overlaid at the top-right of the form container
 	 * (Elementor/Beaver-Builder style) that opens the block editor for this form.
 	 * Being absolutely positioned, it never affects the form's layout. It is
-	 * emitted only for users who can edit the form,
-	 * so it is entirely absent from the DOM for everyone else — a visitor never
-	 * receives the markup or its styles, and the form layout and submission are
-	 * untouched. The scoped stylesheet is printed once per request, no matter how
+	 * emitted only for a logged-in user who can edit this specific form, so for
+	 * every other viewer the markup and its styles are entirely absent from the
+	 * DOM and the form layout and submission are untouched.
+	 *
+	 * Because `get_form_markup()` output is cache-friendly and can be served from a
+	 * shared full-page cache, this response must not be cached once it carries the
+	 * admin-only shortcut: when the pill renders we signal `DONOTCACHEPAGE` so the
+	 * common WordPress page caches skip it. (Edge caches that ignore that constant
+	 * are expected to exclude logged-in users themselves, per the standard WP cache
+	 * contract.) The scoped stylesheet is printed once per request, no matter how
 	 * many forms are embedded on the page.
 	 *
 	 * @param int $form_id Form post ID.
@@ -1343,9 +1349,37 @@ class Generate_Form_Markup {
 	public static function render_edit_form_button( $form_id ) {
 		$form_id = absint( $form_id );
 
+		// Not inside the block editor's own preview (which renders through this
+		// same function over REST): the user is already editing the form there, so
+		// an "edit this form" shortcut would be redundant.
+		if ( defined( 'REST_REQUEST' ) && REST_REQUEST ) {
+			return;
+		}
+
+		// Not on the single-form / Instant Form page, where the form IS the whole
+		// page and the admin bar already links to its editor — the overlay pill
+		// would just be redundant there. It is meant for forms embedded within
+		// other content.
+		if ( defined( 'SRFM_FORMS_POST_TYPE' ) && is_singular( SRFM_FORMS_POST_TYPE ) ) {
+			return;
+		}
+
+		/**
+		 * Allow integrations to suppress the admin "Edit Form" shortcut entirely.
+		 *
+		 * @param bool $show    Whether to render the shortcut. Default true.
+		 * @param int  $form_id Form post ID.
+		 *
+		 * @since x.x.x
+		 */
+		if ( ! apply_filters( 'srfm_show_edit_form_button', true, $form_id ) ) {
+			return;
+		}
+
 		// Capability is checked against this specific form, so an editor only sees
-		// the shortcut on forms they may actually edit.
-		if ( $form_id <= 0 || ! current_user_can( 'edit_post', $form_id ) ) {
+		// the shortcut on forms they may actually edit. The explicit logged-in
+		// guard documents intent and pairs with the cache-bypass signal below.
+		if ( $form_id <= 0 || ! is_user_logged_in() || ! current_user_can( 'edit_post', $form_id ) ) {
 			return;
 		}
 
@@ -1353,6 +1387,25 @@ class Generate_Form_Markup {
 
 		if ( empty( $edit_link ) ) {
 			return;
+		}
+
+		/**
+		 * Filter the target of the admin "Edit Form" shortcut.
+		 *
+		 * @param string $edit_link Editor URL for the form.
+		 * @param int    $form_id   Form post ID.
+		 *
+		 * @since x.x.x
+		 */
+		$edit_link = apply_filters( 'srfm_edit_form_button_link', $edit_link, $form_id );
+
+		// This response now carries admin-only markup, so keep it out of any shared
+		// full-page cache that would serve it to visitors.
+		if ( ! defined( 'DONOTCACHEPAGE' ) ) {
+			define( 'DONOTCACHEPAGE', true );
+		}
+		if ( ! headers_sent() ) {
+			nocache_headers();
 		}
 
 		// Print the styles once per request, even with several forms on the page.
@@ -1388,7 +1441,7 @@ class Generate_Form_Markup {
 			<?php
 		}
 		?>
-		<a class="srfm-edit-form-btn" href="<?php echo esc_url( $edit_link ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php esc_attr_e( 'Edit this form in SureForms', 'sureforms' ); ?>">
+		<a class="srfm-edit-form-btn" href="<?php echo esc_url( $edit_link ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php esc_attr_e( 'Edit Form in SureForms', 'sureforms' ); ?>">
 			<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
 			<span><?php esc_html_e( 'Edit Form', 'sureforms' ); ?></span>
 		</a>
