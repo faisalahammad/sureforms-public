@@ -285,17 +285,28 @@ function GeneralSettings( props ) {
 		// load window if it never opened so the interval can't run indefinitely.
 		let elapsed = 0;
 		let opened = false;
+		let heldMs = 0;
 		const ensureOpen = setInterval( () => {
 			elapsed += 300;
 
-			// Dialog is open on this mount: mark it opened and hold the overlay
-			// painted (the fade-in can stall during load), then wait.
+			// Dialog is open on this mount: hold the overlay painted (the Force UI
+			// fade-in can stall amid the editor's load churn) for a short window,
+			// then stop — the fade settles within a second or two, so there is no
+			// need to keep polling for the dialog's whole open lifetime.
+			//
+			// NOTE: `.srfm-dialog-panel` / `.fixed.inset-0` are the Force UI Dialog
+			// overlay's own markup; if the library renames them this simply no-ops
+			// (the fade-stall workaround stops applying) rather than erroring.
 			if ( isOpenRef.current ) {
 				opened = true;
+				heldMs += 300;
 				const panel = document.querySelector( '.srfm-dialog-panel' );
 				const overlay = panel?.closest( '.fixed.inset-0' );
 				if ( overlay ) {
 					overlay.style.opacity = '1';
+				}
+				if ( heldMs >= 2000 ) {
+					clearInterval( ensureOpen );
 				}
 				return;
 			}

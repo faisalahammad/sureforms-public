@@ -949,7 +949,33 @@ class Test_Getting_Started_Notice extends TestCase {
 	public function test_is_default_confirmation_message() {
 		// No confirmation meta → nothing to compare → not the default.
 		$this->assertFalse( Admin::is_default_confirmation_message( 0 ) );
-		$this->assertIsBool( Admin::is_default_confirmation_message( 999999 ) );
+
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$form_id = wp_insert_post(
+			[
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_status' => 'publish',
+				'post_title'  => 'TY detect',
+			]
+		);
+
+		// The shipped default message is detected as the default.
+		update_post_meta(
+			$form_id,
+			'_srfm_form_confirmation',
+			[ [ 'message' => \SRFM\Inc\Global_Settings\Global_Settings::get_default_confirmation_message() ] ]
+		);
+		$this->assertTrue( Admin::is_default_confirmation_message( $form_id ) );
+
+		// Any real edit to the message flips it to non-default (the auto-clear path).
+		update_post_meta( $form_id, '_srfm_form_confirmation', [ [ 'message' => 'Thanks so much - we will be in touch!' ] ] );
+		$this->assertFalse( Admin::is_default_confirmation_message( $form_id ) );
+
+		wp_delete_post( $form_id, true );
 	}
 
 	/**
@@ -957,7 +983,32 @@ class Test_Getting_Started_Notice extends TestCase {
 	 */
 	public function test_form_has_reply_destination() {
 		$this->assertFalse( Admin::form_has_reply_destination( 0 ) );
-		$this->assertIsBool( Admin::form_has_reply_destination( 999999 ) );
+
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$form_id = wp_insert_post(
+			[
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_status' => 'publish',
+				'post_title'  => 'Reply dest',
+			]
+		);
+
+		// No notification → no reply destination.
+		$this->assertFalse( Admin::form_has_reply_destination( $form_id ) );
+
+		// Enabled notification with a recipient → has a destination.
+		update_post_meta( $form_id, '_srfm_email_notification', [ [ 'status' => true, 'email_to' => 'admin@example.com' ] ] );
+		$this->assertTrue( Admin::form_has_reply_destination( $form_id ) );
+
+		// A disabled notification does not count.
+		update_post_meta( $form_id, '_srfm_email_notification', [ [ 'status' => false, 'email_to' => 'admin@example.com' ] ] );
+		$this->assertFalse( Admin::form_has_reply_destination( $form_id ) );
+
+		wp_delete_post( $form_id, true );
 	}
 
 	/**
@@ -965,6 +1016,48 @@ class Test_Getting_Started_Notice extends TestCase {
 	 */
 	public function test_get_thankyou_prompt_forms() {
 		$this->assertIsArray( Admin::get_thankyou_prompt_forms() );
+
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		// The sureforms_form CPT maps edit_post to manage_options, so an admin.
+		$admin = wp_insert_user(
+			[
+				'user_login' => 'srfm_ty_admin_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_ty_admin_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $admin ) ? 0 : (int) $admin );
+
+		$default_message = \SRFM\Inc\Global_Settings\Global_Settings::get_default_confirmation_message();
+
+		// Starter-template import still on the default message → targeted.
+		$imported = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Imported TY' ] );
+		update_post_meta( $imported, '_srfm_form_confirmation', [ [ 'message' => $default_message ] ] );
+		update_post_meta( $imported, '_astra_sites_imported_post', 1 );
+
+		// Same default message but NOT an Astra Sites import → excluded by the gate.
+		$plain = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Plain TY' ] );
+		update_post_meta( $plain, '_srfm_form_confirmation', [ [ 'message' => $default_message ] ] );
+
+		// Drive the uncached builder to bypass the request-memoized cache.
+		$compute = new \ReflectionMethod( Admin::class, 'compute_thankyou_prompt_forms' );
+		$compute->setAccessible( true );
+		$ids = wp_list_pluck( $compute->invoke( null ), 'id' );
+
+		$this->assertContains( $imported, $ids, 'An Astra Sites imported form on the default message must be targeted.' );
+		$this->assertNotContains( $plain, $ids, 'A non-imported form must not be targeted.' );
+
+		wp_delete_post( $imported, true );
+		wp_delete_post( $plain, true );
+		wp_set_current_user( 0 );
+		if ( ! is_wp_error( $admin ) ) {
+			wp_delete_user( (int) $admin );
+		}
 	}
 
 	/**
