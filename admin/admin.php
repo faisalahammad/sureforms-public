@@ -261,24 +261,16 @@ class Admin {
 	}
 
 	/**
-	 * Setup-checklist data for the newest form that still needs finishing (#3031).
+	 * Setup-checklist data for the newest starter-template form (#3031).
 	 *
-	 * Picks the most recent form the current user can edit that is not yet ready for
-	 * real submissions — and which has not been dismissed or snoozed — and reports
-	 * the completion state of each setup step so the dashboard widget can render the
-	 * checklist and its progress counter. Steps, each keyed by whether it is *done*:
-	 *
-	 *  - created:   the form exists (always done)
-	 *  - published: post status is `publish`
-	 *  - email:     the default admin notification has been customized
-	 *  - page:      the form is embedded on a published page or post
-	 *
-	 * Drafts are included so "publish" can legitimately be an outstanding step. A
-	 * form with every step done is skipped — there is nothing to nudge. Memoized for
-	 * the request so the widget register/enqueue/render passes share one query.
+	 * Picks the most recent form the current user can edit that was created from an
+	 * Astra Sites starter template and which the user has not snoozed. The widget
+	 * lists a fixed set of optional next-steps for it — their completion is not
+	 * computed — so the payload carries only the form and the CTA targets. Memoized
+	 * for the request so the widget register/enqueue/render passes share one query.
 	 *
 	 * @since x.x.x
-	 * @return array<string,mixed>|null Checklist payload, or null when nothing needs finishing.
+	 * @return array<string,mixed>|null Card payload, or null when there is no candidate form.
 	 */
 	public static function get_form_setup_card() {
 		static $cache = false;
@@ -329,41 +321,22 @@ class Admin {
 				continue;
 			}
 
-			// Completion state of each checklist step (true = done). The email step
-			// is done only once the shipped default notification has been customized
-			// — every form ships with one, so mere presence is not "set up".
-			$steps = [
-				'created'   => true,
-				'published' => 'publish' === get_post_status( $form_id ),
-				'email'     => ! self::is_default_email_notification( $form_id ),
-				'page'      => self::form_is_embedded( $form_id ),
-			];
-
-			$total      = count( $steps );
-			$done_count = count( array_filter( $steps ) );
-
-			// Ready for real submissions already — nothing to finish.
-			if ( $done_count >= $total ) {
-				continue;
-			}
-
 			$edit_link = get_edit_post_link( $form_id, 'raw' );
 
 			if ( empty( $edit_link ) ) {
 				continue;
 			}
 
+			// The steps are shown as optional next-steps — their completion is not
+			// computed, so the widget simply lists the actions the owner can take.
 			$cache = [
-				'id'         => $form_id,
-				'title'      => get_the_title( $form_id ),
-				'steps'      => $steps,
-				'done_count' => $done_count,
-				'total'      => $total,
-				'edit_url'   => $edit_link,
+				'id'        => $form_id,
+				'title'     => get_the_title( $form_id ),
+				'edit_url'  => $edit_link,
 				// Deep-links to the email-notification panel where supported; falls
 				// back to opening the editor when the focus handler isn't present.
-				'email_url'  => add_query_arg( 'srfm_focus', 'notifications', $edit_link ),
-				'shortcode'  => sprintf( '[sureforms id="%d"]', $form_id ),
+				'email_url' => add_query_arg( 'srfm_focus', 'notifications', $edit_link ),
+				'shortcode' => sprintf( '[sureforms id="%d"]', $form_id ),
 			];
 
 			return $cache;
@@ -2437,58 +2410,43 @@ JS;
 			return;
 		}
 
-		$steps = $card['steps'];
-
-		// Ordered rows. "created" is informational (always done); the rest carry a
-		// CTA while incomplete. The "page" step reveals the shortcode inline.
+		// Optional next-steps — always offered, their completion is not computed.
 		$rows = [
 			[
-				'key'   => 'created',
-				'label' => __( 'Form created', 'sureforms' ),
-			],
-			[
-				'key'   => 'published',
 				'label' => __( 'Review the fields and publish', 'sureforms' ),
 				'cta'   => __( 'Edit form', 'sureforms' ),
 				'url'   => $card['edit_url'],
 			],
 			[
-				'key'   => 'email',
 				'label' => __( 'Choose who gets notified of new replies', 'sureforms' ),
 				'cta'   => __( 'Set up email', 'sureforms' ),
 				'url'   => $card['email_url'],
 			],
 			[
-				'key'      => 'page',
 				'label'    => __( 'Put the form on a page', 'sureforms' ),
 				'cta'      => __( 'Get embed code', 'sureforms' ),
 				'is_embed' => true,
 			],
 		];
 
-		$progress = sprintf(
-			/* translators: 1: form title, 2: completed step count, 3: total step count. */
-			__( '%1$s is %2$d of %3$d steps done', 'sureforms' ),
-			$card['title'],
-			$card['done_count'],
-			$card['total']
+		$heading = sprintf(
+			/* translators: %s: form title. */
+			__( 'Finish setting up %s', 'sureforms' ),
+			$card['title']
 		);
 		?>
 		<div class="srfm-setup-checklist" id="srfm-setup-checklist">
-			<p class="srfm-setup-checklist__title"><?php echo esc_html( $progress ); ?></p>
-			<p class="srfm-setup-checklist__subtitle"><?php esc_html_e( 'Finish these and the form is ready for real submissions.', 'sureforms' ); ?></p>
+			<p class="srfm-setup-checklist__title"><?php echo esc_html( $heading ); ?></p>
+			<p class="srfm-setup-checklist__subtitle"><?php esc_html_e( 'A few optional steps to get your form ready for real submissions:', 'sureforms' ); ?></p>
 
 			<ul class="srfm-setup-checklist__steps">
 				<?php foreach ( $rows as $row ) { ?>
-					<?php $done = ! empty( $steps[ $row['key'] ] ); ?>
-					<li class="srfm-setup-checklist__step<?php echo $done ? ' is-done' : ''; ?>">
+					<li class="srfm-setup-checklist__step">
 						<span class="srfm-setup-checklist__label"><?php echo esc_html( $row['label'] ); ?></span>
-						<?php if ( ! $done && ! empty( $row['cta'] ) ) { ?>
-							<?php if ( ! empty( $row['is_embed'] ) ) { ?>
-								<button type="button" class="srfm-setup-checklist__cta" id="srfm-setup-checklist-embed"><?php echo esc_html( $row['cta'] ); ?></button>
-							<?php } else { ?>
-								<a class="srfm-setup-checklist__cta" href="<?php echo esc_url( $row['url'] ); ?>"><?php echo esc_html( $row['cta'] ); ?></a>
-							<?php } ?>
+						<?php if ( ! empty( $row['is_embed'] ) ) { ?>
+							<button type="button" class="srfm-setup-checklist__cta" id="srfm-setup-checklist-embed"><?php echo esc_html( $row['cta'] ); ?></button>
+						<?php } else { ?>
+							<a class="srfm-setup-checklist__cta" href="<?php echo esc_url( $row['url'] ); ?>"><?php echo esc_html( $row['cta'] ); ?></a>
 						<?php } ?>
 					</li>
 				<?php } ?>
@@ -2536,9 +2494,8 @@ JS;
 .srfm-setup-checklist__steps { margin: 0; padding: 0; list-style: none; }
 .srfm-setup-checklist__step { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; }
 .srfm-setup-checklist__step + .srfm-setup-checklist__step { margin-top: 6px; }
-.srfm-setup-checklist__step:not(.is-done) { background: #f6f7f7; }
+.srfm-setup-checklist__step { background: #f6f7f7; }
 .srfm-setup-checklist__label { flex: 1 1 auto; font-size: 14px; color: #1e1e1e; }
-.srfm-setup-checklist__step.is-done .srfm-setup-checklist__label { color: #787c82; }
 .srfm-setup-checklist__cta { margin-left: auto; border: 0; background: transparent; padding: 0; font-size: 14px; font-weight: 600; color: #d54e21; text-decoration: underline; cursor: pointer; }
 .srfm-setup-checklist__cta:hover { color: #b83c14; }
 .srfm-setup-checklist__embed { display: none; gap: 8px; margin: 10px 12px 0; }
