@@ -52,6 +52,15 @@ class Admin {
 	public const QUILL_1X_INLINE_CSS = '.ql-editor ul,.ql-editor ol{padding-left:1.5em}.ql-editor ul>li,.ql-editor ol>li{list-style-type:none}.ql-editor ol li:not(.ql-direction-rtl),.ql-editor ul li:not(.ql-direction-rtl){padding-left:1.5em}.ql-editor ol li.ql-direction-rtl,.ql-editor ul li.ql-direction-rtl{padding-right:1.5em}.ql-editor ul>li::before{content:"\2022"}.ql-editor li::before{display:inline-block;white-space:nowrap;width:1.2em}.ql-editor li:not(.ql-direction-rtl)::before{margin-left:-1.5em;margin-right:.3em;text-align:right}.ql-editor li.ql-direction-rtl::before{margin-left:.3em;margin-right:-1.5em}.ql-editor ol li{counter-reset:list-1 list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9;counter-increment:list-0}.ql-editor ol li::before{content:counter(list-0,decimal) ". "}.ql-editor ol li.ql-indent-1{counter-increment:list-1;counter-reset:list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-1::before{content:counter(list-1,lower-alpha) ". "}.ql-editor ol li.ql-indent-2{counter-increment:list-2;counter-reset:list-3 list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-2::before{content:counter(list-2,lower-roman) ". "}.ql-editor ol li.ql-indent-3{counter-increment:list-3;counter-reset:list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-3::before{content:counter(list-3,decimal) ". "}.ql-editor ol li.ql-indent-4{counter-increment:list-4;counter-reset:list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-4::before{content:counter(list-4,lower-alpha) ". "}.ql-editor ol li.ql-indent-5{counter-increment:list-5;counter-reset:list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-5::before{content:counter(list-5,lower-roman) ". "}.ql-editor ol li.ql-indent-6{counter-increment:list-6;counter-reset:list-7 list-8 list-9}.ql-editor ol li.ql-indent-6::before{content:counter(list-6,decimal) ". "}.ql-editor ol li.ql-indent-7{counter-increment:list-7;counter-reset:list-8 list-9}.ql-editor ol li.ql-indent-7::before{content:counter(list-7,lower-alpha) ". "}.ql-editor ol li.ql-indent-8{counter-increment:list-8;counter-reset:list-9}.ql-editor ol li.ql-indent-8::before{content:counter(list-8,lower-roman) ". "}.ql-editor ol li.ql-indent-9{counter-increment:list-9}.ql-editor ol li.ql-indent-9::before{content:counter(list-9,decimal) ". "}';
 
 	/**
+	 * User meta: unix time until which the "Finish setting up" widget is snoozed
+	 * for this user across every form ("Remind me in two weeks"). Per-user rather
+	 * than per-form so the reminder hides the whole widget, not just one form.
+	 *
+	 * @since x.x.x
+	 */
+	public const SETUP_WIDGET_SNOOZE_USER_META = 'srfm_setup_widget_snooze_until';
+
+	/**
 	 * Dashboard widget entries data.
 	 *
 	 * @var array
@@ -250,15 +259,6 @@ class Admin {
 		// Check if the first form creation time stamp is a valid integer and greater than zero.
 		return is_int( $first_form_creation_time_stamp ) && $first_form_creation_time_stamp > 0;
 	}
-
-	/**
-	 * User meta: unix time until which the "Finish setting up" widget is snoozed
-	 * for this user across every form ("Remind me in two weeks"). Per-user rather
-	 * than per-form so the reminder hides the whole widget, not just one form.
-	 *
-	 * @since x.x.x
-	 */
-	public const SETUP_WIDGET_SNOOZE_USER_META = 'srfm_setup_widget_snooze_until';
 
 	/**
 	 * Setup-checklist data for the newest form that still needs finishing (#3031).
@@ -2471,20 +2471,20 @@ JS;
 			<p class="srfm-setup-checklist__subtitle"><?php esc_html_e( 'Finish these and the form is ready for real submissions.', 'sureforms' ); ?></p>
 
 			<ul class="srfm-setup-checklist__steps">
-				<?php foreach ( $rows as $row ) : ?>
+				<?php foreach ( $rows as $row ) { ?>
 					<?php $done = ! empty( $steps[ $row['key'] ] ); ?>
 					<li class="srfm-setup-checklist__step<?php echo $done ? ' is-done' : ''; ?>">
 						<span class="srfm-setup-checklist__check" aria-hidden="true"><?php echo $done ? '&#10003;' : ''; ?></span>
 						<span class="srfm-setup-checklist__label"><?php echo esc_html( $row['label'] ); ?></span>
-						<?php if ( ! $done && ! empty( $row['cta'] ) ) : ?>
-							<?php if ( ! empty( $row['is_embed'] ) ) : ?>
+						<?php if ( ! $done && ! empty( $row['cta'] ) ) { ?>
+							<?php if ( ! empty( $row['is_embed'] ) ) { ?>
 								<button type="button" class="srfm-setup-checklist__cta" id="srfm-setup-checklist-embed"><?php echo esc_html( $row['cta'] ); ?></button>
-							<?php else : ?>
+							<?php } else { ?>
 								<a class="srfm-setup-checklist__cta" href="<?php echo esc_url( $row['url'] ); ?>"><?php echo esc_html( $row['cta'] ); ?></a>
-							<?php endif; ?>
-						<?php endif; ?>
+							<?php } ?>
+						<?php } ?>
 					</li>
-				<?php endforeach; ?>
+				<?php } ?>
 			</ul>
 
 			<div class="srfm-setup-checklist__embed" id="srfm-setup-checklist-embed-box">

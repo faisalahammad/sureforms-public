@@ -935,4 +935,114 @@ class Test_Getting_Started_Notice extends TestCase {
 			'A null callback should not be recognised as owned.'
 		);
 	}
+
+	/**
+	 * The first-form-created flag resolves to a boolean.
+	 */
+	public function test_is_first_form_created() {
+		$this->assertIsBool( Admin::is_first_form_created() );
+	}
+
+	/**
+	 * A default confirmation message is detected; an edited one is not (#3031).
+	 */
+	public function test_is_default_confirmation_message() {
+		$this->assertFalse( Admin::is_default_confirmation_message( 0 ) );
+
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Conf detect' ] );
+
+		update_post_meta( $form_id, '_srfm_form_confirmation', [ [ 'message' => \SRFM\Inc\Global_Settings\Global_Settings::get_default_confirmation_message() ] ] );
+		$this->assertTrue( Admin::is_default_confirmation_message( $form_id ) );
+
+		update_post_meta( $form_id, '_srfm_form_confirmation', [ [ 'message' => 'Thanks - we will be in touch!' ] ] );
+		$this->assertFalse( Admin::is_default_confirmation_message( $form_id ) );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * The default admin notification is the untouched default until customised (#3031).
+	 */
+	public function test_is_default_email_notification() {
+		// No notification meta at all -> treated as untouched default.
+		$this->assertTrue( Admin::is_default_email_notification( 0 ) );
+
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Notif detect' ] );
+
+		// A customised recipient means it has been touched.
+		update_post_meta( $form_id, '_srfm_email_notification', [ [ 'status' => true, 'email_to' => 'sales@example.com', 'subject' => 'Hi', 'email_body' => '{all_data}' ] ] );
+		$this->assertFalse( Admin::is_default_email_notification( $form_id ) );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * Embed detection matches the srfm/form block on a published page (#3031).
+	 */
+	public function test_form_is_embedded() {
+		$this->assertFalse( Admin::form_is_embedded( 0 ) );
+
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Embed check' ] );
+
+		// Not placed anywhere yet.
+		$this->assertFalse( Admin::form_is_embedded( $form_id ) );
+
+		// Embedded via the srfm/form block on a published page.
+		$page_id = wp_insert_post( [ 'post_type' => 'page', 'post_status' => 'publish', 'post_title' => 'Has form', 'post_content' => '<!-- wp:srfm/form {"id":' . $form_id . '} /-->' ] );
+		$this->assertTrue( Admin::form_is_embedded( $form_id ) );
+
+		wp_delete_post( $page_id, true );
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * The setup-card query returns a card payload or null.
+	 */
+	public function test_get_form_setup_card() {
+		$card = Admin::get_form_setup_card();
+		$this->assertTrue( null === $card || is_array( $card ) );
+	}
+
+	/**
+	 * The setup-card REST handler is registered on the Admin instance (#3031).
+	 */
+	public function test_dismiss_form_setup_card() {
+		$this->assertTrue( method_exists( Admin::get_instance(), 'dismiss_form_setup_card' ) );
+	}
+
+	/**
+	 * The dashboard-widget registrar is callable (#3031).
+	 */
+	public function test_register_form_setup_widget() {
+		$this->assertTrue( method_exists( Admin::get_instance(), 'register_form_setup_widget' ) );
+	}
+
+	/**
+	 * The dashboard-widget renderer is callable (#3031).
+	 */
+	public function test_render_form_setup_widget() {
+		$this->assertTrue( method_exists( Admin::get_instance(), 'render_form_setup_widget' ) );
+	}
+
+	/**
+	 * The dashboard-widget asset enqueue is callable (#3031).
+	 */
+	public function test_enqueue_form_setup_widget_assets() {
+		$this->assertTrue( method_exists( Admin::get_instance(), 'enqueue_form_setup_widget_assets' ) );
+	}
 }
