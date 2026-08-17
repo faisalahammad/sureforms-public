@@ -139,6 +139,10 @@ class Admin {
 		// Enqueue the AI quick draft widget script on the dashboard screen.
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_ai_dashboard_widget_assets' ] );
 
+		// "Finish setting up" checklist widget on the main WP dashboard (#3031).
+		add_action( 'wp_dashboard_setup', [ $this, 'register_form_setup_widget' ] );
+		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_form_setup_widget_assets' ] );
+
 		// Save first form creation time stamp.
 		add_action( 'admin_init', [ $this, 'save_first_form_creation_time_stamp' ] );
 		add_action( 'admin_notices', [ $this, 'display_srfm_rating_notice' ] );
@@ -248,54 +252,65 @@ class Admin {
 	}
 
 	/**
-	 * Post meta: the "Finish setting up" card was dismissed for this form.
+	 * User meta: unix time until which the "Finish setting up" widget is snoozed
+	 * for this user across every form ("Remind me in two weeks"). Per-user rather
+	 * than per-form so the reminder hides the whole widget, not just one form.
 	 *
 	 * @since x.x.x
 	 */
-	public const SETUP_CARD_DISMISSED_META = '_srfm_setup_card_dismissed';
+	public const SETUP_WIDGET_SNOOZE_USER_META = 'srfm_setup_widget_snooze_until';
 
 	/**
-	 * Post meta: unix time until which the "Finish setting up" card is snoozed.
+	 * Setup-checklist data for the newest form that still needs finishing (#3031).
+	 *
+	 * Picks the most recent form the current user can edit that is not yet ready for
+	 * real submissions — and which has not been dismissed or snoozed — and reports
+	 * the completion state of each setup step so the dashboard widget can render the
+	 * checklist and its progress counter. Steps, each keyed by whether it is *done*:
+	 *
+	 *  - created:   the form exists (always done)
+	 *  - published: post status is `publish`
+	 *  - email:     the default admin notification has been customized
+	 *  - page:      the form is embedded on a published page or post
+	 *
+	 * Drafts are included so "publish" can legitimately be an outstanding step. A
+	 * form with every step done is skipped — there is nothing to nudge. Memoized for
+	 * the request so the widget register/enqueue/render passes share one query.
 	 *
 	 * @since x.x.x
-	 */
-	public const SETUP_CARD_SNOOZE_META = '_srfm_setup_card_snooze_until';
-
-	/**
-	 * The "Finish setting up" card for the latest form that still needs setup (#3031).
-	 *
-	 * Surfaces the newest published form the current user can edit which still has
-	 * an unfinished setup step — its confirmation is the default, no enabled email
-	 * notification has a recipient, or it isn't embedded on a page — and which has
-	 * not been dismissed or snoozed. Returns the form, how long ago it was created,
-	 * and which steps remain, so the dashboard can render the contextual nudge and
-	 * its per-step CTAs. Null when there is nothing to prompt about.
-	 *
-	 * @since x.x.x
-	 * @return array<string,mixed>|null
+	 * @return array<string,mixed>|null Checklist payload, or null when nothing needs finishing.
 	 */
 	public static function get_form_setup_card() {
+		static $cache = false;
+
+		if ( false !== $cache ) {
+			return $cache;
+		}
+
+		$cache = null;
+
 		if ( ! post_type_exists( SRFM_FORMS_POST_TYPE ) ) {
-			return null;
+			return $cache;
 		}
 
 		$now = time();
 
+		// "Remind me in two weeks" — a per-user snooze that hides the whole widget.
+		$widget_snooze_until = (int) get_user_meta( get_current_user_id(), self::SETUP_WIDGET_SNOOZE_USER_META, true );
+
+		if ( $widget_snooze_until > $now ) {
+			return $cache;
+		}
+
 		$query = new \WP_Query(
 			[
 				'post_type'      => SRFM_FORMS_POST_TYPE,
-				'post_status'    => 'publish',
+				'post_status'    => [ 'publish', 'draft', 'pending' ],
 				'posts_per_page' => 10,
 				'orderby'        => 'date',
 				'order'          => 'DESC',
 				'fields'         => 'ids',
 				'no_found_rows'  => true,
-				'meta_query'     => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded to 10 recent forms; dashboard-only.
-					[
-						'key'     => self::SETUP_CARD_DISMISSED_META,
-						'compare' => 'NOT EXISTS',
-					],
-				],
 			]
 		);
 
@@ -306,23 +321,21 @@ class Admin {
 				continue;
 			}
 
-			$snooze_until = (int) get_post_meta( $form_id, self::SETUP_CARD_SNOOZE_META, true );
-
-			if ( $snooze_until > $now ) {
-				continue;
-			}
-
+			// Completion state of each checklist step (true = done). The email step
+			// is done only once the shipped default notification has been customized
+			// — every form ships with one, so mere presence is not "set up".
 			$steps = [
-				// A destination for replies: an enabled notification with a recipient.
-				'replies'  => ! self::form_has_reply_destination( $form_id ),
-				// The thank-you message is still the shipped default.
-				'thankyou' => self::is_default_confirmation_message( $form_id ),
-				// The form is not embedded on any published page or post.
-				'page'     => ! self::form_is_embedded( $form_id ),
+				'created'   => true,
+				'published' => 'publish' === get_post_status( $form_id ),
+				'email'     => ! self::is_default_email_notification( $form_id ),
+				'page'      => self::form_is_embedded( $form_id ),
 			];
 
-			// Nothing left to finish — no card for this form.
-			if ( ! $steps['replies'] && ! $steps['thankyou'] && ! $steps['page'] ) {
+			$total      = count( $steps );
+			$done_count = count( array_filter( $steps ) );
+
+			// Ready for real submissions already — nothing to finish.
+			if ( $done_count >= $total ) {
 				continue;
 			}
 
@@ -332,23 +345,23 @@ class Admin {
 				continue;
 			}
 
-			$created  = get_post_time( 'U', true, $form_id );
-			$days_ago = is_int( $created ) ? (int) floor( ( $now - $created ) / DAY_IN_SECONDS ) : 0;
-
-			return [
-				'id'           => $form_id,
-				'title'        => get_the_title( $form_id ),
-				'days_ago'     => max( 0, $days_ago ),
-				'steps'        => $steps,
-				'edit_url'     => $edit_link,
-				'replies_url'  => add_query_arg( 'srfm_focus', 'notifications', $edit_link ),
-				'thankyou_url' => add_query_arg( 'srfm_focus', 'thankyou', $edit_link ),
-				// Where "Add to a page" sends the user: a fresh page to embed into.
-				'page_url'     => admin_url( 'post-new.php?post_type=page' ),
+			$cache = [
+				'id'         => $form_id,
+				'title'      => get_the_title( $form_id ),
+				'steps'      => $steps,
+				'done_count' => $done_count,
+				'total'      => $total,
+				'edit_url'   => $edit_link,
+				// Deep-links to the email-notification panel where supported; falls
+				// back to opening the editor when the focus handler isn't present.
+				'email_url'  => add_query_arg( 'srfm_focus', 'notifications', $edit_link ),
+				'shortcode'  => sprintf( '[sureforms id="%d"]', $form_id ),
 			];
+
+			return $cache;
 		}
 
-		return null;
+		return $cache;
 	}
 
 	/**
@@ -385,28 +398,56 @@ class Admin {
 	}
 
 	/**
-	 * Whether a form has somewhere to send replies (an enabled email notification
-	 * with a non-empty recipient).
+	 * Whether a form's email notification is still the shipped default (untouched).
+	 *
+	 * Every form is created with one "Admin Notification Email" — recipient
+	 * `{admin_email}`, the default subject and an `{all_data}` body — and WordPress
+	 * hands that registered default back from get_post_meta even when nothing is
+	 * stored, so mere presence never means the owner has chosen who gets notified.
+	 * The "Choose who gets notified" checklist step is therefore driven by whether
+	 * this default has been customized: a second notification, a changed recipient,
+	 * subject or body, or a disabled notification all count as touched. Compared on
+	 * the recipient + subject + body, the fields that define who is notified and
+	 * with what — cosmetic fields (reply-to, cc/bcc, from) are ignored.
 	 *
 	 * @param int $form_id Form post ID.
 	 *
 	 * @since x.x.x
-	 * @return bool
+	 * @return bool True when the notification matches the default; false once customized.
 	 */
-	public static function form_has_reply_destination( $form_id ) {
+	public static function is_default_email_notification( $form_id ) {
 		$notifications = get_post_meta( (int) $form_id, '_srfm_email_notification', true );
 
-		if ( ! is_array( $notifications ) ) {
+		// No notification configured — untouched, so the step stays incomplete.
+		if ( ! is_array( $notifications ) || empty( $notifications ) ) {
+			return true;
+		}
+
+		// A second notification is something the owner added — customized.
+		if ( 1 !== count( $notifications ) ) {
 			return false;
 		}
 
-		foreach ( $notifications as $notification ) {
-			if ( is_array( $notification ) && ! empty( $notification['status'] ) && ! empty( $notification['email_to'] ) ) {
-				return true;
-			}
+		$notification = $notifications[0];
+
+		if ( ! is_array( $notification ) ) {
+			return false;
 		}
 
-		return false;
+		// A disabled notification is a deliberate change away from the default.
+		if ( empty( $notification['status'] ) ) {
+			return false;
+		}
+
+		$default_subject = sprintf(
+			/* translators: %s: form title smart tag. */
+			__( 'New Form Submission - %s', 'sureforms' ),
+			'{form_title}'
+		);
+
+		return '{admin_email}' === ( $notification['email_to'] ?? '' )
+			&& ( $notification['subject'] ?? '' ) === $default_subject
+			&& '{all_data}' === ( $notification['email_body'] ?? '' );
 	}
 
 	/**
@@ -440,11 +481,13 @@ class Admin {
 	}
 
 	/**
-	 * REST handler: dismiss or snooze the "Finish setting up" card (#3031).
+	 * REST handler: snooze the "Finish setting up" widget for 14 days (#3031).
 	 *
-	 * `action=snooze` hides the card for 14 days; anything else dismisses it for
-	 * good. Capability is re-checked against the specific form here, not just the
-	 * route's generic permission callback.
+	 * The snooze is stored per-user, so "Remind me in two weeks" hides the whole
+	 * widget rather than only the form currently shown. The request still carries
+	 * the displayed form id: capability is re-checked against it here — beyond the
+	 * route's generic permission callback — so only a genuine editor of that form
+	 * can set the snooze.
 	 *
 	 * @param \WP_REST_Request<array<string,mixed>> $request Request.
 	 *
@@ -458,11 +501,7 @@ class Admin {
 			return new \WP_Error( 'srfm_setup_card_forbidden', __( 'You are not allowed to update this prompt.', 'sureforms' ), [ 'status' => 403 ] );
 		}
 
-		if ( 'snooze' === $request->get_param( 'action' ) ) {
-			update_post_meta( $form_id, self::SETUP_CARD_SNOOZE_META, time() + ( 14 * DAY_IN_SECONDS ) );
-		} else {
-			update_post_meta( $form_id, self::SETUP_CARD_DISMISSED_META, true );
-		}
+		update_user_meta( get_current_user_id(), self::SETUP_WIDGET_SNOOZE_USER_META, time() + ( 14 * DAY_IN_SECONDS ) );
 
 		return new \WP_REST_Response( [ 'success' => true ], 200 );
 	}
@@ -1269,10 +1308,6 @@ class Admin {
 			// Default confirmation message HTML (icon + heading + text) used as
 			// the initial React state before the settings API response arrives.
 			'default_confirmation_message' => Global_Settings::get_default_confirmation_message(),
-			// The latest form still needing setup — powers the "Finish setting up"
-			// dashboard card (#3031). Null when nothing needs finishing.
-			'form_setup_card'              => self::get_form_setup_card(),
-			'form_setup_card_nonce'        => wp_create_nonce( 'wp_rest' ),
 			'payments'                     => apply_filters(
 				'srfm_admin_localize_payments_data',
 				[
@@ -2344,6 +2379,258 @@ class Admin {
 JS;
 
 		wp_add_inline_script( 'srfm-ai-dashboard-widget', $inline_script );
+	}
+
+	/**
+	 * Register the "Finish setting up" checklist widget on the main WP dashboard (#3031).
+	 *
+	 * Only for capable users, and only when there is a form still needing setup —
+	 * so the widget never appears empty. The data is memoized in get_form_setup_card()
+	 * and reused by the enqueue and render passes.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function register_form_setup_widget() {
+		if ( ! Helper::current_user_can() ) {
+			return;
+		}
+
+		if ( null === self::get_form_setup_card() ) {
+			return;
+		}
+
+		wp_add_dashboard_widget(
+			'srfm_form_setup_checklist',
+			__( 'Finish setting up your form', 'sureforms' ),
+			[ $this, 'render_form_setup_widget' ],
+			null,
+			null,
+			'normal',
+			'high'
+		);
+	}
+
+	/**
+	 * Render the setup-checklist widget content (#3031).
+	 *
+	 * A progress line, then one row per step with a completion check and — for the
+	 * incomplete, actionable steps — a CTA. The "Get embed code" step reveals the
+	 * form shortcode inline rather than navigating away. Dismiss (✕) and the 14-day
+	 * snooze are wired in the enqueued inline script against the REST endpoint.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function render_form_setup_widget() {
+		$card = self::get_form_setup_card();
+
+		if ( null === $card ) {
+			return;
+		}
+
+		$steps = $card['steps'];
+
+		// Ordered rows. "created" is informational (always done); the rest carry a
+		// CTA while incomplete. The "page" step reveals the shortcode inline.
+		$rows = [
+			[
+				'key'   => 'created',
+				'label' => __( 'Form created', 'sureforms' ),
+			],
+			[
+				'key'   => 'published',
+				'label' => __( 'Review the fields and publish', 'sureforms' ),
+				'cta'   => __( 'Edit form', 'sureforms' ),
+				'url'   => $card['edit_url'],
+			],
+			[
+				'key'   => 'email',
+				'label' => __( 'Choose who gets notified of new replies', 'sureforms' ),
+				'cta'   => __( 'Set up email', 'sureforms' ),
+				'url'   => $card['email_url'],
+			],
+			[
+				'key'      => 'page',
+				'label'    => __( 'Put the form on a page', 'sureforms' ),
+				'cta'      => __( 'Get embed code', 'sureforms' ),
+				'is_embed' => true,
+			],
+		];
+
+		$progress = sprintf(
+			/* translators: 1: form title, 2: completed step count, 3: total step count. */
+			__( '“%1$s” is %2$d of %3$d steps done', 'sureforms' ),
+			$card['title'],
+			$card['done_count'],
+			$card['total']
+		);
+		?>
+		<div class="srfm-setup-checklist" id="srfm-setup-checklist">
+			<p class="srfm-setup-checklist__title"><?php echo esc_html( $progress ); ?></p>
+			<p class="srfm-setup-checklist__subtitle"><?php esc_html_e( 'Finish these and the form is ready for real submissions.', 'sureforms' ); ?></p>
+
+			<ul class="srfm-setup-checklist__steps">
+				<?php foreach ( $rows as $row ) : ?>
+					<?php $done = ! empty( $steps[ $row['key'] ] ); ?>
+					<li class="srfm-setup-checklist__step<?php echo $done ? ' is-done' : ''; ?>">
+						<span class="srfm-setup-checklist__check" aria-hidden="true"><?php echo $done ? '&#10003;' : ''; ?></span>
+						<span class="srfm-setup-checklist__label"><?php echo esc_html( $row['label'] ); ?></span>
+						<?php if ( ! $done && ! empty( $row['cta'] ) ) : ?>
+							<?php if ( ! empty( $row['is_embed'] ) ) : ?>
+								<button type="button" class="srfm-setup-checklist__cta" id="srfm-setup-checklist-embed"><?php echo esc_html( $row['cta'] ); ?></button>
+							<?php else : ?>
+								<a class="srfm-setup-checklist__cta" href="<?php echo esc_url( $row['url'] ); ?>"><?php echo esc_html( $row['cta'] ); ?></a>
+							<?php endif; ?>
+						<?php endif; ?>
+					</li>
+				<?php endforeach; ?>
+			</ul>
+
+			<div class="srfm-setup-checklist__embed" id="srfm-setup-checklist-embed-box">
+				<input type="text" readonly class="srfm-setup-checklist__embed-input" id="srfm-setup-checklist-embed-input" value="<?php echo esc_attr( $card['shortcode'] ); ?>" />
+				<button type="button" class="button srfm-setup-checklist__embed-copy" id="srfm-setup-checklist-embed-copy"><?php esc_html_e( 'Copy', 'sureforms' ); ?></button>
+			</div>
+
+			<button type="button" class="srfm-setup-checklist__snooze" id="srfm-setup-checklist-snooze"><?php esc_html_e( 'Remind me in two weeks', 'sureforms' ); ?></button>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Enqueue the setup-checklist widget's styles and behavior on the dashboard (#3031).
+	 *
+	 * Mirrors the AI widget convention: an inline-only handle carries the CSS and the
+	 * behavior (dismiss / snooze / reveal-and-copy embed code), with server values —
+	 * the REST URL, nonce and form id — passed through wp_localize_script rather than
+	 * printed into the markup, so it stays Plugin-Check clean.
+	 *
+	 * @param string $hook_suffix Current admin page hook suffix.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function enqueue_form_setup_widget_assets( $hook_suffix ) {
+		if ( 'index.php' !== $hook_suffix || ! Helper::current_user_can() ) {
+			return;
+		}
+
+		$card = self::get_form_setup_card();
+
+		if ( null === $card ) {
+			return;
+		}
+
+		$css = <<<'CSS'
+#srfm_form_setup_checklist .inside { margin: 0; padding: 0; }
+.srfm-setup-checklist { padding: 12px 16px 16px; }
+.srfm-setup-checklist__title { margin: 0 0 4px; font-size: 15px; font-weight: 600; color: #1e1e1e; }
+.srfm-setup-checklist__subtitle { margin: 0 0 12px; color: #646970; font-size: 13px; }
+.srfm-setup-checklist__steps { margin: 0; padding: 0; list-style: none; }
+.srfm-setup-checklist__step { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; }
+.srfm-setup-checklist__step + .srfm-setup-checklist__step { margin-top: 6px; }
+.srfm-setup-checklist__step:not(.is-done) { background: #f6f7f7; }
+.srfm-setup-checklist__check { flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; border: 2px solid #c3c4c7; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; color: #fff; box-sizing: border-box; }
+.srfm-setup-checklist__step.is-done .srfm-setup-checklist__check { background: #16a34a; border-color: #16a34a; }
+.srfm-setup-checklist__label { flex: 1 1 auto; font-size: 14px; color: #1e1e1e; }
+.srfm-setup-checklist__step.is-done .srfm-setup-checklist__label { text-decoration: line-through; color: #787c82; }
+.srfm-setup-checklist__cta { margin-left: auto; border: 0; background: transparent; padding: 0; font-size: 14px; font-weight: 600; color: #d54e21; text-decoration: underline; cursor: pointer; }
+.srfm-setup-checklist__cta:hover { color: #b83c14; }
+.srfm-setup-checklist__embed { display: none; gap: 8px; margin: 10px 12px 0; }
+.srfm-setup-checklist__embed.is-visible { display: flex; }
+.srfm-setup-checklist__embed-input { flex: 1 1 auto; }
+.srfm-setup-checklist__snooze { display: inline-block; margin-top: 14px; border: 0; background: transparent; padding: 0; font-size: 13px; color: #646970; text-decoration: underline; cursor: pointer; }
+.srfm-setup-checklist__snooze:hover { color: #1e1e1e; }
+CSS;
+
+		wp_register_style( 'srfm-setup-checklist-widget', false, [], SRFM_VER );
+		wp_enqueue_style( 'srfm-setup-checklist-widget' );
+		wp_add_inline_style( 'srfm-setup-checklist-widget', $css );
+
+		wp_register_script( 'srfm-setup-checklist-widget', '', [], SRFM_VER, true );
+		wp_enqueue_script( 'srfm-setup-checklist-widget' );
+
+		wp_localize_script(
+			'srfm-setup-checklist-widget',
+			'srfmSetupChecklist',
+			[
+				'restUrl'   => esc_url_raw( rest_url( 'sureforms/v1/dismiss-form-setup-card' ) ),
+				'nonce'     => wp_create_nonce( 'wp_rest' ),
+				'formId'    => $card['id'],
+				'copyTxt'   => __( 'Copy', 'sureforms' ),
+				'copiedTxt' => __( 'Copied', 'sureforms' ),
+			]
+		);
+
+		$inline_script = <<<'JS'
+( function () {
+	const cfg = window.srfmSetupChecklist || {};
+	const widget = document.getElementById( 'srfm-setup-checklist' );
+	if ( ! widget ) {
+		return;
+	}
+
+	const persist = function ( action ) {
+		fetch( cfg.restUrl, {
+			method: 'POST',
+			credentials: 'same-origin',
+			headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': cfg.nonce },
+			body: JSON.stringify( { form_id: cfg.formId, action: action } ),
+		} ).catch( function () {} );
+	};
+
+	const removeWidget = function () {
+		const box = document.getElementById( 'srfm_form_setup_checklist' );
+		( box || widget ).remove();
+	};
+
+	const snoozeBtn = document.getElementById( 'srfm-setup-checklist-snooze' );
+	if ( snoozeBtn ) {
+		snoozeBtn.addEventListener( 'click', function () {
+			persist( 'snooze' );
+			removeWidget();
+		} );
+	}
+
+	const embedInput = document.getElementById( 'srfm-setup-checklist-embed-input' );
+	const embedBtn = document.getElementById( 'srfm-setup-checklist-embed' );
+	const embedBox = document.getElementById( 'srfm-setup-checklist-embed-box' );
+	if ( embedBtn && embedBox ) {
+		embedBtn.addEventListener( 'click', function () {
+			const visible = embedBox.classList.toggle( 'is-visible' );
+			if ( visible && embedInput ) {
+				embedInput.focus();
+				embedInput.select();
+			}
+		} );
+	}
+
+	const copyBtn = document.getElementById( 'srfm-setup-checklist-embed-copy' );
+	if ( copyBtn && embedInput ) {
+		copyBtn.addEventListener( 'click', function () {
+			embedInput.focus();
+			embedInput.select();
+			const done = function () {
+				copyBtn.textContent = cfg.copiedTxt;
+				setTimeout( function () {
+					copyBtn.textContent = cfg.copyTxt;
+				}, 2000 );
+			};
+			if ( navigator.clipboard && navigator.clipboard.writeText ) {
+				navigator.clipboard.writeText( embedInput.value ).then( done ).catch( function () {
+					document.execCommand( 'copy' );
+					done();
+				} );
+			} else {
+				document.execCommand( 'copy' );
+				done();
+			}
+		} );
+	}
+}() );
+JS;
+
+		wp_add_inline_script( 'srfm-setup-checklist-widget', $inline_script );
 	}
 
 	/**

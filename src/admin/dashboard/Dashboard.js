@@ -8,7 +8,6 @@ import QuickAccessTab from './QuickAccessTab';
 import UpgradeToPro from './UpgradeToPro';
 import FormsOverview from './FormsOverview';
 import AdminNotice from '../components/AdminNotice';
-import FormSetupCard from './FormSetupCard';
 import { cn } from '@Utils/Helpers';
 
 export default () => {
@@ -45,8 +44,6 @@ export default () => {
 						<AdminNotice currentPage="sureforms_menu" />
 					</div>
 				) }
-				{ /* "Finish setting up" nudge for a form that still needs work (#3031). */ }
-				<FormSetupCard />
 				<Container
 					className={ cn(
 						! window.srfm_admin?.notices?.length && 'pt-5 xl:pt-8'

@@ -4,7 +4,7 @@ import { useDeviceType } from '@Controls/getPreviewType';
 import { ToggleControl } from '@wordpress/components';
 import { useDispatch, useSelect } from '@wordpress/data';
 import { store as editorStore } from '@wordpress/editor';
-import { useEffect, useState } from '@wordpress/element';
+import { useEffect, useRef, useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import { applyFilters } from '@wordpress/hooks';
 
@@ -14,6 +14,15 @@ import { FormRestrictionProvider } from '../components/form-restrictions/context
 import { prepareBlockSlugs } from '@Utils/Helpers';
 
 let prevMetaHash = '';
+
+// Capture the dashboard deep-link target (?srfm_focus=…) the moment this
+// bundle evaluates — the block editor strips unrecognised query args from the
+// URL shortly after it boots, so reading the param later (inside a mount
+// effect) finds it already gone. Snapshotting it here, before Gutenberg's URL
+// cleanup runs, is what makes the deep-link reliable.
+const srfmDeepLinkFocus = new URLSearchParams( window.location.search ).get(
+	'srfm_focus'
+);
 
 function GeneralSettings( props ) {
 	const { createNotice, removeNotice } = useDispatch( 'core/notices' );
@@ -31,6 +40,10 @@ function GeneralSettings( props ) {
 	const root = document.documentElement.querySelector( 'body' );
 	const [ isOpen, setOpen ] = useState( false );
 	const [ popupTab, setPopupTab ] = useState( false );
+	// Mirrors `isOpen` for the deep-link poll below, which reads it from a
+	// long-lived interval closure that would otherwise see a stale value.
+	const isOpenRef = useRef( isOpen );
+	isOpenRef.current = isOpen;
 	const [ hasValidationErrors, setHasValidationErrors ] = useState( false );
 
 	const closeModal = () => {
@@ -237,6 +250,76 @@ function GeneralSettings( props ) {
 			);
 		};
 	}, [ sureformsKeys ] );
+
+	// Deep-link support: open a specific form-settings panel when the editor is
+	// reached with ?srfm_focus=... — the dashboard setup-checklist CTAs use this so
+	// "Set up email" lands on the Email Notification tab. The target is read from
+	// `srfmDeepLinkFocus`, snapshotted at bundle-eval time because the block editor
+	// strips the query arg from the URL before this effect runs.
+	useEffect( () => {
+		const tabByFocus = {
+			ottokit: 'ottokit',
+			thankyou: 'form_confirmation',
+			notifications: 'email_notification',
+		};
+		const tabId = tabByFocus[ srfmDeepLinkFocus ];
+
+		if ( ! tabId ) {
+			return undefined;
+		}
+
+		// Open the form-settings dialog on the target tab via the same window
+		// event the "Form Settings" popover uses. The editor mounts/remounts the
+		// settings panels during initial load and the listener re-registers on
+		// every meta change, so a single dispatch can miss it, and the Force UI
+		// dialog's opacity fade-in can stall when toggled amid that churn. Poll
+		// every 300ms: dispatch the open request until the dialog appears, then
+		// stop dispatching and just hold the overlay visible.
+		//
+		// Once it has opened, halt the poll the moment `isOpen` goes back to false
+		// — that is the user closing it (Esc / backdrop / ✕), which flips state on
+		// this same live mount. A load-time remount instead tears this effect down
+		// (clearing the interval) and re-runs it fresh on the new mount, so churn
+		// still reopens while a deliberate close stays closed. Give up after the
+		// load window if it never opened so the interval can't run indefinitely.
+		let elapsed = 0;
+		let opened = false;
+		const ensureOpen = setInterval( () => {
+			elapsed += 300;
+
+			// Dialog is open on this mount: mark it opened and hold the overlay
+			// painted (the fade-in can stall during load), then wait.
+			if ( isOpenRef.current ) {
+				opened = true;
+				const panel = document.querySelector( '.srfm-dialog-panel' );
+				const overlay = panel?.closest( '.fixed.inset-0' );
+				if ( overlay ) {
+					overlay.style.opacity = '1';
+				}
+				return;
+			}
+
+			// It was open and is now closed on this same live mount — the user
+			// dismissed it (✕ / Esc / backdrop). Stop; do not reopen.
+			if ( opened ) {
+				clearInterval( ensureOpen );
+				return;
+			}
+
+			// Not open yet — keep asking until the listener catches it.
+			window.dispatchEvent(
+				new CustomEvent( 'srfm-open-form-settings', {
+					detail: { tabId },
+				} )
+			);
+
+			if ( elapsed >= 12000 ) {
+				clearInterval( ensureOpen );
+			}
+		}, 300 );
+
+		return () => clearInterval( ensureOpen );
+	}, [] );
 
 	return (
 		<>
