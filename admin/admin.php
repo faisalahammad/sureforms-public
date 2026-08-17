@@ -254,11 +254,13 @@ class Admin {
 	/**
 	 * Whether a form's confirmation message is still the shipped default.
 	 *
-	 * Compared on tag-stripped, whitespace-collapsed text rather than raw HTML:
-	 * the default is stored with a base64 icon on creation but regenerated with a
-	 * URL icon, so the markup differs while the wording does not. Any real edit to
-	 * the heading or body text changes the text and flips this to false, which is
-	 * exactly when the prompt should stop showing.
+	 * Compared on tag-stripped, entity-decoded, whitespace-collapsed text rather
+	 * than raw HTML: the default is stored with a base64 icon on creation but
+	 * regenerated with a URL icon, so the markup differs while the wording does
+	 * not, and a starter-template import can store a literal apostrophe where the
+	 * generated default carries the encoded `&#039;` — decoding entities makes both
+	 * compare equal. Any real edit to the heading or body text changes the text and
+	 * flips this to false, which is exactly when the prompt should stop showing.
 	 *
 	 * @param int $form_id Form post ID.
 	 *
@@ -279,7 +281,10 @@ class Admin {
 		}
 
 		$normalize = static function ( $html ) {
-			return trim( (string) preg_replace( '/\s+/', ' ', wp_strip_all_tags( (string) $html ) ) );
+			// Decode entities too, so an encoded apostrophe (&#039;) in the generated
+			// default matches a literal one stored by a template import.
+			$text = html_entity_decode( wp_strip_all_tags( (string) $html ), ENT_QUOTES, 'UTF-8' );
+			return trim( (string) preg_replace( '/\s+/', ' ', $text ) );
 		};
 
 		return $normalize( $message ) === $normalize( Global_Settings::get_default_confirmation_message() );

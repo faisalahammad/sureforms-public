@@ -963,11 +963,18 @@ class Test_Getting_Started_Notice extends TestCase {
 			]
 		);
 
+		$default_message = \SRFM\Inc\Global_Settings\Global_Settings::get_default_confirmation_message();
+
 		// The shipped default message is detected as the default.
+		update_post_meta( $form_id, '_srfm_form_confirmation', [ [ 'message' => $default_message ] ] );
+		$this->assertTrue( Admin::is_default_confirmation_message( $form_id ) );
+
+		// The same default with entities decoded — as a starter-template import can
+		// store it (literal apostrophe vs the generated &#039;) — still matches.
 		update_post_meta(
 			$form_id,
 			'_srfm_form_confirmation',
-			[ [ 'message' => \SRFM\Inc\Global_Settings\Global_Settings::get_default_confirmation_message() ] ]
+			[ [ 'message' => html_entity_decode( $default_message, ENT_QUOTES, 'UTF-8' ) ] ]
 		);
 		$this->assertTrue( Admin::is_default_confirmation_message( $form_id ) );
 
