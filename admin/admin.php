@@ -336,6 +336,9 @@ class Admin {
 				// Deep-links to the email-notification panel where supported; falls
 				// back to opening the editor when the focus handler isn't present.
 				'email_url' => add_query_arg( 'srfm_focus', 'notifications', $edit_link ),
+				// Front-end instant-form page; admins can always view it (the
+				// non-privileged redirect in Post_Types exempts them).
+				'view_url'  => (string) get_permalink( $form_id ),
 				'shortcode' => sprintf( '[sureforms id="%d"]', $form_id ),
 			];
 
@@ -2413,7 +2416,7 @@ JS;
 		// Optional next-steps — always offered, their completion is not computed.
 		$rows = [
 			[
-				'label' => __( 'Review the fields and publish', 'sureforms' ),
+				'label' => __( 'Review or edit your form', 'sureforms' ),
 				'cta'   => __( 'Edit form', 'sureforms' ),
 				'url'   => $card['edit_url'],
 			],
@@ -2436,7 +2439,14 @@ JS;
 		);
 		?>
 		<div class="srfm-setup-checklist" id="srfm-setup-checklist">
-			<p class="srfm-setup-checklist__title"><?php echo esc_html( $heading ); ?></p>
+			<p class="srfm-setup-checklist__title">
+				<?php echo esc_html( $heading ); ?>
+				<?php if ( ! empty( $card['view_url'] ) ) { ?>
+					<a class="srfm-setup-checklist__view" href="<?php echo esc_url( $card['view_url'] ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: form title. */ __( 'View %s (opens in a new tab)', 'sureforms' ), $card['title'] ) ); ?>">
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+					</a>
+				<?php } ?>
+			</p>
 			<p class="srfm-setup-checklist__subtitle"><?php esc_html_e( 'Customize your form to get it ready for real submissions:', 'sureforms' ); ?></p>
 
 			<ul class="srfm-setup-checklist__steps">
@@ -2490,6 +2500,8 @@ JS;
 #srfm_form_setup_checklist .inside { margin: 0; padding: 0; }
 .srfm-setup-checklist { padding: 12px 16px 16px; }
 .srfm-setup-checklist__title { margin: 0 0 4px; font-size: 15px; font-weight: 600; color: #1e1e1e; }
+.srfm-setup-checklist__view { display: inline-flex; align-items: center; margin-left: 6px; color: #d54e21; vertical-align: middle; }
+.srfm-setup-checklist__view:hover, .srfm-setup-checklist__view:focus { color: #b83c14; }
 .srfm-setup-checklist__subtitle { margin: 0 0 12px; color: #646970; font-size: 13px; }
 .srfm-setup-checklist__steps { margin: 0; padding: 0; list-style: none; }
 .srfm-setup-checklist__step { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; }
