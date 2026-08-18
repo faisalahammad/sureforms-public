@@ -86,6 +86,18 @@ class Admin {
 	private static $sureforms_page_default_capability = 'manage_options';
 
 	/**
+	 * Request memo for the "Finish setting up" Thank You prompt (#3030).
+	 *
+	 * A static property (not a function-local static) so tests can reset it via
+	 * reflection / reset_thankyou_prompt_cache() — otherwise the first call pins
+	 * the value for the whole process and the feature is untestable.
+	 *
+	 * @var array<int,array<string,mixed>>|null
+	 * @since x.x.x
+	 */
+	private static $thankyou_prompt_cache = null;
+
+	/**
 	 * Class constructor.
 	 *
 	 * @return void
@@ -355,10 +367,8 @@ class Admin {
 		// Memoized for the request so repeated reads (e.g. the notice render plus
 		// any add-on consumer) share a single query. Sentinel is null, not false,
 		// so a filter returning false (__return_false to disable) still memoizes.
-		static $cache = null;
-
-		if ( null !== $cache ) {
-			return $cache;
+		if ( null !== self::$thankyou_prompt_cache ) {
+			return self::$thankyou_prompt_cache;
 		}
 
 		/**
@@ -368,10 +378,23 @@ class Admin {
 		 *
 		 * @since x.x.x
 		 */
-		$filtered = apply_filters( 'srfm_thankyou_prompt_forms', self::compute_thankyou_prompt_forms() );
-		$cache    = is_array( $filtered ) ? $filtered : [];
+		$filtered                    = apply_filters( 'srfm_thankyou_prompt_forms', self::compute_thankyou_prompt_forms() );
+		self::$thankyou_prompt_cache = is_array( $filtered ) ? $filtered : [];
 
-		return $cache;
+		return self::$thankyou_prompt_cache;
+	}
+
+	/**
+	 * Clear the request memo for the Thank You prompt (#3030).
+	 *
+	 * Lets tests exercise the memoized public path, and is a safe hook for anything
+	 * that changes which form qualifies (e.g. a form save).
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public static function reset_thankyou_prompt_cache() {
+		self::$thankyou_prompt_cache = null;
 	}
 
 	/**
@@ -403,11 +426,11 @@ class Admin {
 			return;
 		}
 
-		// Everywhere in wp-admin except the main dashboard — the #3031 dashboard
-		// widget owns the on-dashboard setup nudge. Placement is intentional per #3030.
+		// Everywhere in wp-admin except the main dashboard. A null screen fails
+		// closed (return) rather than registering the notice on an unknown screen.
 		$screen = get_current_screen();
 
-		if ( $screen && 'dashboard' === $screen->id ) {
+		if ( ! $screen || 'dashboard' === $screen->id ) {
 			return;
 		}
 
@@ -427,7 +450,15 @@ class Admin {
 		// result of array_filter()) still exposes the newest prompt at index 0.
 		$prompts = array_values( (array) self::get_thankyou_prompt_forms() );
 
-		if ( empty( $prompts[0] ) || ! is_array( $prompts[0] ) || empty( $prompts[0]['id'] ) || empty( $prompts[0]['edit_url'] ) ) {
+		// Validate every key build_thankyou_notice_markup() reads, not just id/edit_url
+		// — a filter returning a partial payload would otherwise trip "Undefined array
+		// key" warnings and esc_url( null ) deprecations on every admin page.
+		if (
+			empty( $prompts[0] ) || ! is_array( $prompts[0] )
+			|| empty( $prompts[0]['id'] ) || empty( $prompts[0]['edit_url'] )
+			|| empty( $prompts[0]['thankyou_url'] ) || empty( $prompts[0]['replies_url'] )
+			|| ! isset( $prompts[0]['title'] )
+		) {
 			return;
 		}
 
@@ -441,6 +472,10 @@ class Admin {
 				'class'                      => 'srfm-thankyou-notice',
 				'is_dismissible'             => true,
 				'display-with-other-notices' => true,
+				// Render late so this nudge never pre-empts higher-priority notices
+				// (e.g. Astra's minimum-version warnings, which are display-with-
+				// other-notices => false and would be skipped once ours renders).
+				'priority'                   => 100,
 			]
 		);
 

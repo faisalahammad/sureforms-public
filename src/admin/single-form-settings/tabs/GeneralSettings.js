@@ -12,14 +12,13 @@ import { applyFilters } from '@wordpress/hooks';
 import Dialog from '../components/dialog/Dialog';
 import { FormRestrictionProvider } from '../components/form-restrictions/context';
 import { prepareBlockSlugs } from '@Utils/Helpers';
-import { srfmDeepLinkFocus, SRFM_DEEP_LINK_TABS } from '../deep-link';
+import {
+	srfmDeepLinkFocus,
+	SRFM_DEEP_LINK_TABS,
+	deepLinkState,
+} from '../deep-link';
 
 let prevMetaHash = '';
-
-// One deep-link per page load, ever. Module-scoped so a later panel remount
-// (switching to the Block tab and back, which unmounts/remounts this component)
-// cannot re-fire the open and slam the dialog back over the user's work.
-let srfmDeepLinkConsumed = false;
 
 function GeneralSettings( props ) {
 	const { createNotice, removeNotice } = useDispatch( 'core/notices' );
@@ -251,11 +250,12 @@ function GeneralSettings( props ) {
 	// This component only mounts once the Form Options panel is open; the editor
 	// root (Editor.js) is responsible for ensuring that (sidebar + panel). Once
 	// mounted, this fires a single synchronous dispatch to the sibling listener
-	// effect above (declared first, so React registers it before this one runs).
-	// Consume-once via the module flag so a later panel remount does not reopen
-	// the dialog on top of the user's work.
+	// effect above (declared first, so React registers it before this one runs)
+	// and sets the shared deepLinkState.consumed — which stops the root's opener
+	// loop and prevents a later panel remount reopening the dialog over the user's
+	// work.
 	useEffect( () => {
-		if ( srfmDeepLinkConsumed ) {
+		if ( deepLinkState.consumed ) {
 			return;
 		}
 
@@ -270,7 +270,7 @@ function GeneralSettings( props ) {
 			return;
 		}
 
-		srfmDeepLinkConsumed = true;
+		deepLinkState.consumed = true;
 		window.dispatchEvent(
 			new CustomEvent( 'srfm-open-form-settings', {
 				detail: { tabId },

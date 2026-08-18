@@ -935,6 +935,30 @@ class Test_Getting_Started_Notice extends TestCase {
 			'A null callback should not be recognised as owned.'
 		);
 	}
+}
+
+/**
+ * Tests for the "Finish setting up" Thank You prompt (#3030).
+ *
+ * Separate class (not appended to Test_Getting_Started_Notice) so it doesn't
+ * collide with #3031's tests on merge — both branches otherwise declare
+ * test_is_first_form_created() in the same class.
+ */
+class Test_Thankyou_Prompt_Notice extends TestCase {
+	use Astra_Notices_Helper;
+
+	/**
+	 * Reset shared state between tests — this file has no WP_UnitTestCase rollback.
+	 *
+	 * @return void
+	 */
+	protected function tearDown(): void {
+		wp_set_current_user( 0 );
+		Admin::reset_thankyou_prompt_cache();
+		remove_all_filters( 'srfm_thankyou_prompt_forms' );
+		remove_all_filters( 'srfm_show_thankyou_prompt' );
+		parent::tearDown();
+	}
 
 	/**
 	 * The first-form-created flag follows the stored timestamp option.
@@ -1118,27 +1142,68 @@ class Test_Getting_Started_Notice extends TestCase {
 	}
 
 	/**
-	 * The Thank You notice registrar emits nothing when there is no qualifying
-	 * Astra Sites starter-template form (#3030).
+	 * The registrar adds nothing without a qualifying form, and exactly one notice
+	 * with it — asserted on the Astra_Notices registry, with real preconditions so
+	 * the method doesn't just return on its first guard (#3030).
 	 */
 	public function test_render_thankyou_prompt_notice() {
 		$admin = Admin::get_instance();
-		$this->assertTrue( method_exists( $admin, 'render_thankyou_prompt_notice' ) );
 
-		if ( ! class_exists( '\Astra_Notices' ) ) {
-			$this->markTestSkipped( 'Astra_Notices library not loaded.' );
+		if ( ! class_exists( '\Astra_Notices' ) || ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'Astra_Notices / CPT not available.' );
 		}
+		remove_all_actions( 'wp_insert_post_data' );
 
-		// The method registers with Astra_Notices rather than echoing, so assert on
-		// the registry: with no qualifying starter-template form in the test DB,
-		// nothing should be registered.
 		$prop = new \ReflectionProperty( \Astra_Notices::class, 'notices' );
 		$prop->setAccessible( true );
-		$prop->setValue( null, [] );
+		$original = $prop->getValue();
 
-		$admin->render_thankyou_prompt_notice();
+		// A capable user on a NON-dashboard screen with no prior dismissal — the
+		// preconditions the method needs before it ever reaches the query.
+		$admin_user = wp_insert_user(
+			[
+				'user_login' => 'srfm_ty_render_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_ty_render_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $admin_user ) ? 0 : (int) $admin_user );
+		set_current_screen( 'plugins' );
+		delete_user_meta( is_wp_error( $admin_user ) ? 0 : (int) $admin_user, 'srfm-thankyou-prompt' );
 
-		$this->assertSame( [], $prop->getValue(), 'No qualifying form → no notice registered.' );
+		try {
+			// Negative: no qualifying starter-template form → nothing registered.
+			Admin::reset_thankyou_prompt_cache();
+			$prop->setValue( null, [] );
+			$admin->render_thankyou_prompt_notice();
+			$this->assertSame( [], $prop->getValue(), 'No qualifying form → no notice registered.' );
+
+			// Positive: a starter-template import still on the default Thank You
+			// message → exactly the srfm-thankyou-prompt notice is registered.
+			$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Positive TY' ] );
+			update_post_meta( $form_id, Admin::ASTRA_SITES_IMPORT_META, 1 );
+			update_post_meta(
+				$form_id,
+				'_srfm_form_confirmation',
+				[ [ 'confirmation_type' => 'same page', 'message' => \SRFM\Inc\Global_Settings\Global_Settings::get_default_confirmation_message() ] ]
+			);
+
+			Admin::reset_thankyou_prompt_cache();
+			$prop->setValue( null, [] );
+			$admin->render_thankyou_prompt_notice();
+			$ids = wp_list_pluck( (array) $prop->getValue(), 'id' );
+			$this->assertContains( 'srfm-thankyou-prompt', $ids, 'A qualifying form registers exactly the prompt notice.' );
+
+			wp_delete_post( $form_id, true );
+		} finally {
+			$prop->setValue( null, is_array( $original ) ? $original : [] );
+			Admin::reset_thankyou_prompt_cache();
+			wp_set_current_user( 0 );
+			if ( ! is_wp_error( $admin_user ) ) {
+				wp_delete_user( (int) $admin_user );
+			}
+		}
 	}
 
 	/**
@@ -1153,6 +1218,21 @@ class Test_Getting_Started_Notice extends TestCase {
 
 		$this->assertStringContainsString( 'srfm-thankyou-notice', $output );
 		$this->assertStringContainsString( '#D54407', $output );
+		// The SureForms mark is a data-URI background; assert the URI itself so a
+		// dropped esc_url() protocol allowlist (which blanks it) is caught.
+		$this->assertStringContainsString( "background: url('data:image/svg+xml,", $output );
+	}
+
+	/**
+	 * The prompt cache reset clears the request memo (#3030).
+	 */
+	public function test_reset_thankyou_prompt_cache() {
+		Admin::reset_thankyou_prompt_cache();
+		$this->assertIsArray( Admin::get_thankyou_prompt_forms() );
+
+		// After a reset the next read recomputes rather than returning a pinned value.
+		Admin::reset_thankyou_prompt_cache();
+		$this->assertIsArray( Admin::get_thankyou_prompt_forms() );
 	}
 
 	/**
