@@ -1125,12 +1125,20 @@ class Test_Getting_Started_Notice extends TestCase {
 		$admin = Admin::get_instance();
 		$this->assertTrue( method_exists( $admin, 'render_thankyou_prompt_notice' ) );
 
-		ob_start();
-		$admin->render_thankyou_prompt_notice();
-		$output = (string) ob_get_clean();
+		if ( ! class_exists( '\Astra_Notices' ) ) {
+			$this->markTestSkipped( 'Astra_Notices library not loaded.' );
+		}
 
-		// No starter-template form exists in the test DB, so nothing is printed.
-		$this->assertStringNotContainsString( 'srfm-thankyou-notice', $output );
+		// The method registers with Astra_Notices rather than echoing, so assert on
+		// the registry: with no qualifying starter-template form in the test DB,
+		// nothing should be registered.
+		$prop = new \ReflectionProperty( \Astra_Notices::class, 'notices' );
+		$prop->setAccessible( true );
+		$prop->setValue( null, [] );
+
+		$admin->render_thankyou_prompt_notice();
+
+		$this->assertSame( [], $prop->getValue(), 'No qualifying form → no notice registered.' );
 	}
 
 	/**

@@ -13,7 +13,6 @@ import {
 	useSelect,
 	useDispatch,
 	select as dataSelect,
-	dispatch as dataDispatch,
 } from '@wordpress/data';
 import {
 	store as editorStore,
@@ -23,10 +22,8 @@ import {
 import { store as blockEditorStore } from '@wordpress/block-editor';
 import { store as preferencesStore } from '@wordpress/preferences';
 
-import GeneralSettings, {
-	srfmDeepLinkFocus,
-	SRFM_DEEP_LINK_TABS,
-} from './tabs/GeneralSettings.js';
+import GeneralSettings from './tabs/GeneralSettings.js';
+import { srfmDeepLinkFocus, SRFM_DEEP_LINK_TABS } from './deep-link';
 import StyleSettings from './tabs/StyleSettings.js';
 import InspectorTabs from '@Components/inspector-tabs/InspectorTabs.js';
 import InspectorTab, {
@@ -91,14 +88,13 @@ const SureformsFormSpecificSettings = () => {
 	// runs from the always-mounted plugin root so the deep-link works regardless
 	// of the user's saved sidebar state.
 	//
-	// Opening it once on mount isn't enough: an early open (before the editor has
-	// finished booting) is a no-op or gets reverted by the editor's preference
-	// restore — the same reason forcePanel's open doesn't stick. Re-assert on a
-	// short interval until the sidebar is open, then stop. The dispatch is made
-	// from a timer tick (outside the store's notification cycle, where it would be
-	// swallowed) so it actually takes effect. Bounded so a sidebar that can't open
-	// is never retried indefinitely; opening it is enough — GeneralSettings then
-	// mounts and self-opens the target tab (once).
+	// GeneralSettings mounts only when the Document sidebar is open AND the "Form
+	// Options" panel is expanded — both are user preferences that can be off, and
+	// an early open during boot gets reverted by the editor's preference restore.
+	// So re-assert forcePanel() (which opens the sidebar and enables+opens both
+	// panels) on a short interval from a timer tick — outside the store's
+	// notification cycle, where the dispatch would be swallowed — until the target
+	// state is reached, then stop. GeneralSettings then self-opens the tab (once).
 	useEffect( () => {
 		if (
 			! Object.prototype.hasOwnProperty.call(
@@ -111,18 +107,40 @@ const SureformsFormSpecificSettings = () => {
 
 		let elapsed = 0;
 		const ensureOpen = setInterval( () => {
+			// Bound + clear FIRST, so a throwing store method can never keep the
+			// interval alive for the rest of the session.
 			elapsed += 300;
-			const editPostStore = dataSelect( 'core/edit-post' );
-			if ( editPostStore?.isEditorSidebarOpened() ) {
+			if ( elapsed > 6000 ) {
 				clearInterval( ensureOpen );
 				return;
 			}
-			dataDispatch( 'core/edit-post' )?.openGeneralSidebar(
-				'edit-post/document'
-			);
-			if ( elapsed >= 6000 ) {
-				clearInterval( ensureOpen );
+
+			const editor = dataSelect( 'core/editor' );
+			if ( ! editor ) {
+				return;
 			}
+
+			// The Form Options panel must be open, on the Document tab (the sidebar
+			// being "open" is true for the Block tab too, where GeneralSettings does
+			// not render).
+			const iface = dataSelect( 'core/interface' );
+			const panelOpen =
+				typeof editor.isEditorPanelOpened === 'function' &&
+				editor.isEditorPanelOpened(
+					'srfm-form-specific-settings/srfm-sidebar'
+				);
+			const onDocument =
+				iface &&
+				typeof iface.getActiveComplementaryArea === 'function' &&
+				iface.getActiveComplementaryArea( 'core/edit-post' ) ===
+					'edit-post/document';
+
+			if ( panelOpen && onDocument ) {
+				clearInterval( ensureOpen );
+				return;
+			}
+
+			forcePanel();
 		}, 300 );
 
 		return () => clearInterval( ensureOpen );

@@ -16,11 +16,12 @@ import { Copy, PenLine, Trash } from 'lucide-react';
 import TabContentWrapper from '@Components/tab-content-wrapper';
 import { notify } from '@Utils/notify';
 import { applyFilters, doAction } from '@wordpress/hooks';
+import { srfmDeepLinkFocus } from '../../deep-link';
 
 // One-shot guard: when the editor is reached via the "Set where replies go"
-// deep-link (?srfm_focus=notifications, surfaced by PHP as window.srfmDeepLinkFocus),
-// jump straight into the first notification's editor instead of landing on the
-// list. Module-scoped so a later tab remount does not reopen it.
+// deep-link (?srfm_focus=notifications), jump straight into the notification
+// editor instead of landing on the list. Module-scoped so a later tab remount
+// does not reopen it.
 let srfmRepliesDeepLinkConsumed = false;
 
 const CustomButton = forwardRef(
@@ -212,24 +213,23 @@ const EmailNotification = ( {
 		},
 	];
 
-	// Deep-link: open the first notification's editor directly when arriving via
-	// "Set where replies go". Runs once data is available, then never again.
+	// Deep-link: open the notification editor directly when arriving via "Set
+	// where replies go". The replies step shows precisely when the form has no
+	// reply destination — routinely zero notifications — so this must act on an
+	// empty array too, landing on the Add-New form (a bare object is
+	// EmailConfirmation's documented add shape: initFormData falls back on
+	// data.id || false). Consume as soon as data is an array so it can't re-fire
+	// when the user saves their first notification and the array flips [] -> [x].
 	useEffect( () => {
 		if ( srfmRepliesDeepLinkConsumed ) {
 			return;
 		}
-		if (
-			typeof window === 'undefined' ||
-			window.srfmDeepLinkFocus !== 'notifications'
-		) {
+		if ( srfmDeepLinkFocus !== 'notifications' ) {
 			return;
 		}
-		if (
-			Array.isArray( emailNotificationData ) &&
-			emailNotificationData.length > 0
-		) {
+		if ( Array.isArray( emailNotificationData ) ) {
 			srfmRepliesDeepLinkConsumed = true;
-			handleEdit( emailNotificationData[ 0 ] );
+			handleEdit( emailNotificationData[ 0 ] ?? {} );
 		}
 	}, [ emailNotificationData ] );
 

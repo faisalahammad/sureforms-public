@@ -12,32 +12,14 @@ import { applyFilters } from '@wordpress/hooks';
 import Dialog from '../components/dialog/Dialog';
 import { FormRestrictionProvider } from '../components/form-restrictions/context';
 import { prepareBlockSlugs } from '@Utils/Helpers';
+import { srfmDeepLinkFocus, SRFM_DEEP_LINK_TABS } from '../deep-link';
 
 let prevMetaHash = '';
-
-// The dashboard "Finish setting up" notice CTA opens the editor with
-// ?srfm_focus=… to auto-open a settings tab. Gutenberg strips unrecognised query
-// args client-side before this bundle can reliably read them, so PHP surfaces the
-// value as `window.srfmDeepLinkFocus` (printed before this bundle) — read that
-// first, falling back to the raw URL for safety.
-export const srfmDeepLinkFocus =
-	( typeof window !== 'undefined' && window.srfmDeepLinkFocus ) ||
-	new URLSearchParams( window.location.search ).get( 'srfm_focus' );
 
 // One deep-link per page load, ever. Module-scoped so a later panel remount
 // (switching to the Block tab and back, which unmounts/remounts this component)
 // cannot re-fire the open and slam the dialog back over the user's work.
 let srfmDeepLinkConsumed = false;
-
-// Maps the ?srfm_focus value to a Form Settings tab id. A plain object read
-// through hasOwnProperty (never prototype members), so ?srfm_focus=constructor
-// resolves to nothing rather than handing a function to setPopupTab. Exported so
-// the always-mounted editor root (Editor.js) can open the settings sidebar for
-// the same targets — GeneralSettings only mounts once that sidebar is open.
-export const SRFM_DEEP_LINK_TABS = {
-	thankyou: 'form_confirmation',
-	notifications: 'email_notification',
-};
 
 function GeneralSettings( props ) {
 	const { createNotice, removeNotice } = useDispatch( 'core/notices' );
@@ -72,7 +54,7 @@ function GeneralSettings( props ) {
 
 		setOpen( false );
 
-		if ( btoa( JSON.stringify( sureformsKeys ) ) !== prevMetaHash ) {
+		if ( JSON.stringify( sureformsKeys ) !== prevMetaHash ) {
 			createNotice(
 				'warning',
 				__(
@@ -243,7 +225,7 @@ function GeneralSettings( props ) {
 			if ( tabId ) {
 				setPopupTab( tabId );
 				setOpen( true );
-				prevMetaHash = btoa( JSON.stringify( sureformsKeys ) );
+				prevMetaHash = JSON.stringify( sureformsKeys );
 			}
 		};
 
@@ -264,17 +246,14 @@ function GeneralSettings( props ) {
 
 	// Deep-link support: open a specific Form Settings tab when the editor is
 	// reached with ?srfm_focus=... — the dashboard "Finish setting up" notice CTA
-	// uses this so "Edit the thank-you message" lands on Form Confirmation. The
-	// target is read from `srfmDeepLinkFocus`, snapshotted at bundle-eval time
-	// because the block editor strips the query arg from the URL before this
-	// effect runs.
+	// uses this so "Edit the thank-you message" lands on Form Confirmation.
 	//
-	// forcePanel() force-opens the Form Options panel on every editor load, so
-	// this component is reliably mounted here and the sibling listener effect
-	// above (declared first, so React registers it before this one runs) is in
-	// place to receive the event — a single synchronous dispatch cannot miss it,
-	// no polling needed. Consume-once via the module flag so a later panel
-	// remount does not reopen the dialog on top of the user's work.
+	// This component only mounts once the Form Options panel is open; the editor
+	// root (Editor.js) is responsible for ensuring that (sidebar + panel). Once
+	// mounted, this fires a single synchronous dispatch to the sibling listener
+	// effect above (declared first, so React registers it before this one runs).
+	// Consume-once via the module flag so a later panel remount does not reopen
+	// the dialog on top of the user's work.
 	useEffect( () => {
 		if ( srfmDeepLinkConsumed ) {
 			return;
