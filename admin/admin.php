@@ -330,16 +330,17 @@ class Admin {
 			// The steps are shown as optional next-steps — their completion is not
 			// computed, so the widget simply lists the actions the owner can take.
 			$cache = [
-				'id'        => $form_id,
-				'title'     => get_the_title( $form_id ),
-				'edit_url'  => $edit_link,
+				'id'           => $form_id,
+				'title'        => get_the_title( $form_id ),
+				'edit_url'     => $edit_link,
 				// Deep-links to the email-notification panel where supported; falls
 				// back to opening the editor when the focus handler isn't present.
-				'email_url' => add_query_arg( 'srfm_focus', 'notifications', $edit_link ),
+				'email_url'    => add_query_arg( 'srfm_focus', 'notifications', $edit_link ),
+				// Deep-links to the Form Confirmation panel (the Thank You message).
+				'thankyou_url' => add_query_arg( 'srfm_focus', 'thankyou', $edit_link ),
 				// Front-end instant-form page; admins can always view it (the
 				// non-privileged redirect in Post_Types exempts them).
-				'view_url'  => (string) get_permalink( $form_id ),
-				'shortcode' => sprintf( '[sureforms id="%d"]', $form_id ),
+				'view_url'     => (string) get_permalink( $form_id ),
 			];
 
 			return $cache;
@@ -2421,14 +2422,14 @@ JS;
 				'url'   => $card['edit_url'],
 			],
 			[
+				'label' => __( 'Personalize the Thank You message', 'sureforms' ),
+				'cta'   => __( 'Edit message', 'sureforms' ),
+				'url'   => $card['thankyou_url'],
+			],
+			[
 				'label' => __( 'Choose who gets notified of new replies', 'sureforms' ),
 				'cta'   => __( 'Set up email', 'sureforms' ),
 				'url'   => $card['email_url'],
-			],
-			[
-				'label'    => __( 'Put the form on a page', 'sureforms' ),
-				'cta'      => __( 'Get embed code', 'sureforms' ),
-				'is_embed' => true,
 			],
 		];
 
@@ -2453,19 +2454,10 @@ JS;
 				<?php foreach ( $rows as $row ) { ?>
 					<li class="srfm-setup-checklist__step">
 						<span class="srfm-setup-checklist__label"><?php echo esc_html( $row['label'] ); ?></span>
-						<?php if ( ! empty( $row['is_embed'] ) ) { ?>
-							<button type="button" class="srfm-setup-checklist__cta" id="srfm-setup-checklist-embed"><?php echo esc_html( $row['cta'] ); ?></button>
-						<?php } else { ?>
-							<a class="srfm-setup-checklist__cta" href="<?php echo esc_url( $row['url'] ); ?>"><?php echo esc_html( $row['cta'] ); ?></a>
-						<?php } ?>
+						<a class="srfm-setup-checklist__cta" href="<?php echo esc_url( $row['url'] ); ?>"><?php echo esc_html( $row['cta'] ); ?></a>
 					</li>
 				<?php } ?>
 			</ul>
-
-			<div class="srfm-setup-checklist__embed" id="srfm-setup-checklist-embed-box">
-				<input type="text" readonly class="srfm-setup-checklist__embed-input" id="srfm-setup-checklist-embed-input" value="<?php echo esc_attr( $card['shortcode'] ); ?>" />
-				<button type="button" class="button srfm-setup-checklist__embed-copy" id="srfm-setup-checklist-embed-copy"><?php esc_html_e( 'Copy', 'sureforms' ); ?></button>
-			</div>
 
 			<button type="button" class="srfm-setup-checklist__snooze" id="srfm-setup-checklist-snooze"><?php esc_html_e( 'Remind me in two weeks', 'sureforms' ); ?></button>
 		</div>
@@ -2510,9 +2502,6 @@ JS;
 .srfm-setup-checklist__label { flex: 1 1 auto; font-size: 14px; color: #1e1e1e; }
 .srfm-setup-checklist__cta { margin-left: auto; border: 0; background: transparent; padding: 0; font-size: 14px; font-weight: 600; color: #d54e21; text-decoration: underline; cursor: pointer; }
 .srfm-setup-checklist__cta:hover { color: #b83c14; }
-.srfm-setup-checklist__embed { display: none; gap: 8px; margin: 10px 12px 0; }
-.srfm-setup-checklist__embed.is-visible { display: flex; }
-.srfm-setup-checklist__embed-input { flex: 1 1 auto; }
 .srfm-setup-checklist__snooze { display: inline-block; margin-top: 14px; border: 0; background: transparent; padding: 0; font-size: 13px; color: #646970; text-decoration: underline; cursor: pointer; }
 .srfm-setup-checklist__snooze:hover { color: #1e1e1e; }
 CSS;
@@ -2528,11 +2517,9 @@ CSS;
 			'srfm-setup-checklist-widget',
 			'srfmSetupChecklist',
 			[
-				'restUrl'   => esc_url_raw( rest_url( 'sureforms/v1/dismiss-form-setup-card' ) ),
-				'nonce'     => wp_create_nonce( 'wp_rest' ),
-				'formId'    => $card['id'],
-				'copyTxt'   => __( 'Copy', 'sureforms' ),
-				'copiedTxt' => __( 'Copied', 'sureforms' ),
+				'restUrl' => esc_url_raw( rest_url( 'sureforms/v1/dismiss-form-setup-card' ) ),
+				'nonce'   => wp_create_nonce( 'wp_rest' ),
+				'formId'  => $card['id'],
 			]
 		);
 
@@ -2563,42 +2550,6 @@ CSS;
 		snoozeBtn.addEventListener( 'click', function () {
 			persist( 'snooze' );
 			removeWidget();
-		} );
-	}
-
-	const embedInput = document.getElementById( 'srfm-setup-checklist-embed-input' );
-	const embedBtn = document.getElementById( 'srfm-setup-checklist-embed' );
-	const embedBox = document.getElementById( 'srfm-setup-checklist-embed-box' );
-	if ( embedBtn && embedBox ) {
-		embedBtn.addEventListener( 'click', function () {
-			const visible = embedBox.classList.toggle( 'is-visible' );
-			if ( visible && embedInput ) {
-				embedInput.focus();
-				embedInput.select();
-			}
-		} );
-	}
-
-	const copyBtn = document.getElementById( 'srfm-setup-checklist-embed-copy' );
-	if ( copyBtn && embedInput ) {
-		copyBtn.addEventListener( 'click', function () {
-			embedInput.focus();
-			embedInput.select();
-			const done = function () {
-				copyBtn.textContent = cfg.copiedTxt;
-				setTimeout( function () {
-					copyBtn.textContent = cfg.copyTxt;
-				}, 2000 );
-			};
-			if ( navigator.clipboard && navigator.clipboard.writeText ) {
-				navigator.clipboard.writeText( embedInput.value ).then( done ).catch( function () {
-					document.execCommand( 'copy' );
-					done();
-				} );
-			} else {
-				document.execCommand( 'copy' );
-				done();
-			}
 		} );
 	}
 }() );
