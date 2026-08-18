@@ -937,85 +937,19 @@ class Test_Getting_Started_Notice extends TestCase {
 	}
 
 	/**
-	 * The first-form-created flag resolves to a boolean.
-	 */
-	public function test_is_first_form_created() {
-		$this->assertIsBool( Admin::is_first_form_created() );
-	}
-
-	/**
-	 * A default confirmation message is detected; an edited one is not (#3031).
-	 */
-	public function test_is_default_confirmation_message() {
-		$this->assertFalse( Admin::is_default_confirmation_message( 0 ) );
-
-		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
-			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
-		}
-		remove_all_actions( 'wp_insert_post_data' );
-
-		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Conf detect' ] );
-
-		update_post_meta( $form_id, '_srfm_form_confirmation', [ [ 'message' => \SRFM\Inc\Global_Settings\Global_Settings::get_default_confirmation_message() ] ] );
-		$this->assertTrue( Admin::is_default_confirmation_message( $form_id ) );
-
-		update_post_meta( $form_id, '_srfm_form_confirmation', [ [ 'message' => 'Thanks - we will be in touch!' ] ] );
-		$this->assertFalse( Admin::is_default_confirmation_message( $form_id ) );
-
-		wp_delete_post( $form_id, true );
-	}
-
-	/**
-	 * The default admin notification is the untouched default until customised (#3031).
-	 */
-	public function test_is_default_email_notification() {
-		// No notification meta at all -> treated as untouched default.
-		$this->assertTrue( Admin::is_default_email_notification( 0 ) );
-
-		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
-			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
-		}
-		remove_all_actions( 'wp_insert_post_data' );
-
-		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Notif detect' ] );
-
-		// A customised recipient means it has been touched.
-		update_post_meta( $form_id, '_srfm_email_notification', [ [ 'status' => true, 'email_to' => 'sales@example.com', 'subject' => 'Hi', 'email_body' => '{all_data}' ] ] );
-		$this->assertFalse( Admin::is_default_email_notification( $form_id ) );
-
-		wp_delete_post( $form_id, true );
-	}
-
-	/**
-	 * Embed detection matches the srfm/form block on a published page (#3031).
-	 */
-	public function test_form_is_embedded() {
-		$this->assertFalse( Admin::form_is_embedded( 0 ) );
-
-		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
-			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
-		}
-		remove_all_actions( 'wp_insert_post_data' );
-
-		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Embed check' ] );
-
-		// Not placed anywhere yet.
-		$this->assertFalse( Admin::form_is_embedded( $form_id ) );
-
-		// Embedded via the srfm/form block on a published page.
-		$page_id = wp_insert_post( [ 'post_type' => 'page', 'post_status' => 'publish', 'post_title' => 'Has form', 'post_content' => '<!-- wp:srfm/form {"id":' . $form_id . '} /-->' ] );
-		$this->assertTrue( Admin::form_is_embedded( $form_id ) );
-
-		wp_delete_post( $page_id, true );
-		wp_delete_post( $form_id, true );
-	}
-
-	/**
-	 * The setup-card query returns a card payload or null.
+	 * The setup-card payload is null or a fully-formed card with deep-link URLs (#3031).
 	 */
 	public function test_get_form_setup_card() {
 		$card = Admin::get_form_setup_card();
 		$this->assertTrue( null === $card || is_array( $card ) );
+
+		if ( is_array( $card ) ) {
+			$this->assertArrayHasKey( 'id', $card );
+			$this->assertArrayHasKey( 'edit_url', $card );
+			// The email/thank-you CTAs must carry their deep-link focus targets.
+			$this->assertStringContainsString( 'srfm_focus=notifications', (string) ( $card['email_url'] ?? '' ) );
+			$this->assertStringContainsString( 'srfm_focus=thankyou', (string) ( $card['thankyou_url'] ?? '' ) );
+		}
 	}
 
 	/**
@@ -1078,16 +1012,37 @@ class Test_Getting_Started_Notice extends TestCase {
 	}
 
 	/**
-	 * The dashboard-widget renderer is callable (#3031).
+	 * The renderer honours the card contract: nothing when there's no card, the
+	 * checklist markup (heading, CTAs, snooze) when there is (#3031).
 	 */
 	public function test_render_form_setup_widget() {
-		$this->assertTrue( method_exists( Admin::get_instance(), 'render_form_setup_widget' ) );
+		$admin = Admin::get_instance();
+		$card  = Admin::get_form_setup_card();
+
+		ob_start();
+		$admin->render_form_setup_widget();
+		$output = (string) ob_get_clean();
+
+		if ( null === $card ) {
+			$this->assertSame( '', $output, 'No card → the widget renders nothing.' );
+		} else {
+			$this->assertStringContainsString( 'srfm-setup-checklist', $output );
+			$this->assertStringContainsString( 'srfm-setup-checklist__cta', $output );
+			$this->assertStringContainsString( 'srfm-setup-checklist-snooze', $output );
+		}
 	}
 
 	/**
-	 * The dashboard-widget asset enqueue is callable (#3031).
+	 * Widget assets never load off the dashboard screen (#3031).
 	 */
 	public function test_enqueue_form_setup_widget_assets() {
-		$this->assertTrue( method_exists( Admin::get_instance(), 'enqueue_form_setup_widget_assets' ) );
+		$admin = Admin::get_instance();
+
+		wp_dequeue_style( 'srfm-setup-checklist-widget' );
+		wp_deregister_style( 'srfm-setup-checklist-widget' );
+
+		// Wrong hook → the method returns before querying or enqueuing anything.
+		$admin->enqueue_form_setup_widget_assets( 'edit.php' );
+		$this->assertFalse( wp_style_is( 'srfm-setup-checklist-widget', 'enqueued' ), 'Assets must not load outside the dashboard.' );
 	}
 }

@@ -281,7 +281,7 @@ class Admin {
 
 		$cache = null;
 
-		if ( ! post_type_exists( SRFM_FORMS_POST_TYPE ) ) {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || ! post_type_exists( SRFM_FORMS_POST_TYPE ) ) {
 			return $cache;
 		}
 
@@ -296,16 +296,19 @@ class Admin {
 
 		// Only forms created from an Astra Sites starter template — those carry the
 		// `_astra_sites_imported_post` marker Astra Sites stamps on imported posts.
+		// Prime post + meta caches (the loop reads title, permalink and edit link
+		// per candidate) so this is a single query, not a follow-up per form.
 		$query = new \WP_Query(
 			[
-				'post_type'      => SRFM_FORMS_POST_TYPE,
-				'post_status'    => [ 'publish', 'draft', 'pending' ],
-				'posts_per_page' => 10,
-				'orderby'        => 'date',
-				'order'          => 'DESC',
-				'fields'         => 'ids',
-				'no_found_rows'  => true,
-				'meta_query'     => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded to 10 recent forms; dashboard-only.
+				'post_type'              => SRFM_FORMS_POST_TYPE,
+				'post_status'            => [ 'publish', 'draft', 'pending' ],
+				'posts_per_page'         => 10,
+				'orderby'                => 'date',
+				'order'                  => 'DESC',
+				'no_found_rows'          => true,
+				'update_post_meta_cache' => true,
+				'update_post_term_cache' => false,
+				'meta_query'             => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded to 10 recent forms; dashboard-only.
 					[
 						'key'     => '_astra_sites_imported_post',
 						'compare' => 'EXISTS',
@@ -314,8 +317,8 @@ class Admin {
 			]
 		);
 
-		foreach ( $query->posts as $form_id ) {
-			$form_id = (int) $form_id;
+		foreach ( $query->posts as $post ) {
+			$form_id = (int) $post->ID;
 
 			if ( ! current_user_can( 'edit_post', $form_id ) ) {
 				continue;
@@ -347,122 +350,6 @@ class Admin {
 		}
 
 		return $cache;
-	}
-
-	/**
-	 * Whether a form is embedded on at least one published page or post.
-	 *
-	 * A bounded LIKE over published content matches the two embed forms SureForms
-	 * emits — the `srfm/form` block (`"id":N`) and the `[sureforms id="N"]`
-	 * shortcode — stopping at the first hit. Heuristic by design: it errs toward
-	 * "embedded" so the card never nags about a form that is already placed.
-	 *
-	 * @param int $form_id Form post ID.
-	 *
-	 * @since x.x.x
-	 * @return bool
-	 */
-	public static function form_is_embedded( $form_id ) {
-		global $wpdb;
-
-		$form_id = (int) $form_id;
-
-		$block_like     = '%' . $wpdb->esc_like( 'srfm/form' ) . '%' . $wpdb->esc_like( '"id":' . $form_id ) . '%';
-		$shortcode_like = '%' . $wpdb->esc_like( '[sureforms id="' . $form_id . '"' ) . '%';
-
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Bounded existence check for the dashboard setup card; no core API expresses a reverse "which pages embed form N" lookup.
-		$found = $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT ID FROM {$wpdb->posts} WHERE post_status = 'publish' AND post_type IN ( 'post', 'page' ) AND ( post_content LIKE %s OR post_content LIKE %s ) LIMIT 1",
-				$block_like,
-				$shortcode_like
-			)
-		);
-
-		return ! empty( $found );
-	}
-
-	/**
-	 * Whether a form's email notification is still the shipped default (untouched).
-	 *
-	 * Every form is created with one "Admin Notification Email" — recipient
-	 * `{admin_email}`, the default subject and an `{all_data}` body — and WordPress
-	 * hands that registered default back from get_post_meta even when nothing is
-	 * stored, so mere presence never means the owner has chosen who gets notified.
-	 * The "Choose who gets notified" checklist step is therefore driven by whether
-	 * this default has been customized: a second notification, a changed recipient,
-	 * subject or body, or a disabled notification all count as touched. Compared on
-	 * the recipient + subject + body, the fields that define who is notified and
-	 * with what — cosmetic fields (reply-to, cc/bcc, from) are ignored.
-	 *
-	 * @param int $form_id Form post ID.
-	 *
-	 * @since x.x.x
-	 * @return bool True when the notification matches the default; false once customized.
-	 */
-	public static function is_default_email_notification( $form_id ) {
-		$notifications = get_post_meta( (int) $form_id, '_srfm_email_notification', true );
-
-		// No notification configured — untouched, so the step stays incomplete.
-		if ( ! is_array( $notifications ) || empty( $notifications ) ) {
-			return true;
-		}
-
-		// A second notification is something the owner added — customized.
-		if ( 1 !== count( $notifications ) ) {
-			return false;
-		}
-
-		$notification = $notifications[0];
-
-		if ( ! is_array( $notification ) ) {
-			return false;
-		}
-
-		// A disabled notification is a deliberate change away from the default.
-		if ( empty( $notification['status'] ) ) {
-			return false;
-		}
-
-		$default_subject = sprintf(
-			/* translators: %s: form title smart tag. */
-			__( 'New Form Submission - %s', 'sureforms' ),
-			'{form_title}'
-		);
-
-		return '{admin_email}' === ( $notification['email_to'] ?? '' )
-			&& ( $notification['subject'] ?? '' ) === $default_subject
-			&& '{all_data}' === ( $notification['email_body'] ?? '' );
-	}
-
-	/**
-	 * Whether a form's confirmation message is still the shipped default.
-	 *
-	 * Compared on tag-stripped text rather than raw HTML: the default is stored
-	 * with a base64 icon on creation but regenerated with a URL icon, so the markup
-	 * differs while the wording does not. Any real edit flips this to false.
-	 *
-	 * @param int $form_id Form post ID.
-	 *
-	 * @since x.x.x
-	 * @return bool
-	 */
-	public static function is_default_confirmation_message( $form_id ) {
-		$confirmation = get_post_meta( (int) $form_id, '_srfm_form_confirmation', true );
-
-		if ( ! is_array( $confirmation ) || ! isset( $confirmation[0]['message'] ) || ! is_string( $confirmation[0]['message'] ) ) {
-			return false;
-		}
-
-		if ( '' === trim( $confirmation[0]['message'] ) ) {
-			return false;
-		}
-
-		$normalize = static function ( $html ) {
-			return trim( (string) preg_replace( '/\s+/', ' ', wp_strip_all_tags( (string) $html ) ) );
-		};
-
-		return $normalize( $confirmation[0]['message'] ) === $normalize( Global_Settings::get_default_confirmation_message() );
 	}
 
 	/**
@@ -2419,10 +2306,11 @@ JS;
 	/**
 	 * Render the setup-checklist widget content (#3031).
 	 *
-	 * A progress line, then one row per step with a completion check and — for the
-	 * incomplete, actionable steps — a CTA. The "Get embed code" step reveals the
-	 * form shortcode inline rather than navigating away. Dismiss (✕) and the 14-day
-	 * snooze are wired in the enqueued inline script against the REST endpoint.
+	 * A heading (with a link to view the form), a subtitle, and a fixed list of
+	 * optional next-steps — each always shown with its CTA; completion is not
+	 * computed. Each CTA deep-links into the editor (edit form / Thank You message /
+	 * email notification). The "Remind me in two weeks" snooze is wired in the
+	 * enqueued inline script against the REST endpoint.
 	 *
 	 * @since x.x.x
 	 * @return void
@@ -2562,7 +2450,7 @@ CSS;
 	}
 
 	const persist = function ( action ) {
-		fetch( cfg.restUrl, {
+		return fetch( cfg.restUrl, {
 			method: 'POST',
 			credentials: 'same-origin',
 			keepalive: true,
@@ -2572,14 +2460,18 @@ CSS;
 	};
 
 	const removeWidget = function () {
+		// Remove the whole postbox; removing only the inner node would leave an
+		// empty box with its title still showing.
 		const box = document.getElementById( 'srfm_form_setup_checklist' );
-		( box || widget ).remove();
+		if ( box ) {
+			box.remove();
+		}
 	};
 
 	// Beacon the CTA / view-form clicks for analytics. keepalive on the fetch lets
 	// the request finish even though the CTA immediately navigates away.
 	widget.addEventListener( 'click', function ( e ) {
-		const target = e.target.closest( '[data-srfm-event]' );
+		const target = e.target?.closest?.( '[data-srfm-event]' );
 		if ( target ) {
 			persist( target.getAttribute( 'data-srfm-event' ) );
 		}
@@ -2588,8 +2480,14 @@ CSS;
 	const snoozeBtn = document.getElementById( 'srfm-setup-checklist-snooze' );
 	if ( snoozeBtn ) {
 		snoozeBtn.addEventListener( 'click', function () {
-			persist( 'snooze' );
-			removeWidget();
+			// Only hide the widget once the snooze actually persisted — the
+			// render-time wp_rest nonce can expire on a long-open dashboard, and
+			// hiding on a 403 would make the widget silently reappear next load.
+			persist( 'snooze' ).then( function ( res ) {
+				if ( res && res.ok ) {
+					removeWidget();
+				}
+			} );
 		} );
 	}
 }() );

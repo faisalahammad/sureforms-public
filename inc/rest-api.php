@@ -1425,6 +1425,8 @@ class Rest_Api {
 							'sanitize_callback' => 'absint',
 						],
 						'action'  => [
+							'type'              => 'string',
+							'enum'              => [ 'edit_form', 'edit_thankyou', 'set_up_email', 'view_form', 'snooze' ],
 							'sanitize_callback' => 'sanitize_text_field',
 						],
 					],
