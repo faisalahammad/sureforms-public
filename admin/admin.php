@@ -2478,7 +2478,7 @@ JS;
 				<?php foreach ( $rows as $row ) { ?>
 					<li class="srfm-setup-checklist__step">
 						<span class="srfm-setup-checklist__label"><?php echo esc_html( $row['label'] ); ?></span>
-						<a class="srfm-setup-checklist__cta" data-srfm-event="<?php echo esc_attr( $row['event'] ); ?>" href="<?php echo esc_url( $row['url'] ); ?>"><?php echo esc_html( $row['cta'] ); ?></a>
+						<a class="srfm-setup-checklist__cta" data-srfm-event="<?php echo esc_attr( $row['event'] ); ?>" href="<?php echo esc_url( $row['url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $row['cta'] ); ?></a>
 					</li>
 				<?php } ?>
 			</ul>
