@@ -2502,6 +2502,9 @@ JS;
 .srfm-setup-checklist__label { flex: 1 1 auto; font-size: 14px; color: #1e1e1e; }
 .srfm-setup-checklist__cta { margin-left: auto; border: 0; background: transparent; padding: 0; font-size: 14px; font-weight: 600; color: #d54e21; text-decoration: underline; cursor: pointer; }
 .srfm-setup-checklist__cta:hover { color: #b83c14; }
+/* Drop WP's blue focus ring on the widget's links; keep an accessible, on-brand keyboard outline. */
+.srfm-setup-checklist a:focus { outline: none; box-shadow: none; }
+.srfm-setup-checklist a:focus-visible { outline: 2px solid #d54e21; outline-offset: 2px; box-shadow: none; }
 .srfm-setup-checklist__snooze { display: inline-block; margin-top: 14px; border: 0; background: transparent; padding: 0; font-size: 13px; color: #646970; text-decoration: underline; cursor: pointer; }
 .srfm-setup-checklist__snooze:hover { color: #1e1e1e; }
 CSS;
