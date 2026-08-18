@@ -2437,7 +2437,7 @@ JS;
 		?>
 		<div class="srfm-setup-checklist" id="srfm-setup-checklist">
 			<p class="srfm-setup-checklist__title"><?php echo esc_html( $heading ); ?></p>
-			<p class="srfm-setup-checklist__subtitle"><?php esc_html_e( 'A few optional steps to get your form ready for real submissions:', 'sureforms' ); ?></p>
+			<p class="srfm-setup-checklist__subtitle"><?php esc_html_e( 'Customize your form to get it ready for real submissions:', 'sureforms' ); ?></p>
 
 			<ul class="srfm-setup-checklist__steps">
 				<?php foreach ( $rows as $row ) { ?>
