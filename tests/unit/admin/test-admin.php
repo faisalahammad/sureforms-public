@@ -937,10 +937,22 @@ class Test_Getting_Started_Notice extends TestCase {
 	}
 
 	/**
-	 * The first-form-created flag resolves to a boolean.
+	 * The first-form-created flag follows the stored timestamp option.
 	 */
 	public function test_is_first_form_created() {
-		$this->assertIsBool( Admin::is_first_form_created() );
+		// No stored timestamp → first form not yet created.
+		Helper::update_srfm_option( 'first_form_created_at', false );
+		$this->assertFalse( Admin::is_first_form_created() );
+
+		// A positive integer timestamp → first form has been created.
+		Helper::update_srfm_option( 'first_form_created_at', time() );
+		$this->assertTrue( Admin::is_first_form_created() );
+
+		// A zero/invalid timestamp does not count as created.
+		Helper::update_srfm_option( 'first_form_created_at', 0 );
+		$this->assertFalse( Admin::is_first_form_created() );
+
+		Helper::update_srfm_option( 'first_form_created_at', false );
 	}
 
 	/**
@@ -965,8 +977,8 @@ class Test_Getting_Started_Notice extends TestCase {
 
 		$default_message = \SRFM\Inc\Global_Settings\Global_Settings::get_default_confirmation_message();
 
-		// The shipped default message is detected as the default.
-		update_post_meta( $form_id, '_srfm_form_confirmation', [ [ 'message' => $default_message ] ] );
+		// The shipped default message on a "same page" confirmation is the default.
+		update_post_meta( $form_id, '_srfm_form_confirmation', [ [ 'confirmation_type' => 'same page', 'message' => $default_message ] ] );
 		$this->assertTrue( Admin::is_default_confirmation_message( $form_id ) );
 
 		// The same default with entities decoded — as a starter-template import can
@@ -974,19 +986,24 @@ class Test_Getting_Started_Notice extends TestCase {
 		update_post_meta(
 			$form_id,
 			'_srfm_form_confirmation',
-			[ [ 'message' => html_entity_decode( $default_message, ENT_QUOTES, 'UTF-8' ) ] ]
+			[ [ 'confirmation_type' => 'same page', 'message' => html_entity_decode( $default_message, ENT_QUOTES, 'UTF-8' ) ] ]
 		);
 		$this->assertTrue( Admin::is_default_confirmation_message( $form_id ) );
 
+		// A redirect confirmation never renders the message, so even the default
+		// string must NOT be flagged (it would otherwise nag with no way to clear).
+		update_post_meta( $form_id, '_srfm_form_confirmation', [ [ 'confirmation_type' => 'different page', 'message' => $default_message ] ] );
+		$this->assertFalse( Admin::is_default_confirmation_message( $form_id ) );
+
 		// Any real edit to the message flips it to non-default (the auto-clear path).
-		update_post_meta( $form_id, '_srfm_form_confirmation', [ [ 'message' => 'Thanks so much - we will be in touch!' ] ] );
+		update_post_meta( $form_id, '_srfm_form_confirmation', [ [ 'confirmation_type' => 'same page', 'message' => 'Thanks so much - we will be in touch!' ] ] );
 		$this->assertFalse( Admin::is_default_confirmation_message( $form_id ) );
 
 		wp_delete_post( $form_id, true );
 	}
 
 	/**
-	 * A form with no email notification has no reply destination (#3030).
+	 * A form with no enabled email notification has no reply destination (#3030).
 	 */
 	public function test_form_has_reply_destination() {
 		$this->assertFalse( Admin::form_has_reply_destination( 0 ) );
@@ -1004,9 +1021,6 @@ class Test_Getting_Started_Notice extends TestCase {
 			]
 		);
 
-		// No notification → no reply destination.
-		$this->assertFalse( Admin::form_has_reply_destination( $form_id ) );
-
 		// Enabled notification with a recipient → has a destination.
 		update_post_meta( $form_id, '_srfm_email_notification', [ [ 'status' => true, 'email_to' => 'admin@example.com' ] ] );
 		$this->assertTrue( Admin::form_has_reply_destination( $form_id ) );
@@ -1015,15 +1029,47 @@ class Test_Getting_Started_Notice extends TestCase {
 		update_post_meta( $form_id, '_srfm_email_notification', [ [ 'status' => false, 'email_to' => 'admin@example.com' ] ] );
 		$this->assertFalse( Admin::form_has_reply_destination( $form_id ) );
 
+		// An enabled notification with no recipient does not count.
+		update_post_meta( $form_id, '_srfm_email_notification', [ [ 'status' => true, 'email_to' => '' ] ] );
+		$this->assertFalse( Admin::form_has_reply_destination( $form_id ) );
+
 		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * The notice markup renders the title, message and all three CTAs (#3030).
+	 */
+	public function test_thankyou_notice_markup_renders_ctas() {
+		$build = new \ReflectionMethod( Admin::class, 'build_thankyou_notice_markup' );
+		$build->setAccessible( true );
+
+		$markup = $build->invoke(
+			null,
+			[
+				'title'        => 'Sample Form',
+				'days_ago'     => 2,
+				'steps'        => [ 'replies' => true, 'thankyou' => true ],
+				'edit_url'     => 'https://example.com/e',
+				'replies_url'  => 'https://example.com/r',
+				'thankyou_url' => 'https://example.com/t',
+			]
+		);
+
+		// Title carries the form name; body is the (accurate, step-agnostic) message.
+		$this->assertStringContainsString( 'Sample Form', $markup );
+		$this->assertStringContainsString( 'already created this form for you', $markup );
+
+		// All three CTAs, each with its tracking class and deep-link target.
+		$this->assertStringContainsString( 'srfm-ty-edit-form', $markup );
+		$this->assertStringContainsString( 'srfm-ty-set-replies', $markup );
+		$this->assertStringContainsString( 'srfm-ty-edit-thankyou', $markup );
+		$this->assertStringContainsString( 'https://example.com/t', $markup );
 	}
 
 	/**
 	 * The Thank You prompt query always returns an array (#3030).
 	 */
 	public function test_get_thankyou_prompt_forms() {
-		$this->assertIsArray( Admin::get_thankyou_prompt_forms() );
-
 		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
 			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
 		}
@@ -1044,20 +1090,24 @@ class Test_Getting_Started_Notice extends TestCase {
 
 		// Starter-template import still on the default message → targeted.
 		$imported = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Imported TY' ] );
-		update_post_meta( $imported, '_srfm_form_confirmation', [ [ 'message' => $default_message ] ] );
-		update_post_meta( $imported, '_astra_sites_imported_post', 1 );
+		update_post_meta( $imported, '_srfm_form_confirmation', [ [ 'confirmation_type' => 'same page', 'message' => $default_message ] ] );
+		update_post_meta( $imported, Admin::ASTRA_SITES_IMPORT_META, 1 );
 
 		// Same default message but NOT an Astra Sites import → excluded by the gate.
 		$plain = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Plain TY' ] );
-		update_post_meta( $plain, '_srfm_form_confirmation', [ [ 'message' => $default_message ] ] );
+		update_post_meta( $plain, '_srfm_form_confirmation', [ [ 'confirmation_type' => 'same page', 'message' => $default_message ] ] );
 
 		// Drive the uncached builder to bypass the request-memoized cache.
 		$compute = new \ReflectionMethod( Admin::class, 'compute_thankyou_prompt_forms' );
 		$compute->setAccessible( true );
-		$ids = wp_list_pluck( $compute->invoke( null ), 'id' );
+		$prompts = $compute->invoke( null );
+		$ids     = wp_list_pluck( $prompts, 'id' );
 
 		$this->assertContains( $imported, $ids, 'An Astra Sites imported form on the default message must be targeted.' );
 		$this->assertNotContains( $plain, $ids, 'A non-imported form must not be targeted.' );
+
+		// The surfaced payload carries the deep-link CTA target (?srfm_focus=thankyou).
+		$this->assertStringContainsString( 'srfm_focus=thankyou', (string) ( $prompts[0]['thankyou_url'] ?? '' ) );
 
 		wp_delete_post( $imported, true );
 		wp_delete_post( $plain, true );
@@ -1098,10 +1148,31 @@ class Test_Getting_Started_Notice extends TestCase {
 	}
 
 	/**
-	 * The Thank You notice click-tracking enqueue method exists (#3030).
+	 * The Thank You notice click-tracking enqueues a delegated dismiss beacon (#3030).
+	 *
+	 * Regression guard: the ✕ is injected by core on DOMContentLoaded, after this
+	 * inline script parses, so it must be caught by delegation from the wrapper —
+	 * a direct .notice-dismiss lookup would bind to nothing.
 	 */
 	public function test_enqueue_thankyou_notice_tracking() {
 		$admin = Admin::get_instance();
-		$this->assertTrue( method_exists( $admin, 'enqueue_thankyou_notice_tracking' ) );
+
+		wp_dequeue_script( 'srfm-thankyou-notice-track' );
+		wp_deregister_script( 'srfm-thankyou-notice-track' );
+
+		$admin->enqueue_thankyou_notice_tracking();
+
+		$this->assertTrue( wp_script_is( 'srfm-thankyou-notice-track', 'enqueued' ) );
+
+		$after = wp_scripts()->get_data( 'srfm-thankyou-notice-track', 'after' );
+		$body  = is_array( $after ) ? implode( "\n", $after ) : (string) $after;
+
+		// Dismissal is delegated from the wrapper, not bound to .notice-dismiss.
+		$this->assertStringContainsString( "addEventListener( 'click'", $body );
+		$this->assertStringContainsString( "closest( '.notice-dismiss' )", $body );
+		$this->assertStringContainsString( 'dismissed', $body );
+
+		wp_dequeue_script( 'srfm-thankyou-notice-track' );
+		wp_deregister_script( 'srfm-thankyou-notice-track' );
 	}
 }

@@ -4,7 +4,7 @@ import { useDeviceType } from '@Controls/getPreviewType';
 import { ToggleControl } from '@wordpress/components';
 import { useDispatch, useSelect } from '@wordpress/data';
 import { store as editorStore } from '@wordpress/editor';
-import { useEffect, useRef, useState } from '@wordpress/element';
+import { useEffect, useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import { applyFilters } from '@wordpress/hooks';
 
@@ -15,14 +15,29 @@ import { prepareBlockSlugs } from '@Utils/Helpers';
 
 let prevMetaHash = '';
 
-// Capture the dashboard deep-link target (?srfm_focus=…) the moment this
-// bundle evaluates — the block editor strips unrecognised query args from the
-// URL shortly after it boots, so reading the param later (inside a mount
-// effect) finds it already gone. Snapshotting it here, before Gutenberg's URL
-// cleanup runs, is what makes the deep-link reliable.
-const srfmDeepLinkFocus = new URLSearchParams( window.location.search ).get(
-	'srfm_focus'
-);
+// The dashboard "Finish setting up" notice CTA opens the editor with
+// ?srfm_focus=… to auto-open a settings tab. Gutenberg strips unrecognised query
+// args client-side before this bundle can reliably read them, so PHP surfaces the
+// value as `window.srfmDeepLinkFocus` (printed before this bundle) — read that
+// first, falling back to the raw URL for safety.
+export const srfmDeepLinkFocus =
+	( typeof window !== 'undefined' && window.srfmDeepLinkFocus ) ||
+	new URLSearchParams( window.location.search ).get( 'srfm_focus' );
+
+// One deep-link per page load, ever. Module-scoped so a later panel remount
+// (switching to the Block tab and back, which unmounts/remounts this component)
+// cannot re-fire the open and slam the dialog back over the user's work.
+let srfmDeepLinkConsumed = false;
+
+// Maps the ?srfm_focus value to a Form Settings tab id. A plain object read
+// through hasOwnProperty (never prototype members), so ?srfm_focus=constructor
+// resolves to nothing rather than handing a function to setPopupTab. Exported so
+// the always-mounted editor root (Editor.js) can open the settings sidebar for
+// the same targets — GeneralSettings only mounts once that sidebar is open.
+export const SRFM_DEEP_LINK_TABS = {
+	thankyou: 'form_confirmation',
+	notifications: 'email_notification',
+};
 
 function GeneralSettings( props ) {
 	const { createNotice, removeNotice } = useDispatch( 'core/notices' );
@@ -40,10 +55,6 @@ function GeneralSettings( props ) {
 	const root = document.documentElement.querySelector( 'body' );
 	const [ isOpen, setOpen ] = useState( false );
 	const [ popupTab, setPopupTab ] = useState( false );
-	// Mirrors `isOpen` for the deep-link poll below, which reads it from a
-	// long-lived interval closure that would otherwise see a stale value.
-	const isOpenRef = useRef( isOpen );
-	isOpenRef.current = isOpen;
 	const [ hasValidationErrors, setHasValidationErrors ] = useState( false );
 
 	const closeModal = () => {
@@ -251,86 +262,41 @@ function GeneralSettings( props ) {
 		};
 	}, [ sureformsKeys ] );
 
-	// Deep-link support: open a specific form-settings panel when the editor is
-	// reached with ?srfm_focus=... — the dashboard "Finish setting up" card CTAs
-	// use this so "Set where replies go" lands on the OttoKit (Automations)
-	// screen, and "Edit the thank-you message" on Form Confirmation. The target
-	// is read from `srfmDeepLinkFocus`, snapshotted at bundle-eval time because
-	// the block editor strips the query arg from the URL before this effect runs.
+	// Deep-link support: open a specific Form Settings tab when the editor is
+	// reached with ?srfm_focus=... — the dashboard "Finish setting up" notice CTA
+	// uses this so "Edit the thank-you message" lands on Form Confirmation. The
+	// target is read from `srfmDeepLinkFocus`, snapshotted at bundle-eval time
+	// because the block editor strips the query arg from the URL before this
+	// effect runs.
+	//
+	// forcePanel() force-opens the Form Options panel on every editor load, so
+	// this component is reliably mounted here and the sibling listener effect
+	// above (declared first, so React registers it before this one runs) is in
+	// place to receive the event — a single synchronous dispatch cannot miss it,
+	// no polling needed. Consume-once via the module flag so a later panel
+	// remount does not reopen the dialog on top of the user's work.
 	useEffect( () => {
-		const tabByFocus = {
-			ottokit: 'ottokit',
-			thankyou: 'form_confirmation',
-			notifications: 'email_notification',
-		};
-		const tabId = tabByFocus[ srfmDeepLinkFocus ];
-
-		if ( ! tabId ) {
-			return undefined;
+		if ( srfmDeepLinkConsumed ) {
+			return;
 		}
 
-		// Open the form-settings dialog on the target tab via the same window
-		// event the "Form Settings" popover uses. The editor mounts/remounts the
-		// settings panels during initial load and the listener re-registers on
-		// every meta change, so a single dispatch can miss it, and the Force UI
-		// dialog's opacity fade-in can stall when toggled amid that churn. Poll
-		// every 300ms: dispatch the open request until the dialog appears, then
-		// stop dispatching and just hold the overlay visible.
-		//
-		// Once it has opened, halt the poll the moment `isOpen` goes back to false
-		// — that is the user closing it (Esc / backdrop / ✕), which flips state on
-		// this same live mount. A load-time remount instead tears this effect down
-		// (clearing the interval) and re-runs it fresh on the new mount, so churn
-		// still reopens while a deliberate close stays closed. Give up after the
-		// load window if it never opened so the interval can't run indefinitely.
-		let elapsed = 0;
-		let opened = false;
-		let heldMs = 0;
-		const ensureOpen = setInterval( () => {
-			elapsed += 300;
+		const tabId = Object.prototype.hasOwnProperty.call(
+			SRFM_DEEP_LINK_TABS,
+			srfmDeepLinkFocus
+		)
+			? SRFM_DEEP_LINK_TABS[ srfmDeepLinkFocus ]
+			: null;
 
-			// Dialog is open on this mount: hold the overlay painted (the Force UI
-			// fade-in can stall amid the editor's load churn) for a short window,
-			// then stop — the fade settles within a second or two, so there is no
-			// need to keep polling for the dialog's whole open lifetime.
-			//
-			// NOTE: `.srfm-dialog-panel` / `.fixed.inset-0` are the Force UI Dialog
-			// overlay's own markup; if the library renames them this simply no-ops
-			// (the fade-stall workaround stops applying) rather than erroring.
-			if ( isOpenRef.current ) {
-				opened = true;
-				heldMs += 300;
-				const panel = document.querySelector( '.srfm-dialog-panel' );
-				const overlay = panel?.closest( '.fixed.inset-0' );
-				if ( overlay ) {
-					overlay.style.opacity = '1';
-				}
-				if ( heldMs >= 2000 ) {
-					clearInterval( ensureOpen );
-				}
-				return;
-			}
+		if ( ! tabId ) {
+			return;
+		}
 
-			// It was open and is now closed on this same live mount — the user
-			// dismissed it (✕ / Esc / backdrop). Stop; do not reopen.
-			if ( opened ) {
-				clearInterval( ensureOpen );
-				return;
-			}
-
-			// Not open yet — keep asking until the listener catches it.
-			window.dispatchEvent(
-				new CustomEvent( 'srfm-open-form-settings', {
-					detail: { tabId },
-				} )
-			);
-
-			if ( elapsed >= 12000 ) {
-				clearInterval( ensureOpen );
-			}
-		}, 300 );
-
-		return () => clearInterval( ensureOpen );
+		srfmDeepLinkConsumed = true;
+		window.dispatchEvent(
+			new CustomEvent( 'srfm-open-form-settings', {
+				detail: { tabId },
+			} )
+		);
 	}, [] );
 
 	return (

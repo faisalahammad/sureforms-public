@@ -41,6 +41,16 @@ class Admin {
 	public const RATING_NOTICE_THRESHOLD = 3;
 
 	/**
+	 * Post meta the Starter Templates (Astra Sites) plugin stamps on every post it
+	 * imports. The "Finish setting up" Thank You prompt (#3030) scopes to these
+	 * forms only. Owned by a plugin that is NOT a SureForms dependency: on installs
+	 * without Starter Templates nothing carries this meta and the prompt never shows.
+	 *
+	 * @since x.x.x
+	 */
+	public const ASTRA_SITES_IMPORT_META = '_astra_sites_imported_post';
+
+	/**
 	 * Inline CSS for Quill 1.x (react-quill) list markers.
 	 *
 	 * Quill 1.x renders bullet/numbered list markers via CSS ::before pseudo-elements,
@@ -262,6 +272,10 @@ class Admin {
 	 * compare equal. Any real edit to the heading or body text changes the text and
 	 * flips this to false, which is exactly when the prompt should stop showing.
 	 *
+	 * Locale caveat: the comparison target is translated at call time, so a form
+	 * whose default was stored under a different active locale won't match. That
+	 * fails safe — the prompt simply doesn't show — never a false nag.
+	 *
 	 * @param int $form_id Form post ID.
 	 *
 	 * @since x.x.x
@@ -271,6 +285,15 @@ class Admin {
 		$confirmation = get_post_meta( (int) $form_id, '_srfm_form_confirmation', true );
 
 		if ( ! is_array( $confirmation ) || ! isset( $confirmation[0]['message'] ) || ! is_string( $confirmation[0]['message'] ) ) {
+			return false;
+		}
+
+		// The default message is only ever shown for a "same page" confirmation.
+		// A redirect ("different page" / "custom url") never renders it, yet the
+		// stored settings still seed the default message string — so without this
+		// guard a redirect form would be nagged forever about a message no visitor
+		// sees, with no way to clear the prompt by doing what it asks.
+		if ( ! isset( $confirmation[0]['confirmation_type'] ) || 'same page' !== $confirmation[0]['confirmation_type'] ) {
 			return false;
 		}
 
@@ -288,38 +311,6 @@ class Admin {
 		};
 
 		return $normalize( $message ) === $normalize( Global_Settings::get_default_confirmation_message() );
-	}
-
-	/**
-	 * The most recently created form still using the default Thank You message.
-	 *
-	 * Powers the dashboard prompt (#3030). Limited to the single latest such form
-	 * to avoid clutter, and to forms the current user may actually edit. A form is
-	 * a candidate only when its confirmation message is untouched (default) and
-	 * the prompt has not been dismissed for it.
-	 *
-	 * @since x.x.x
-	 * @return array<int,array{id:int,title:string,edit_url:string}> One entry, or none.
-	 */
-	public static function get_thankyou_prompt_forms() {
-		// Memoized for the request so repeated reads (e.g. the notice render plus
-		// any add-on consumer) share a single query.
-		static $cache = false;
-
-		if ( false !== $cache ) {
-			return $cache;
-		}
-
-		/**
-		 * Filter the forms the "Finish setting up" Thank You notice may surface.
-		 *
-		 * @param array<int,array<string,mixed>> $prompts Candidate prompt payloads.
-		 *
-		 * @since x.x.x
-		 */
-		$cache = apply_filters( 'srfm_thankyou_prompt_forms', self::compute_thankyou_prompt_forms() );
-
-		return $cache;
 	}
 
 	/**
@@ -348,13 +339,50 @@ class Admin {
 	}
 
 	/**
+	 * The most recently created form still needing setup (default Thank You
+	 * message, or no reply destination).
+	 *
+	 * Powers the "Finish setting up" prompt (#3030). Limited to the single latest
+	 * such form to avoid clutter, and to forms the current user may actually edit.
+	 * A form is a candidate when it still has an unfinished step (default Thank You
+	 * message, or no reply destination). Dismissal is enforced by the caller,
+	 * before this query runs.
+	 *
+	 * @since x.x.x
+	 * @return array<int,array<string,mixed>> One entry, or none.
+	 */
+	public static function get_thankyou_prompt_forms() {
+		// Memoized for the request so repeated reads (e.g. the notice render plus
+		// any add-on consumer) share a single query. Sentinel is null, not false,
+		// so a filter returning false (__return_false to disable) still memoizes.
+		static $cache = null;
+
+		if ( null !== $cache ) {
+			return $cache;
+		}
+
+		/**
+		 * Filter the forms the "Finish setting up" Thank You notice may surface.
+		 *
+		 * @param array<int,array<string,mixed>> $prompts Candidate prompt payloads.
+		 *
+		 * @since x.x.x
+		 */
+		$filtered = apply_filters( 'srfm_thankyou_prompt_forms', self::compute_thankyou_prompt_forms() );
+		$cache    = is_array( $filtered ) ? $filtered : [];
+
+		return $cache;
+	}
+
+	/**
 	 * Register the "Finish setting up" prompt as an Astra Notices admin notice (#3030).
 	 *
 	 * Hooked to admin_notices so it registers before the Astra Notices library
 	 * renders (priority 30). Shown on every admin screen EXCEPT the main dashboard,
 	 * for the newest form the current user can edit that still has an unfinished
-	 * step (default thank-you message or no reply destination). The notice id is
-	 * per-form, so the library's built-in ✕ dismissal persists per form.
+	 * step (default Thank You message, or no reply destination). Uses a single
+	 * stable notice id so the library's built-in ✕ dismissal is one persistent
+	 * choice ("stop nudging me"), not a per-form row.
 	 *
 	 * @since x.x.x
 	 * @return void
@@ -375,21 +403,35 @@ class Admin {
 			return;
 		}
 
-		// Everywhere in wp-admin except the main dashboard.
+		// Everywhere in wp-admin except the main dashboard — the #3031 dashboard
+		// widget owns the on-dashboard setup nudge. Placement is intentional per #3030.
 		$screen = get_current_screen();
 
 		if ( $screen && 'dashboard' === $screen->id ) {
 			return;
 		}
 
-		$prompts = self::get_thankyou_prompt_forms();
+		// A single stable notice id (not per-form): keeps both the autoloaded
+		// `allowed_astra_notices` option and the per-user dismissal meta bounded to
+		// one row, and lets a dismissed user short-circuit before the query runs.
+		$notice_id = 'srfm-thankyou-prompt';
 
-		if ( empty( $prompts ) ) {
+		// The library only checks dismissal at render (priority 30, after this
+		// query would already have run). Check it up front so a user who dismissed
+		// the prompt never pays for the WP_Query on subsequent admin page views.
+		if ( 'notice-dismissed' === get_user_meta( get_current_user_id(), $notice_id, true ) ) {
 			return;
 		}
 
-		$form      = $prompts[0];
-		$notice_id = 'srfm-thankyou-prompt-' . (int) $form['id'];
+		// array_values so a filter returning a key-preserving array (e.g. the
+		// result of array_filter()) still exposes the newest prompt at index 0.
+		$prompts = array_values( (array) self::get_thankyou_prompt_forms() );
+
+		if ( empty( $prompts[0] ) || ! is_array( $prompts[0] ) || empty( $prompts[0]['id'] ) || empty( $prompts[0]['edit_url'] ) ) {
+			return;
+		}
+
+		$form = $prompts[0];
 
 		\Astra_Notices::add_notice(
 			[
@@ -429,14 +471,14 @@ class Admin {
 		wp_register_script( 'srfm-thankyou-notice-track', '', [], SRFM_VER, true );
 		wp_enqueue_script( 'srfm-thankyou-notice-track' );
 
-		wp_localize_script(
-			'srfm-thankyou-notice-track',
-			'srfmThankYouNoticeTrack',
+		$config = wp_json_encode(
 			[
 				'ajaxurl' => admin_url( 'admin-ajax.php' ),
 				'nonce'   => wp_create_nonce( 'srfm_notice_response' ),
 			]
 		);
+
+		wp_add_inline_script( 'srfm-thankyou-notice-track', 'window.srfmThankYouNoticeTrack = ' . $config . ';', 'before' );
 
 		$inline_script = <<<'JS'
 ( function () {
@@ -460,24 +502,27 @@ class Admin {
 			body: body.toString(),
 		} ).catch( function () {} );
 	};
-	[
+	// Delegate from the wrapper: this inline script runs at parse time, before
+	// core's common.js injects the .notice-dismiss ✕ (on DOMContentLoaded), so a
+	// direct querySelector for it would find nothing and the dismiss beacon would
+	// never fire. Delegation catches the ✕ and the CTAs whenever they exist.
+	const ctas = [
 		[ '.srfm-ty-edit-form', 'edit_form' ],
 		[ '.srfm-ty-set-replies', 'set_replies' ],
 		[ '.srfm-ty-edit-thankyou', 'edit_thankyou' ],
-	].forEach( function ( pair ) {
-		const el = wrap.querySelector( pair[ 0 ] );
-		if ( el ) {
-			el.addEventListener( 'click', function () {
-				send( pair[ 1 ] );
-			} );
+	];
+	wrap.addEventListener( 'click', function ( e ) {
+		if ( e.target.closest( '.notice-dismiss' ) ) {
+			send( 'dismissed' );
+			return;
+		}
+		for ( let i = 0; i < ctas.length; i++ ) {
+			if ( e.target.closest( ctas[ i ][ 0 ] ) ) {
+				send( ctas[ i ][ 1 ] );
+				return;
+			}
 		}
 	} );
-	const dismiss = wrap.querySelector( '.notice-dismiss' );
-	if ( dismiss ) {
-		dismiss.addEventListener( 'click', function () {
-			send( 'dismissed' );
-		} );
-	}
 }() );
 JS;
 
@@ -494,19 +539,25 @@ JS;
 	 * @return void
 	 */
 	public function print_thankyou_notice_styles() {
+		// The library wp_kses_post()'s the message, which strips <svg> and data:
+		// image srcs, so the SureForms mark is painted as a CSS background here
+		// (this hook fires outside that kses call). URL-encoded, not base64, so the
+		// value is fully percent-encoded and safe to pass through esc_url.
+		$icon = 'data:image/svg+xml,' . rawurlencode(
+			'<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 32 32"><path fill="#D54407" fill-rule="evenodd" clip-rule="evenodd" d="M32 0H0V32H32V0ZM22.8573 6.85728H9.14304V11.4287V13.7144L11.4288 11.4287H22.8573V6.85728ZM20.5717 13.7146H9.14314V18.286V20.5714V20.5718V25.1428H16.0003V20.5714H9.14351L11.4289 18.286H20.5717V13.7146Z"/></svg>'
+		);
 		?>
 		<style id="srfm-thankyou-notice-styles">
 			.srfm-thankyou-notice.notice { border-left-color: #D54407; }
-			/* The library lays the container out as a flex row; stack our blocks. */
-			.srfm-thankyou-notice .astra-notice-container { display: block; padding: 4px 0; }
+			/* Stack our blocks (the library lays the container out as a flex row) and reserve room on the left for the SureForms mark. */
+			.srfm-thankyou-notice .astra-notice-container { display: block; padding: 4px 0 4px 52px; background: url('<?php echo esc_url( $icon, [ 'data' ] ); ?>') no-repeat 4px 6px; background-size: 32px 32px; }
 			.srfm-thankyou-notice .srfm-thankyou-notice__title { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: #1d2327; }
 			.srfm-thankyou-notice .srfm-thankyou-notice__text { margin: 0 0 10px; color: #50575e; }
 			.srfm-thankyou-notice .srfm-thankyou-notice__actions { margin: 12px 0 2px; display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; }
 			.srfm-thankyou-notice .button-primary { background: #D54407; border-color: #D54407; color: #fff; box-shadow: none; text-shadow: none; }
 			.srfm-thankyou-notice .button-primary:hover, .srfm-thankyou-notice .button-primary:focus { background: #C83B00; border-color: #C83B00; color: #fff; box-shadow: none; }
-			.srfm-thankyou-notice .button:not(.button-primary) { background: transparent; border-color: transparent; color: #D54407; box-shadow: none; }
+			.srfm-thankyou-notice .button:not(.button-primary) { background: transparent; border-color: transparent; color: #D54407; box-shadow: none; padding: 0; }
 			.srfm-thankyou-notice .button:not(.button-primary):hover, .srfm-thankyou-notice .button:not(.button-primary):focus { background: transparent; border-color: transparent; color: #C83B00; box-shadow: none; }
-			.srfm-thankyou-notice .srfm-ty-edit-thankyou { padding: 0; }
 			.srfm-thankyou-notice .button-primary:focus { outline: 2px solid #D54407; outline-offset: 1px; }
 		</style>
 		<?php
@@ -2034,25 +2085,6 @@ JS;
 		$notice_id = isset( $_POST['notice_id'] ) ? sanitize_text_field( wp_unslash( $_POST['notice_id'] ) ) : '';
 		$button    = isset( $_POST['button'] ) ? sanitize_text_field( wp_unslash( $_POST['button'] ) ) : '';
 
-		// The "Finish setting up" prompt (#3030) uses a per-form notice id, so it
-		// can't be an exact key in the map below — match it by prefix and validate
-		// the button against its own fixed set.
-		if ( 0 === strpos( $notice_id, 'srfm-thankyou-prompt-' ) ) {
-			$thankyou_events = [
-				'edit_form'     => 'thankyou_notice_edit_form',
-				'set_replies'   => 'thankyou_notice_set_replies',
-				'edit_thankyou' => 'thankyou_notice_edit_thankyou',
-				'dismissed'     => 'thankyou_notice_dismiss',
-			];
-
-			if ( ! isset( $thankyou_events[ $button ] ) ) {
-				wp_send_json_error( [ 'message' => __( 'Invalid parameters.', 'sureforms' ) ], 400 );
-			}
-
-			Analytics::events()->track( $thankyou_events[ $button ], $button );
-			wp_send_json_success();
-		}
-
 		$valid = [
 			'srfm-getting-started-notice' => [
 				'go_to_dashboard' => 'getting_started_notice_cta',
@@ -2063,6 +2095,13 @@ JS;
 				'rate_sureforms' => 'rating_notice_cta',
 				'maybe_later'    => 'rating_notice_snooze',
 				'dismissed'      => 'rating_notice_dismiss',
+			],
+			// The "Finish setting up" prompt (#3030): three CTAs, plus the ✕.
+			'srfm-thankyou-prompt'        => [
+				'edit_form'     => 'thankyou_notice_edit_form',
+				'set_replies'   => 'thankyou_notice_set_replies',
+				'edit_thankyou' => 'thankyou_notice_edit_thankyou',
+				'dismissed'     => 'thankyou_notice_dismiss',
 			],
 		];
 
@@ -2489,26 +2528,27 @@ JS;
 	 * @return array<int,array<string,mixed>> One entry, or none.
 	 */
 	private static function compute_thankyou_prompt_forms() {
-		if ( ! post_type_exists( SRFM_FORMS_POST_TYPE ) ) {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || ! post_type_exists( SRFM_FORMS_POST_TYPE ) ) {
 			return [];
 		}
 
-		// Only forms created from an Astra Sites starter template — those carry the
-		// `_astra_sites_imported_post` marker Astra Sites stamps on imported posts.
-		// Dismissal is handled per-form by the Astra Notices library (via the
-		// per-form notice id), so this only needs the newest incomplete form.
+		// Only forms imported from a Starter Templates (Astra Sites) starter
+		// template — see self::ASTRA_SITES_IMPORT_META. Prime post + meta caches
+		// (the loop reads meta, title and creation time per candidate) so this is a
+		// single query rather than the main query plus a follow-up per form.
 		$query = new \WP_Query(
 			[
-				'post_type'      => SRFM_FORMS_POST_TYPE,
-				'post_status'    => 'publish',
-				'posts_per_page' => 10,
-				'orderby'        => 'date',
-				'order'          => 'DESC',
-				'fields'         => 'ids',
-				'no_found_rows'  => true,
-				'meta_query'     => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded to 10 recent forms; admin-notice only.
+				'post_type'              => SRFM_FORMS_POST_TYPE,
+				'post_status'            => 'publish',
+				'posts_per_page'         => 10,
+				'orderby'                => 'date',
+				'order'                  => 'DESC',
+				'no_found_rows'          => true,
+				'update_post_meta_cache' => true,
+				'update_post_term_cache' => false,
+				'meta_query'             => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded to 10 recent forms; admin-notice only.
 					[
-						'key'     => '_astra_sites_imported_post',
+						'key'     => self::ASTRA_SITES_IMPORT_META,
 						'compare' => 'EXISTS',
 					],
 				],
@@ -2518,8 +2558,8 @@ JS;
 		$prompts = [];
 		$now     = time();
 
-		foreach ( $query->posts as $form_id ) {
-			$form_id = (int) $form_id;
+		foreach ( $query->posts as $post ) {
+			$form_id = (int) $post->ID;
 
 			if ( ! current_user_can( 'edit_post', $form_id ) ) {
 				continue;
@@ -2552,10 +2592,11 @@ JS;
 				'days_ago'     => max( 0, $days_ago ),
 				'steps'        => $steps,
 				'edit_url'     => $edit_link,
-				// The editor reads srfm_focus to open the matching settings panel:
-				// "replies" lands on OttoKit (Automations), "thankyou" on Form
-				// Confirmation.
-				'replies_url'  => add_query_arg( 'srfm_focus', 'ottokit', $edit_link ),
+				// The editor reads srfm_focus to open the matching settings tab:
+				// "notifications" lands on Email Notification (where the reply
+				// destination is set, so the CTA can actually clear that step) and
+				// "thankyou" on Form Confirmation.
+				'replies_url'  => add_query_arg( 'srfm_focus', 'notifications', $edit_link ),
 				'thankyou_url' => add_query_arg( 'srfm_focus', 'thankyou', $edit_link ),
 			];
 
@@ -2575,31 +2616,11 @@ JS;
 	 * @return string
 	 */
 	private static function build_thankyou_notice_markup( $form ) {
-		$steps    = isset( $form['steps'] ) && is_array( $form['steps'] ) ? $form['steps'] : [];
-		$days_ago = isset( $form['days_ago'] ) ? (int) $form['days_ago'] : 0;
-
-		// The notice only surfaces forms still on the default confirmation, so the
-		// thank-you clause is always present; the reply-destination clause is the
-		// only variable. Each combination is a complete translatable phrase — no
-		// glued fragments — so translators can order the words for their locale.
-		$whats_left = ! empty( $steps['replies'] )
-			? __( 'replies have nowhere to go and the thank-you message is still the default', 'sureforms' )
-			: __( 'the thank-you message is still the default', 'sureforms' );
-
-		$time_text = $days_ago > 0
-			? sprintf(
-				/* translators: %d: number of days. */
-				_n( 'You started this form %d day ago', 'You started this form %d days ago', $days_ago, 'sureforms' ),
-				$days_ago
-			)
-			: __( 'You started this form recently', 'sureforms' );
-
-		$sentence = sprintf(
-			/* translators: 1: "You started this form N days ago", 2: a complete clause, e.g. "the thank-you message is still the default". */
-			__( '%1$s and haven\'t opened it since. It isn\'t collecting anything yet — %2$s.', 'sureforms' ),
-			$time_text,
-			$whats_left
-		);
+		// The prompt only surfaces starter-template imports (see the meta gate), so
+		// the form was created for the user rather than by them. Kept generic — no
+		// per-step claim — so it is always accurate whatever the user has since
+		// changed, while the action buttons point to the specific things to finish.
+		$sentence = __( 'We’ve already created this form for you. Finish customising it so it’s ready to collect real submissions.', 'sureforms' );
 
 		ob_start();
 		?>
@@ -2617,8 +2638,8 @@ JS;
 		<p class="srfm-thankyou-notice__text"><?php echo esc_html( $sentence ); ?></p>
 		<p class="srfm-thankyou-notice__actions">
 			<a class="button button-primary srfm-ty-edit-form" href="<?php echo esc_url( $form['edit_url'] ); ?>"><?php esc_html_e( 'Edit form', 'sureforms' ); ?></a>
+			<a class="button srfm-ty-edit-thankyou" href="<?php echo esc_url( $form['thankyou_url'] ); ?>"><?php esc_html_e( 'Edit the Thank You message', 'sureforms' ); ?></a>
 			<a class="button srfm-ty-set-replies" href="<?php echo esc_url( $form['replies_url'] ); ?>"><?php esc_html_e( 'Set where replies go', 'sureforms' ); ?></a>
-			<a class="button srfm-ty-edit-thankyou" href="<?php echo esc_url( $form['thankyou_url'] ); ?>"><?php esc_html_e( 'Edit the thank-you message', 'sureforms' ); ?></a>
 		</p>
 		<?php
 		return (string) ob_get_clean();

@@ -9,7 +9,12 @@ import {
 import { __ } from '@wordpress/i18n';
 import { useState, useEffect, createRoot } from '@wordpress/element';
 
-import { useSelect, useDispatch } from '@wordpress/data';
+import {
+	useSelect,
+	useDispatch,
+	select as dataSelect,
+	dispatch as dataDispatch,
+} from '@wordpress/data';
 import {
 	store as editorStore,
 	PluginDocumentSettingPanel,
@@ -18,7 +23,10 @@ import {
 import { store as blockEditorStore } from '@wordpress/block-editor';
 import { store as preferencesStore } from '@wordpress/preferences';
 
-import GeneralSettings from './tabs/GeneralSettings.js';
+import GeneralSettings, {
+	srfmDeepLinkFocus,
+	SRFM_DEEP_LINK_TABS,
+} from './tabs/GeneralSettings.js';
 import StyleSettings from './tabs/StyleSettings.js';
 import InspectorTabs from '@Components/inspector-tabs/InspectorTabs.js';
 import InspectorTab, {
@@ -75,6 +83,50 @@ const SureformsFormSpecificSettings = () => {
 	const [ rootContainer, setRootContainer ] = useState( null );
 	const [ rootHtmlTag, setRootHtmlTag ] = useState( null );
 	const [ documentBody, setDocumentBody ] = useState( null );
+
+	// Deep-link support (#3030): when the editor is opened with ?srfm_focus=…,
+	// make sure the settings sidebar is open. GeneralSettings — which hosts the
+	// Form Settings dialog and self-opens the target tab on mount — only renders
+	// while that sidebar is open, and it can be collapsed by user preference. This
+	// runs from the always-mounted plugin root so the deep-link works regardless
+	// of the user's saved sidebar state.
+	//
+	// Opening it once on mount isn't enough: an early open (before the editor has
+	// finished booting) is a no-op or gets reverted by the editor's preference
+	// restore — the same reason forcePanel's open doesn't stick. Re-assert on a
+	// short interval until the sidebar is open, then stop. The dispatch is made
+	// from a timer tick (outside the store's notification cycle, where it would be
+	// swallowed) so it actually takes effect. Bounded so a sidebar that can't open
+	// is never retried indefinitely; opening it is enough — GeneralSettings then
+	// mounts and self-opens the target tab (once).
+	useEffect( () => {
+		if (
+			! Object.prototype.hasOwnProperty.call(
+				SRFM_DEEP_LINK_TABS,
+				srfmDeepLinkFocus
+			)
+		) {
+			return undefined;
+		}
+
+		let elapsed = 0;
+		const ensureOpen = setInterval( () => {
+			elapsed += 300;
+			const editPostStore = dataSelect( 'core/edit-post' );
+			if ( editPostStore?.isEditorSidebarOpened() ) {
+				clearInterval( ensureOpen );
+				return;
+			}
+			dataDispatch( 'core/edit-post' )?.openGeneralSidebar(
+				'edit-post/document'
+			);
+			if ( elapsed >= 6000 ) {
+				clearInterval( ensureOpen );
+			}
+		}, 300 );
+
+		return () => clearInterval( ensureOpen );
+	}, [] );
 
 	useEffect( () => {
 		let intervalId = null;
