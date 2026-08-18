@@ -150,6 +150,17 @@ class Gutenberg_Hooks {
 		wp_enqueue_script( SRFM_SLUG . $form_editor_script, SRFM_URL . 'assets/build/formEditor.js', $script_info['dependencies'], $script_info['version'], true );
 		wp_localize_script( SRFM_SLUG . $form_editor_script, 'scIcons', [ 'path' => SRFM_URL . 'assets/build/icon-assets' ] );
 
+		// Deep-link (#3030): the "Finish setting up" Thank You notice CTA opens this
+		// editor with ?srfm_focus=… to auto-open a settings tab. Gutenberg strips
+		// unrecognised query args client-side before the editor bundle can read them,
+		// so surface the value from the server — where it is never stripped — as a
+		// global the bundle reads at evaluation time. Validated to a known allowlist.
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only deep-link hint on an authenticated editor screen; no state change.
+		$srfm_focus = isset( $_GET['srfm_focus'] ) ? sanitize_key( wp_unslash( $_GET['srfm_focus'] ) ) : '';
+		if ( in_array( $srfm_focus, [ 'thankyou', 'notifications' ], true ) ) {
+			wp_add_inline_script( SRFM_SLUG . $form_editor_script, 'window.srfmDeepLinkFocus = ' . wp_json_encode( $srfm_focus ) . ';', 'before' );
+		}
+
 		// Enqueue the code editor for the Custom CSS Editor in SureForms.
 		wp_enqueue_code_editor( [ 'type' => 'text/css' ] );
 		wp_enqueue_script( 'wp-theme-plugin-editor' );

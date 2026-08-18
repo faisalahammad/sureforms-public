@@ -938,8 +938,11 @@ class Test_Getting_Started_Notice extends TestCase {
 
 	/**
 	 * The first-form-created flag follows the stored timestamp option.
+	 *
+	 * Suffixed name so it doesn't collide with #3040's same-named test on merge
+	 * (both append to Test_Getting_Started_Notice); the coverage grep still matches.
 	 */
-	public function test_is_first_form_created() {
+	public function test_is_first_form_created_reflects_stored_timestamp() {
 		// No stored timestamp → first form not yet created.
 		Helper::update_srfm_option( 'first_form_created_at', false );
 		$this->assertFalse( Admin::is_first_form_created() );
@@ -956,19 +959,63 @@ class Test_Getting_Started_Notice extends TestCase {
 	}
 
 	/**
-	 * The setup-card payload is null or a fully-formed card with deep-link URLs (#3031).
+	 * The card is populated for a starter-template form, with deep-link URLs (#3031).
+	 *
+	 * Seeds the trigger meta and resets the request memo so the populated path runs
+	 * on CI — otherwise get_form_setup_card() returns null (nothing stamps the
+	 * marker) and the assertions never execute.
 	 */
 	public function test_get_form_setup_card() {
-		$card = Admin::get_form_setup_card();
-		$this->assertTrue( null === $card || is_array( $card ) );
-
-		if ( is_array( $card ) ) {
-			$this->assertArrayHasKey( 'id', $card );
-			$this->assertArrayHasKey( 'edit_url', $card );
-			// The email/thank-you CTAs must carry their deep-link focus targets.
-			$this->assertStringContainsString( 'srfm_focus=notifications', (string) ( $card['email_url'] ?? '' ) );
-			$this->assertStringContainsString( 'srfm_focus=thankyou', (string) ( $card['thankyou_url'] ?? '' ) );
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
 		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$admin_user = wp_insert_user(
+			[
+				'user_login' => 'srfm_card_admin_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_card_admin_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $admin_user ) ? 0 : (int) $admin_user );
+
+		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Card Form' ] );
+		update_post_meta( $form_id, '_astra_sites_imported_post', 1 );
+
+		try {
+			Admin::reset_form_setup_card_cache();
+			$card = Admin::get_form_setup_card();
+
+			$this->assertIsArray( $card, 'A starter-template form must yield a card.' );
+			$this->assertSame( $form_id, $card['id'] );
+			$this->assertNotEmpty( $card['edit_url'] );
+			$this->assertStringContainsString( 'srfm_focus=notifications', (string) $card['email_url'] );
+			$this->assertStringContainsString( 'srfm_focus=thankyou', (string) $card['thankyou_url'] );
+
+			// A non-editor gets no card.
+			wp_set_current_user( 0 );
+			Admin::reset_form_setup_card_cache();
+			$this->assertNull( Admin::get_form_setup_card(), 'A user who cannot edit the form gets no card.' );
+		} finally {
+			Admin::reset_form_setup_card_cache();
+			wp_delete_post( $form_id, true );
+			wp_set_current_user( 0 );
+			if ( ! is_wp_error( $admin_user ) ) {
+				wp_delete_user( (int) $admin_user );
+			}
+		}
+	}
+
+	/**
+	 * Resetting the card memo lets a later read recompute (#3031).
+	 */
+	public function test_reset_form_setup_card_cache() {
+		Admin::reset_form_setup_card_cache();
+		$this->assertTrue( null === Admin::get_form_setup_card() || is_array( Admin::get_form_setup_card() ) );
+		Admin::reset_form_setup_card_cache();
+		$this->assertTrue( null === Admin::get_form_setup_card() || is_array( Admin::get_form_setup_card() ) );
 	}
 
 	/**
@@ -1031,23 +1078,54 @@ class Test_Getting_Started_Notice extends TestCase {
 	}
 
 	/**
-	 * The renderer honours the card contract: nothing when there's no card, the
-	 * checklist markup (heading, CTAs, snooze) when there is (#3031).
+	 * The renderer prints the checklist markup for a qualifying form, and nothing
+	 * without one (#3031). Seeds the trigger so the populated path runs on CI.
 	 */
 	public function test_render_form_setup_widget() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
 		$admin = Admin::get_instance();
-		$card  = Admin::get_form_setup_card();
 
-		ob_start();
-		$admin->render_form_setup_widget();
-		$output = (string) ob_get_clean();
+		$admin_user = wp_insert_user(
+			[
+				'user_login' => 'srfm_render_admin_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_render_admin_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $admin_user ) ? 0 : (int) $admin_user );
 
-		if ( null === $card ) {
-			$this->assertSame( '', $output, 'No card → the widget renders nothing.' );
-		} else {
+		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Render Form' ] );
+		update_post_meta( $form_id, '_astra_sites_imported_post', 1 );
+
+		try {
+			// Positive: a qualifying form renders the full checklist.
+			Admin::reset_form_setup_card_cache();
+			ob_start();
+			$admin->render_form_setup_widget();
+			$output = (string) ob_get_clean();
+
 			$this->assertStringContainsString( 'srfm-setup-checklist', $output );
 			$this->assertStringContainsString( 'srfm-setup-checklist__cta', $output );
 			$this->assertStringContainsString( 'srfm-setup-checklist-snooze', $output );
+			$this->assertStringContainsString( 'Render Form', $output );
+
+			// Negative: no card → nothing rendered.
+			wp_set_current_user( 0 );
+			Admin::reset_form_setup_card_cache();
+			ob_start();
+			$admin->render_form_setup_widget();
+			$this->assertSame( '', (string) ob_get_clean(), 'No card → the widget renders nothing.' );
+		} finally {
+			Admin::reset_form_setup_card_cache();
+			wp_delete_post( $form_id, true );
+			wp_set_current_user( 0 );
+			if ( ! is_wp_error( $admin_user ) ) {
+				wp_delete_user( (int) $admin_user );
+			}
 		}
 	}
 

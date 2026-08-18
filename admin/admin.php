@@ -85,6 +85,20 @@ class Admin {
 	private static $sureforms_page_default_capability = 'manage_options';
 
 	/**
+	 * Request memo for the dashboard setup-checklist card (#3031).
+	 *
+	 * A static property (not a function-local static) so tests can reset it via
+	 * reset_form_setup_card_cache() and exercise the populated path — a
+	 * function-local static pins the first result for the whole process. Keyed by
+	 * user id since the payload derives from that user's caps and snooze meta.
+	 * `false` means "not computed yet"; `null`/array is a computed result.
+	 *
+	 * @var array<int,array<string,mixed>|null>
+	 * @since x.x.x
+	 */
+	private static $setup_card_cache = [];
+
+	/**
 	 * Class constructor.
 	 *
 	 * @return void
@@ -273,83 +287,30 @@ class Admin {
 	 * @return array<string,mixed>|null Card payload, or null when there is no candidate form.
 	 */
 	public static function get_form_setup_card() {
-		static $cache = false;
+		$user_id = get_current_user_id();
 
-		if ( false !== $cache ) {
-			return $cache;
+		// Request memo, keyed per user — the payload derives from that user's
+		// capabilities and snooze meta. Reset via reset_form_setup_card_cache().
+		if ( array_key_exists( $user_id, self::$setup_card_cache ) ) {
+			return self::$setup_card_cache[ $user_id ];
 		}
 
-		$cache = null;
+		self::$setup_card_cache[ $user_id ] = self::compute_form_setup_card();
 
-		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || ! post_type_exists( SRFM_FORMS_POST_TYPE ) ) {
-			return $cache;
-		}
+		return self::$setup_card_cache[ $user_id ];
+	}
 
-		$now = time();
-
-		// "Remind me in two weeks" — a per-user snooze that hides the whole widget.
-		$widget_snooze_until = (int) get_user_meta( get_current_user_id(), self::SETUP_WIDGET_SNOOZE_USER_META, true );
-
-		if ( $widget_snooze_until > $now ) {
-			return $cache;
-		}
-
-		// Only forms created from an Astra Sites starter template — those carry the
-		// `_astra_sites_imported_post` marker Astra Sites stamps on imported posts.
-		// Prime post + meta caches (the loop reads title, permalink and edit link
-		// per candidate) so this is a single query, not a follow-up per form.
-		$query = new \WP_Query(
-			[
-				'post_type'              => SRFM_FORMS_POST_TYPE,
-				'post_status'            => [ 'publish', 'draft', 'pending' ],
-				'posts_per_page'         => 10,
-				'orderby'                => 'date',
-				'order'                  => 'DESC',
-				'no_found_rows'          => true,
-				'update_post_meta_cache' => true,
-				'update_post_term_cache' => false,
-				'meta_query'             => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded to 10 recent forms; dashboard-only.
-					[
-						'key'     => '_astra_sites_imported_post',
-						'compare' => 'EXISTS',
-					],
-				],
-			]
-		);
-
-		foreach ( $query->posts as $post ) {
-			$form_id = (int) $post->ID;
-
-			if ( ! current_user_can( 'edit_post', $form_id ) ) {
-				continue;
-			}
-
-			$edit_link = get_edit_post_link( $form_id, 'raw' );
-
-			if ( empty( $edit_link ) ) {
-				continue;
-			}
-
-			// The steps are shown as optional next-steps — their completion is not
-			// computed, so the widget simply lists the actions the owner can take.
-			$cache = [
-				'id'           => $form_id,
-				'title'        => get_the_title( $form_id ),
-				'edit_url'     => $edit_link,
-				// Deep-links to the email-notification panel where supported; falls
-				// back to opening the editor when the focus handler isn't present.
-				'email_url'    => add_query_arg( 'srfm_focus', 'notifications', $edit_link ),
-				// Deep-links to the Form Confirmation panel (the Thank You message).
-				'thankyou_url' => add_query_arg( 'srfm_focus', 'thankyou', $edit_link ),
-				// Front-end instant-form page; admins can always view it (the
-				// non-privileged redirect in Post_Types exempts them).
-				'view_url'     => (string) get_permalink( $form_id ),
-			];
-
-			return $cache;
-		}
-
-		return $cache;
+	/**
+	 * Clear the setup-card request memo (#3031).
+	 *
+	 * Lets tests exercise the populated path, and is a safe hook for anything that
+	 * changes which form qualifies (e.g. a form save or snooze).
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public static function reset_form_setup_card_cache() {
+		self::$setup_card_cache = [];
 	}
 
 	/**
@@ -2345,10 +2306,13 @@ JS;
 			],
 		];
 
-		$heading = sprintf(
+		// Fall back to a generic label for an untitled form so the heading never
+		// renders "Finish setting up " with a dangling space.
+		$card_title = '' !== trim( (string) $card['title'] ) ? $card['title'] : __( 'your form', 'sureforms' );
+		$heading    = sprintf(
 			/* translators: %s: form title. */
 			__( 'Finish setting up %s', 'sureforms' ),
-			$card['title']
+			$card_title
 		);
 		?>
 		<div class="srfm-setup-checklist" id="srfm-setup-checklist">
@@ -2570,6 +2534,79 @@ JS;
 			?>
 		</div>
 		<?php
+	}
+
+	/**
+	 * Build the setup-card payload (uncached). See get_form_setup_card().
+	 *
+	 * @since x.x.x
+	 * @return array<string,mixed>|null Card payload, or null when there is no candidate.
+	 */
+	private static function compute_form_setup_card() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || ! post_type_exists( SRFM_FORMS_POST_TYPE ) ) {
+			return null;
+		}
+
+		// "Remind me in two weeks" — a per-user snooze that hides the whole widget.
+		if ( (int) get_user_meta( get_current_user_id(), self::SETUP_WIDGET_SNOOZE_USER_META, true ) > time() ) {
+			return null;
+		}
+
+		// Only forms created from an Astra Sites starter template — those carry the
+		// `_astra_sites_imported_post` marker Astra Sites stamps on imported posts.
+		// Prime post + meta caches (the loop reads title, permalink and edit link
+		// per candidate) so this is a single query, not a follow-up per form.
+		$query = new \WP_Query(
+			[
+				'post_type'              => SRFM_FORMS_POST_TYPE,
+				'post_status'            => [ 'publish', 'draft', 'pending' ],
+				'posts_per_page'         => 10,
+				'orderby'                => 'date',
+				'order'                  => 'DESC',
+				'no_found_rows'          => true,
+				'update_post_meta_cache' => true,
+				'update_post_term_cache' => false,
+				'meta_query'             => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded to 10 recent forms; dashboard-only.
+					[
+						'key'     => '_astra_sites_imported_post',
+						'compare' => 'EXISTS',
+					],
+				],
+			]
+		);
+
+		foreach ( $query->posts as $post ) {
+			$form_id = (int) $post->ID;
+
+			if ( ! current_user_can( 'edit_post', $form_id ) ) {
+				continue;
+			}
+
+			$edit_link = get_edit_post_link( $form_id, 'raw' );
+
+			if ( empty( $edit_link ) ) {
+				continue;
+			}
+
+			// The steps are shown as optional next-steps — their completion is not
+			// computed, so the widget simply lists the actions the owner can take.
+			return [
+				'id'           => $form_id,
+				'title'        => get_the_title( $form_id ),
+				'edit_url'     => $edit_link,
+				// Deep-links to the email-notification panel where supported; falls
+				// back to opening the editor when the focus handler isn't present.
+				'email_url'    => add_query_arg( 'srfm_focus', 'notifications', $edit_link ),
+				// Deep-links to the Form Confirmation panel (the Thank You message).
+				'thankyou_url' => add_query_arg( 'srfm_focus', 'thankyou', $edit_link ),
+				// Front-end instant-form page. get_permalink() only yields a working
+				// URL for published forms; a draft/pending form has no public URL, so
+				// omit the view link there (the empty() guard hides the icon).
+				'view_url'     => 'publish' === $post->post_status ? (string) get_permalink( $form_id ) : '',
+			];
+		}
+
+		return null;
 	}
 
 	/**

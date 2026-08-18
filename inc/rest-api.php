@@ -1425,8 +1425,13 @@ class Rest_Api {
 							'sanitize_callback' => 'absint',
 						],
 						'action'  => [
+							'required'          => true,
 							'type'              => 'string',
 							'enum'              => [ 'edit_form', 'edit_thankyou', 'set_up_email', 'view_form', 'snooze' ],
+							// Core only enforces `enum` via the default arg sanitizer, which
+							// is skipped once a sanitize_callback is set — so pair it with an
+							// explicit validate_callback, matching this file's other routes.
+							'validate_callback' => 'rest_validate_request_arg',
 							'sanitize_callback' => 'sanitize_text_field',
 						],
 					],
