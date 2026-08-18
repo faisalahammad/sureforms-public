@@ -2637,9 +2637,9 @@ JS;
 		</p>
 		<p class="srfm-thankyou-notice__text"><?php echo esc_html( $sentence ); ?></p>
 		<p class="srfm-thankyou-notice__actions">
-			<a class="button button-primary srfm-ty-edit-form" href="<?php echo esc_url( $form['edit_url'] ); ?>"><?php esc_html_e( 'Edit form', 'sureforms' ); ?></a>
-			<a class="button srfm-ty-edit-thankyou" href="<?php echo esc_url( $form['thankyou_url'] ); ?>"><?php esc_html_e( 'Edit the Thank You message', 'sureforms' ); ?></a>
-			<a class="button srfm-ty-set-replies" href="<?php echo esc_url( $form['replies_url'] ); ?>"><?php esc_html_e( 'Set where replies go', 'sureforms' ); ?></a>
+			<a class="button button-primary srfm-ty-edit-form" href="<?php echo esc_url( $form['edit_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Edit form', 'sureforms' ); ?></a>
+			<a class="button srfm-ty-edit-thankyou" href="<?php echo esc_url( $form['thankyou_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Edit the Thank You message', 'sureforms' ); ?></a>
+			<a class="button srfm-ty-set-replies" href="<?php echo esc_url( $form['replies_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Set where replies go', 'sureforms' ); ?></a>
 		</p>
 		<?php
 		return (string) ob_get_clean();
