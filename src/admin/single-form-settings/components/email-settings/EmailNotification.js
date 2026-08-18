@@ -17,6 +17,12 @@ import TabContentWrapper from '@Components/tab-content-wrapper';
 import { notify } from '@Utils/notify';
 import { applyFilters, doAction } from '@wordpress/hooks';
 
+// One-shot guard: when the editor is reached via the "Set where replies go"
+// deep-link (?srfm_focus=notifications, surfaced by PHP as window.srfmDeepLinkFocus),
+// jump straight into the first notification's editor instead of landing on the
+// list. Module-scoped so a later tab remount does not reopen it.
+let srfmRepliesDeepLinkConsumed = false;
+
 const CustomButton = forwardRef(
 	(
 		{
@@ -205,6 +211,27 @@ const EmailNotification = ( {
 			label: __( 'Actions', 'sureforms' ),
 		},
 	];
+
+	// Deep-link: open the first notification's editor directly when arriving via
+	// "Set where replies go". Runs once data is available, then never again.
+	useEffect( () => {
+		if ( srfmRepliesDeepLinkConsumed ) {
+			return;
+		}
+		if (
+			typeof window === 'undefined' ||
+			window.srfmDeepLinkFocus !== 'notifications'
+		) {
+			return;
+		}
+		if (
+			Array.isArray( emailNotificationData ) &&
+			emailNotificationData.length > 0
+		) {
+			srfmRepliesDeepLinkConsumed = true;
+			handleEdit( emailNotificationData[ 0 ] );
+		}
+	}, [ emailNotificationData ] );
 
 	useEffect( () => {
 		function handleClickOutside() {
