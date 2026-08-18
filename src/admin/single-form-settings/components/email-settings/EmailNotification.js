@@ -17,6 +17,17 @@ import TabContentWrapper from '@Components/tab-content-wrapper';
 import { notify } from '@Utils/notify';
 import { applyFilters, doAction } from '@wordpress/hooks';
 
+// Deep-link target (?srfm_focus=…). Prefer the PHP-surfaced global when present
+// (reliable), else the URL snapshot captured at bundle-eval — before Gutenberg
+// strips the query arg. Used to jump straight into the first notification when
+// the editor is reached via "Set up email" / "Set where replies go".
+const srfmRepliesDeepLinkFocus =
+	( typeof window !== 'undefined' && window.srfmDeepLinkFocus ) ||
+	new URLSearchParams( window.location.search ).get( 'srfm_focus' );
+
+// One-shot guard so a later tab remount does not reopen the editor.
+let srfmRepliesDeepLinkConsumed = false;
+
 const CustomButton = forwardRef(
 	(
 		{
@@ -205,6 +216,24 @@ const EmailNotification = ( {
 			label: __( 'Actions', 'sureforms' ),
 		},
 	];
+
+	// Deep-link: open the first notification's editor directly when arriving via
+	// "Set up email" / "Set where replies go". Runs once data is available.
+	useEffect( () => {
+		if ( srfmRepliesDeepLinkConsumed ) {
+			return;
+		}
+		if ( srfmRepliesDeepLinkFocus !== 'notifications' ) {
+			return;
+		}
+		if (
+			Array.isArray( emailNotificationData ) &&
+			emailNotificationData.length > 0
+		) {
+			srfmRepliesDeepLinkConsumed = true;
+			handleEdit( emailNotificationData[ 0 ] );
+		}
+	}, [ emailNotificationData ] );
 
 	useEffect( () => {
 		function handleClickOutside() {
