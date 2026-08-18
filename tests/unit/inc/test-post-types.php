@@ -247,7 +247,7 @@ class Test_Post_Types extends TestCase {
 			require_once ABSPATH . WPINC . '/class-wp-admin-bar.php';
 		}
 
-		$post_types = new Post_Types();
+		$post_types = Post_Types::get_instance();
 		$post_types->register_post_types();
 		add_filter( 'show_admin_bar', '__return_true' );
 
@@ -268,6 +268,7 @@ class Test_Post_Types extends TestCase {
 		$node = $bar->get_node( 'new-' . SRFM_FORMS_POST_TYPE );
 		$this->assertNotNull( $node, 'Admin should get a Form node under "+ New".' );
 		$this->assertSame( 'new-content', $node->parent );
+		$this->assertSame( 'Form', (string) $node->title, 'Node uses the admin-bar label.' );
 		$this->assertStringContainsString( 'post-new.php?post_type=' . SRFM_FORMS_POST_TYPE, (string) $node->href );
 
 		// A user without the create capability gets no node.
@@ -286,12 +287,15 @@ class Test_Post_Types extends TestCase {
 		$this->assertNull( $bar_sub->get_node( 'new-' . SRFM_FORMS_POST_TYPE ), 'A non-privileged user must not get the Form node.' );
 
 		remove_filter( 'show_admin_bar', '__return_true' );
+		unset( $GLOBALS['show_admin_bar'] );
 		wp_set_current_user( 0 );
-		if ( ! is_wp_error( $admin ) ) {
-			wp_delete_user( (int) $admin );
-		}
-		if ( ! is_wp_error( $subscriber ) ) {
-			wp_delete_user( (int) $subscriber );
+		if ( function_exists( 'wp_delete_user' ) ) {
+			if ( ! is_wp_error( $admin ) ) {
+				wp_delete_user( (int) $admin );
+			}
+			if ( ! is_wp_error( $subscriber ) ) {
+				wp_delete_user( (int) $subscriber );
+			}
 		}
 	}
 
@@ -306,7 +310,7 @@ class Test_Post_Types extends TestCase {
 			require_once ABSPATH . WPINC . '/class-wp-admin-bar.php';
 		}
 
-		$post_types = new Post_Types();
+		$post_types = Post_Types::get_instance();
 		$post_types->register_post_types();
 		add_filter( 'show_admin_bar', '__return_true' );
 
@@ -321,6 +325,7 @@ class Test_Post_Types extends TestCase {
 		wp_set_current_user( is_wp_error( $admin ) ? 0 : (int) $admin );
 
 		global $post;
+		$original_post = $post;
 
 		// Viewing a form → an "Edit Form" node is added.
 		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Bar edit form' ] );
@@ -341,12 +346,13 @@ class Test_Post_Types extends TestCase {
 		$post_types->add_edit_form_to_admin_bar_menu( $bar_other );
 		$this->assertNull( $bar_other->get_node( 'edit-form' ), 'A non-form post must not add the Edit Form node.' );
 
-		$post = null;
+		$post = $original_post;
 		remove_filter( 'show_admin_bar', '__return_true' );
+		unset( $GLOBALS['show_admin_bar'] );
 		wp_delete_post( $form_id, true );
 		wp_delete_post( $page_id, true );
 		wp_set_current_user( 0 );
-		if ( ! is_wp_error( $admin ) ) {
+		if ( function_exists( 'wp_delete_user' ) && ! is_wp_error( $admin ) ) {
 			wp_delete_user( (int) $admin );
 		}
 	}

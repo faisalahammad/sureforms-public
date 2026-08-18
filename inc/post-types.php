@@ -36,7 +36,6 @@ class Post_Types {
 		add_action( 'init', [ $this, 'register_post_metas' ] );
 		add_shortcode( 'sureforms', [ $this, 'forms_shortcode' ] );
 		add_action( 'manage_posts_extra_tablenav', [ $this, 'maybe_render_blank_form_state' ] );
-		add_action( 'admin_bar_menu', [ $this, 'remove_admin_bar_menu_item' ], 80, 1 );
 		add_action( 'template_redirect', [ $this, 'srfm_instant_form_redirect' ] );
 		add_action( 'template_redirect', [ $this, 'disable_sureforms_archive_page' ], 9 );
 		add_action( 'load-edit.php', [ $this, 'redirect_forms_listing_page' ] );
@@ -128,14 +127,17 @@ class Post_Types {
 			return;
 		}
 
-		// The core "+ New" (new-content) group is registered at priority 70; this
-		// runs at 100, so the parent node is guaranteed to exist.
+		// Core registers the "+ New" (new-content) group at priority 70, so running at
+		// 100 places this node inside it. If core skipped the group (the user can create
+		// nothing else), WP_Admin_Bar::_bind() drops this orphan node silently.
+		// name_admin_bar is the label core uses for "+ New" children; escaped because
+		// WP_Admin_Bar echoes node titles unescaped.
 		$wp_admin_bar->add_node(
 			[
 				'id'     => 'new-' . SRFM_FORMS_POST_TYPE,
 				'parent' => 'new-content',
-				'title'  => $post_type->labels->singular_name,
-				'href'   => admin_url( 'post-new.php?post_type=' . SRFM_FORMS_POST_TYPE ),
+				'title'  => esc_html( $post_type->labels->name_admin_bar ),
+				'href'   => esc_url( admin_url( 'post-new.php?post_type=' . SRFM_FORMS_POST_TYPE ) ),
 			]
 		);
 	}
@@ -327,18 +329,6 @@ class Post_Types {
 			wp_safe_redirect( home_url(), 301 );
 			exit;
 		}
-	}
-
-	/**
-	 * Remove add new form menu item.
-	 *
-	 * @param WP_Admin_Bar $wp_admin_bar WP_Admin_Bar instance.
-	 *
-	 * @return void
-	 * @since 0.0.1
-	 */
-	public function remove_admin_bar_menu_item( $wp_admin_bar ) {
-		$wp_admin_bar->remove_node( 'new-sureforms_form' );
 	}
 
 	/**
