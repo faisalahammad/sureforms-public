@@ -43,6 +43,7 @@ class Post_Types {
 
 		add_filter( 'rest_prepare_sureforms_form', [ $this, 'sureforms_normalize_meta_for_rest' ], 10, 2 );
 		add_action( 'admin_bar_menu', [ $this, 'add_edit_form_to_admin_bar_menu' ], 100 );
+		add_action( 'admin_bar_menu', [ $this, 'add_new_form_to_admin_bar_menu' ], 100 );
 	}
 
 	/**
@@ -99,6 +100,42 @@ class Post_Types {
 					'title' => esc_attr__( 'Edit this form', 'sureforms' ),
 				],
 				'html'  => true,
+			]
+		);
+	}
+
+	/**
+	 * Add a "Form" shortcut to the admin bar "+ New" menu (#3026).
+	 *
+	 * Mirrors how core post types appear under "+ New", but added manually rather
+	 * than via `show_in_admin_bar` so it does not also register a second front-end
+	 * "Edit" node alongside the custom one in add_edit_form_to_admin_bar_menu().
+	 * Gated on the form CPT's own create capability (manage_options for this CPT),
+	 * so it only shows for users who can actually create a form.
+	 *
+	 * @param WP_Admin_Bar $wp_admin_bar WP_Admin_Bar instance.
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function add_new_form_to_admin_bar_menu( $wp_admin_bar ) {
+		if ( ! is_admin_bar_showing() || ! $wp_admin_bar instanceof WP_Admin_Bar ) {
+			return;
+		}
+
+		$post_type = get_post_type_object( SRFM_FORMS_POST_TYPE );
+
+		if ( ! $post_type || empty( $post_type->cap->create_posts ) || ! current_user_can( $post_type->cap->create_posts ) ) {
+			return;
+		}
+
+		// The core "+ New" (new-content) group is registered at priority 70; this
+		// runs at 100, so the parent node is guaranteed to exist.
+		$wp_admin_bar->add_node(
+			[
+				'id'     => 'new-' . SRFM_FORMS_POST_TYPE,
+				'parent' => 'new-content',
+				'title'  => $post_type->labels->singular_name,
+				'href'   => admin_url( 'post-new.php?post_type=' . SRFM_FORMS_POST_TYPE ),
 			]
 		);
 	}
