@@ -937,6 +937,25 @@ class Test_Getting_Started_Notice extends TestCase {
 	}
 
 	/**
+	 * The first-form-created flag follows the stored timestamp option.
+	 */
+	public function test_is_first_form_created() {
+		// No stored timestamp → first form not yet created.
+		Helper::update_srfm_option( 'first_form_created_at', false );
+		$this->assertFalse( Admin::is_first_form_created() );
+
+		// A positive integer timestamp → first form has been created.
+		Helper::update_srfm_option( 'first_form_created_at', time() );
+		$this->assertTrue( Admin::is_first_form_created() );
+
+		// A zero/invalid timestamp does not count as created.
+		Helper::update_srfm_option( 'first_form_created_at', 0 );
+		$this->assertFalse( Admin::is_first_form_created() );
+
+		Helper::update_srfm_option( 'first_form_created_at', false );
+	}
+
+	/**
 	 * The setup-card payload is null or a fully-formed card with deep-link URLs (#3031).
 	 */
 	public function test_get_form_setup_card() {
