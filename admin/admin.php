@@ -466,13 +466,13 @@ class Admin {
 	}
 
 	/**
-	 * REST handler: snooze the "Finish setting up" widget for 14 days (#3031).
+	 * REST handler: record a "Finish setting up" widget interaction (#3031).
 	 *
-	 * The snooze is stored per-user, so "Remind me in two weeks" hides the whole
-	 * widget rather than only the form currently shown. The request still carries
-	 * the displayed form id: capability is re-checked against it here — beyond the
-	 * route's generic permission callback — so only a genuine editor of that form
-	 * can set the snooze.
+	 * Tracks the clicked action as an analytics event and, for "snooze", stores a
+	 * per-user 14-day snooze so "Remind me in two weeks" hides the whole widget
+	 * rather than only the form currently shown. The request carries the displayed
+	 * form id: capability is re-checked against it here — beyond the route's generic
+	 * permission callback — so only a genuine editor of that form can act.
 	 *
 	 * @param \WP_REST_Request<array<string,mixed>> $request Request.
 	 *
@@ -486,7 +486,27 @@ class Admin {
 			return new \WP_Error( 'srfm_setup_card_forbidden', __( 'You are not allowed to update this prompt.', 'sureforms' ), [ 'status' => 403 ] );
 		}
 
-		update_user_meta( get_current_user_id(), self::SETUP_WIDGET_SNOOZE_USER_META, time() + ( 14 * DAY_IN_SECONDS ) );
+		$action = sanitize_key( (string) $request->get_param( 'action' ) );
+
+		// Interaction analytics for the setup widget (#3031). Each event carries a
+		// date automatically (see BSF_Analytics_Events::track()) and dedupes per
+		// event name, matching the sibling notice's telemetry.
+		$events = [
+			'edit_form'     => 'form_setup_widget_edit_form',
+			'edit_thankyou' => 'form_setup_widget_edit_thankyou',
+			'set_up_email'  => 'form_setup_widget_set_up_email',
+			'view_form'     => 'form_setup_widget_view_form',
+			'snooze'        => 'form_setup_widget_snooze',
+		];
+
+		if ( isset( $events[ $action ] ) ) {
+			Analytics::events()->track( $events[ $action ], (string) $form_id );
+		}
+
+		// "Remind me in two weeks" hides the whole widget per-user for 14 days.
+		if ( 'snooze' === $action ) {
+			update_user_meta( get_current_user_id(), self::SETUP_WIDGET_SNOOZE_USER_META, time() + ( 14 * DAY_IN_SECONDS ) );
+		}
 
 		return new \WP_REST_Response( [ 'success' => true ], 200 );
 	}
@@ -2415,21 +2435,25 @@ JS;
 		}
 
 		// Optional next-steps — always offered, their completion is not computed.
+		// 'event' is the analytics action key beaconed on click (see the widget JS).
 		$rows = [
 			[
 				'label' => __( 'Review or edit your form', 'sureforms' ),
 				'cta'   => __( 'Edit form', 'sureforms' ),
 				'url'   => $card['edit_url'],
+				'event' => 'edit_form',
 			],
 			[
 				'label' => __( 'Personalize the Thank You message', 'sureforms' ),
 				'cta'   => __( 'Edit message', 'sureforms' ),
 				'url'   => $card['thankyou_url'],
+				'event' => 'edit_thankyou',
 			],
 			[
 				'label' => __( 'Choose who gets notified of new replies', 'sureforms' ),
 				'cta'   => __( 'Set up email', 'sureforms' ),
 				'url'   => $card['email_url'],
+				'event' => 'set_up_email',
 			],
 		];
 
@@ -2443,7 +2467,7 @@ JS;
 			<p class="srfm-setup-checklist__title">
 				<?php echo esc_html( $heading ); ?>
 				<?php if ( ! empty( $card['view_url'] ) ) { ?>
-					<a class="srfm-setup-checklist__view" href="<?php echo esc_url( $card['view_url'] ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: form title. */ __( 'View %s (opens in a new tab)', 'sureforms' ), $card['title'] ) ); ?>">
+					<a class="srfm-setup-checklist__view" data-srfm-event="view_form" href="<?php echo esc_url( $card['view_url'] ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: form title. */ __( 'View %s (opens in a new tab)', 'sureforms' ), $card['title'] ) ); ?>">
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
 					</a>
 				<?php } ?>
@@ -2454,7 +2478,7 @@ JS;
 				<?php foreach ( $rows as $row ) { ?>
 					<li class="srfm-setup-checklist__step">
 						<span class="srfm-setup-checklist__label"><?php echo esc_html( $row['label'] ); ?></span>
-						<a class="srfm-setup-checklist__cta" href="<?php echo esc_url( $row['url'] ); ?>"><?php echo esc_html( $row['cta'] ); ?></a>
+						<a class="srfm-setup-checklist__cta" data-srfm-event="<?php echo esc_attr( $row['event'] ); ?>" href="<?php echo esc_url( $row['url'] ); ?>"><?php echo esc_html( $row['cta'] ); ?></a>
 					</li>
 				<?php } ?>
 			</ul>
@@ -2538,6 +2562,7 @@ CSS;
 		fetch( cfg.restUrl, {
 			method: 'POST',
 			credentials: 'same-origin',
+			keepalive: true,
 			headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': cfg.nonce },
 			body: JSON.stringify( { form_id: cfg.formId, action: action } ),
 		} ).catch( function () {} );
@@ -2547,6 +2572,15 @@ CSS;
 		const box = document.getElementById( 'srfm_form_setup_checklist' );
 		( box || widget ).remove();
 	};
+
+	// Beacon the CTA / view-form clicks for analytics. keepalive on the fetch lets
+	// the request finish even though the CTA immediately navigates away.
+	widget.addEventListener( 'click', function ( e ) {
+		const target = e.target.closest( '[data-srfm-event]' );
+		if ( target ) {
+			persist( target.getAttribute( 'data-srfm-event' ) );
+		}
+	} );
 
 	const snoozeBtn = document.getElementById( 'srfm-setup-checklist-snooze' );
 	if ( snoozeBtn ) {

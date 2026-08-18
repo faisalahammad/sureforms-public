@@ -1019,10 +1019,55 @@ class Test_Getting_Started_Notice extends TestCase {
 	}
 
 	/**
-	 * The setup-card REST handler is registered on the Admin instance (#3031).
+	 * The setup-card REST handler snoozes only on the "snooze" action (#3031).
+	 *
+	 * A CTA/analytics action ("edit_form") records telemetry but must not hide the
+	 * widget; only "snooze" writes the per-user snooze meta.
 	 */
 	public function test_dismiss_form_setup_card() {
-		$this->assertTrue( method_exists( Admin::get_instance(), 'dismiss_form_setup_card' ) );
+		$admin = Admin::get_instance();
+		$this->assertTrue( method_exists( $admin, 'dismiss_form_setup_card' ) );
+
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || ! class_exists( '\WP_REST_Request' ) ) {
+			$this->markTestSkipped( 'REST/CPT environment not available' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$user = wp_insert_user(
+			[
+				'user_login' => 'srfm_widget_admin_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_widget_admin_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $user ) ? 0 : (int) $user );
+
+		$form_id  = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Widget form' ] );
+		$meta_key = Admin::SETUP_WIDGET_SNOOZE_USER_META;
+
+		$call = static function ( $action ) use ( $admin, $form_id ) {
+			$req = new \WP_REST_Request( 'POST', '/sureforms/v1/dismiss-form-setup-card' );
+			$req->set_param( 'form_id', $form_id );
+			$req->set_param( 'action', $action );
+			return $admin->dismiss_form_setup_card( $req );
+		};
+
+		// A CTA action succeeds but does NOT snooze the widget.
+		delete_user_meta( (int) $user, $meta_key );
+		$res = $call( 'edit_form' );
+		$this->assertFalse( is_wp_error( $res ), 'A valid CTA action should not error.' );
+		$this->assertSame( '', (string) get_user_meta( (int) $user, $meta_key, true ), 'A CTA action must not set the snooze meta.' );
+
+		// The snooze action stores a future snooze timestamp.
+		$call( 'snooze' );
+		$this->assertGreaterThan( time(), (int) get_user_meta( (int) $user, $meta_key, true ), 'Snooze must store a future timestamp.' );
+
+		wp_delete_post( $form_id, true );
+		wp_set_current_user( 0 );
+		if ( ! is_wp_error( $user ) ) {
+			wp_delete_user( (int) $user );
+		}
 	}
 
 	/**
