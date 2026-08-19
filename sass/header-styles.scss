@@ -40,6 +40,9 @@ body.post-type-sureforms_form .edit-post-header .edit-post-fullscreen-mode-close
 
 // styles the back-button wrapper as the logo tile.
 body.post-type-sureforms_form .editor-header__back-button {
+	// WP 7.1 gives the wrapper its own margin, which broke the tile's flush fit
+	// against the header edge.
+	margin: 0;
 	align-items: center;
 	align-self: stretch;
 	background: #1e1e1e;
