@@ -33,6 +33,49 @@ body.post-type-sureforms_form .edit-post-header .edit-post-fullscreen-mode-close
 	box-shadow: none;
 }
 
+// WP 7.1: the `.edit-post-fullscreen-mode-close` button was replaced by the
+// generic `.editor-header__back-button` wrapper, so the selectors above no
+// longer match and the SureForms logo fell back to the default back chevron.
+// Re-apply the logo to the new markup (the rules above stay for WP < 7.1).
+
+// styles the back-button wrapper as the logo tile.
+body.post-type-sureforms_form .editor-header__back-button {
+	// WP 7.1 gives the wrapper its own margin, which broke the tile's flush fit
+	// against the header edge.
+	margin: 0;
+	align-items: center;
+	align-self: stretch;
+	background: #1e1e1e;
+	border-radius: 0;
+	display: flex;
+	justify-content: center;
+	position: relative;
+	width: 60px;
+}
+
+// keeps the (now icon-less) back link filling the tile and clickable.
+body.post-type-sureforms_form .editor-header__back-button a.components-button {
+	color: #fff;
+	height: 100%;
+	justify-content: center;
+	width: 60px;
+}
+
+// hides the default back chevron.
+body.post-type-sureforms_form .editor-header__back-button a.components-button svg {
+	display: none;
+}
+
+// adds the SureForms logo on top of the back link.
+body.post-type-sureforms_form .editor-header__back-button:before {
+	content: url( 'data:image/svg+xml;utf8,<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" clip-rule="evenodd" d="M32 0H0V32H32V0ZM22.8573 6.85728H9.14304V11.4287V13.7144L11.4288 11.4287H22.8573V6.85728ZM20.5717 13.7146H9.14314V18.286V20.5714V20.5718V25.1428H16.0003V20.5714H9.14351L11.4289 18.286H20.5717V13.7146Z" fill="white"/></svg>' );
+	left: 50%;
+	pointer-events: none;
+	position: absolute;
+	top: 50%;
+	transform: translate( -50%, -50% );
+}
+
 // hides the pinned items other than settings.
 // When the block is not selected aria-controls is set to edit-post:document.
 // When the block is selected aria-controls is set to edit-post:block. So we need to exclude these two.

@@ -39,6 +39,9 @@ export default ( { attributes, setAttributes, clientId } ) => {
 
 	const iframeRef = useRef( null );
 	const iframeContainerRef = useRef( null );
+	// Last height written to the frame, so an unchanged measurement is a no-op
+	// rather than another resize → reflow → report cycle.
+	const appliedHeightRef = useRef( 0 );
 	const [ loading, setLoading ] = useState( false );
 	const [ formIframeHeight, setFormIframeHeight ] = useState( 0 );
 	const [ showUpgradeModal, setShowUpgradeModal ] = useState( false );
@@ -106,9 +109,27 @@ export default ( { attributes, setAttributes, clientId } ) => {
 		[ id ]
 	);
 
-	// Remove unwanted elements from the iframe and add styling for the form
-	const modifyIframeContent = () => {
-		const iframeDocument = iframeRef.current.contentDocument;
+	/**
+	 * Read the preview document, when the browser lets us.
+	 *
+	 * Returns null instead of throwing: from WP 7.1 the editor canvas is a
+	 * cross-origin-isolated document, so this iframe is treated as cross-origin
+	 * and both `contentDocument` and any property access on it are unavailable.
+	 *
+	 * @return {Document|null} The preview document, or null when unreachable.
+	 */
+	const getPreviewDocument = () => {
+		try {
+			return iframeRef.current?.contentDocument ?? null;
+		} catch ( error ) {
+			// Cross-origin (or isolated) preview — nothing readable here.
+			return null;
+		}
+	};
+
+	// Sync the iframe height from the preview document, where that is readable.
+	const syncHeightFromDocument = () => {
+		const iframeDocument = getPreviewDocument();
 
 		if ( ! iframeDocument ) {
 			return;
@@ -121,14 +142,29 @@ export default ( { attributes, setAttributes, clientId } ) => {
 		if ( formOuterContainerSelector ) {
 			const getHeight = formOuterContainerSelector.offsetHeight;
 
-			if ( getHeight && 0 !== getHeight ) {
-				// set height of iframe if form is not empty.
+			// set height of iframe if form is not empty, and only when it actually
+			// changed — writing the same height back reflows the preview for nothing.
+			if (
+				getHeight &&
+				0 !== getHeight &&
+				appliedHeightRef.current !== getHeight
+			) {
+				appliedHeightRef.current = getHeight;
 				setFormIframeHeight( getHeight );
 				iframeRef.current.height = getHeight;
 			}
 		}
+	};
 
+	// Remove unwanted elements from the iframe and add styling for the form
+	const modifyIframeContent = () => {
+		// Clear the loader first, unconditionally. Height measurement below is
+		// best-effort — when the preview document is unreadable (WP 7.1's isolated
+		// canvas) the height instead arrives over the srfm-preview-height message.
+		// Clearing last, behind that guard, is what left the spinner up forever.
 		setLoading( false );
+
+		syncHeightFromDocument();
 	};
 
 	useEffect( () => {
@@ -147,25 +183,12 @@ export default ( { attributes, setAttributes, clientId } ) => {
 
 		const observerCallback = ( entries ) => {
 			entries.forEach( ( entry ) => {
-				// Check if form is visible and iframe height hasn't been set
+				// Check if form is visible and iframe height hasn't been set.
+				// syncHeightFromDocument() no-ops when the preview document is
+				// unreachable; reading `.contentDocument.querySelector()` directly
+				// threw a TypeError there.
 				if ( ! formIframeHeight && entry.isIntersecting ) {
-					// Access the iframe's content
-					const iframeDocument = iframeRef.current.contentDocument;
-
-					// Find the form container inside the iframe
-					const formOuterContainerSelector =
-						iframeDocument.querySelector( '.srfm-form-container' );
-
-					if ( formOuterContainerSelector ) {
-						const getHeight =
-							formOuterContainerSelector.offsetHeight;
-
-						// Set iframe height if a valid height is found
-						if ( getHeight && getHeight !== 0 ) {
-							setFormIframeHeight( getHeight );
-							iframeRef.current.height = getHeight;
-						}
-					}
+					syncHeightFromDocument();
 				}
 			} );
 		};
@@ -181,14 +204,70 @@ export default ( { attributes, setAttributes, clientId } ) => {
 	}, [] );
 
 	useEffect( () => {
-		if ( iframeRef && iframeRef.current ) {
-			setLoading( true );
-
-			iframeRef.current.onload = () => {
-				modifyIframeContent();
-			};
+		if ( ! iframeRef?.current ) {
+			return;
 		}
+
+		setLoading( true );
+
+		iframeRef.current.onload = () => {
+			modifyIframeContent();
+		};
+
+		// The load event can be missed entirely: the iframe is `loading="eager"`
+		// so it may already have loaded before this effect runs, and a preview
+		// blocked by the embedder's isolation policy never fires load at all.
+		// Without this the loader would stay up for the rest of the session.
+		const loaderFallback = setTimeout( () => {
+			setLoading( false );
+			syncHeightFromDocument();
+		}, 3000 );
+
+		return () => clearTimeout( loaderFallback );
 	}, [ id, iframeRef, hasResolved, attributes.formTheme ] );
+
+	// Height over postMessage — the only channel that survives a cross-origin
+	// preview (WP 7.1's isolated editor canvas), where the document cannot be
+	// measured from here. The preview page posts its own height on load/resize.
+	// Identity is checked by comparing the event source against this iframe's
+	// contentWindow: a reference comparison needs no cross-origin access, and is
+	// stricter than an origin check when the embedder origin is opaque.
+	useEffect( () => {
+		const onPreviewMessage = ( event ) => {
+			if (
+				'srfm-preview-height' !== event.data?.type ||
+				event.source !== iframeRef.current?.contentWindow
+			) {
+				return;
+			}
+
+			const height = Number( event.data.height );
+
+			if ( ! Number.isFinite( height ) || height <= 0 ) {
+				return;
+			}
+
+			setLoading( false );
+
+			// Ignore a height we have already applied. Applying it resizes the
+			// frame, which reflows the preview and can prompt another report, so
+			// this is the second half of the loop guard (the first is in
+			// preview-styling.js) and keeps repeated messages from re-rendering.
+			if ( appliedHeightRef.current === height ) {
+				return;
+			}
+
+			appliedHeightRef.current = height;
+			setFormIframeHeight( height );
+
+			if ( iframeRef.current ) {
+				iframeRef.current.height = height;
+			}
+		};
+
+		window.addEventListener( 'message', onPreviewMessage );
+		return () => window.removeEventListener( 'message', onPreviewMessage );
+	}, [] );
 
 	// Send styling updates to iframe via PostMessage
 	const sendStylingToIframe = useCallback( () => {
