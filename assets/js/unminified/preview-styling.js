@@ -54,6 +54,49 @@
 		overrideStyle.textContent = cssText;
 	}
 
+	/**
+	 * Report our rendered height to the embedding editor.
+	 *
+	 * The block editor used to measure this document directly, but from WP 7.1 its
+	 * canvas is cross-origin isolated, so the embed is opaque to it and the iframe
+	 * stayed at its default height. Pushing the height out is the only channel that
+	 * works in both cases.
+	 *
+	 * targetOrigin is '*' deliberately: the embedder can be an opaque/blob origin
+	 * under WP 7.1, so no specific origin can be computed, and the payload is a
+	 * single layout number with nothing sensitive in it. The editor side verifies
+	 * the sender by comparing against its own iframe's contentWindow.
+	 *
+	 * @since x.x.x
+	 */
+	function reportHeight() {
+		const height = container.offsetHeight;
+
+		if ( ! height ) {
+			return;
+		}
+
+		const message = { type: 'srfm-preview-height', height };
+
+		// The editor's React tree runs in the top window while the canvas is a
+		// separate document, so parent and top can differ — post to both.
+		[ window.parent, window.top ].forEach( function ( target ) {
+			if ( target && target !== window ) {
+				target.postMessage( message, '*' );
+			}
+		} );
+	}
+
+	// Only meaningful when framed; a directly-loaded preview has no embedder.
+	if ( window.parent !== window ) {
+		reportHeight();
+		window.addEventListener( 'load', reportHeight );
+
+		if ( 'undefined' !== typeof ResizeObserver ) {
+			new ResizeObserver( reportHeight ).observe( container );
+		}
+	}
+
 	window.addEventListener( 'message', function ( event ) {
 		if ( event.origin !== window.location.origin ) {
 			return;

@@ -93,8 +93,14 @@ export default ( { attributes, setAttributes, clientId } ) => {
 				'sureforms_form',
 				id
 			);
-			const canEdit =
-				select( coreStore ).canUserEditEntityRecord( 'sureforms_form' );
+			// canUserEditEntityRecord() is deprecated since WP 6.7 (it warns in the
+			// console on 7.1) and took ( kind, name, recordId ) — the single
+			// 'sureforms_form' argument was landing in `kind`.
+			const canEdit = select( coreStore ).canUser( 'update', {
+				kind: 'postType',
+				name: 'sureforms_form',
+				id,
+			} );
 			return {
 				canEdit,
 				isMissing: hasResolvedValue && ! form,
@@ -106,9 +112,27 @@ export default ( { attributes, setAttributes, clientId } ) => {
 		[ id ]
 	);
 
-	// Remove unwanted elements from the iframe and add styling for the form
-	const modifyIframeContent = () => {
-		const iframeDocument = iframeRef.current.contentDocument;
+	/**
+	 * Read the preview document, when the browser lets us.
+	 *
+	 * Returns null instead of throwing: from WP 7.1 the editor canvas is a
+	 * cross-origin-isolated document, so this iframe is treated as cross-origin
+	 * and both `contentDocument` and any property access on it are unavailable.
+	 *
+	 * @return {Document|null} The preview document, or null when unreachable.
+	 */
+	const getPreviewDocument = () => {
+		try {
+			return iframeRef.current?.contentDocument ?? null;
+		} catch ( error ) {
+			// Cross-origin (or isolated) preview — nothing readable here.
+			return null;
+		}
+	};
+
+	// Sync the iframe height from the preview document, where that is readable.
+	const syncHeightFromDocument = () => {
+		const iframeDocument = getPreviewDocument();
 
 		if ( ! iframeDocument ) {
 			return;
@@ -127,8 +151,17 @@ export default ( { attributes, setAttributes, clientId } ) => {
 				iframeRef.current.height = getHeight;
 			}
 		}
+	};
 
+	// Remove unwanted elements from the iframe and add styling for the form
+	const modifyIframeContent = () => {
+		// Clear the loader first, unconditionally. Height measurement below is
+		// best-effort — when the preview document is unreadable (WP 7.1's isolated
+		// canvas) the height instead arrives over the srfm-preview-height message.
+		// Clearing last, behind that guard, is what left the spinner up forever.
 		setLoading( false );
+
+		syncHeightFromDocument();
 	};
 
 	useEffect( () => {
@@ -147,25 +180,12 @@ export default ( { attributes, setAttributes, clientId } ) => {
 
 		const observerCallback = ( entries ) => {
 			entries.forEach( ( entry ) => {
-				// Check if form is visible and iframe height hasn't been set
+				// Check if form is visible and iframe height hasn't been set.
+				// syncHeightFromDocument() no-ops when the preview document is
+				// unreachable; reading `.contentDocument.querySelector()` directly
+				// threw a TypeError there.
 				if ( ! formIframeHeight && entry.isIntersecting ) {
-					// Access the iframe's content
-					const iframeDocument = iframeRef.current.contentDocument;
-
-					// Find the form container inside the iframe
-					const formOuterContainerSelector =
-						iframeDocument.querySelector( '.srfm-form-container' );
-
-					if ( formOuterContainerSelector ) {
-						const getHeight =
-							formOuterContainerSelector.offsetHeight;
-
-						// Set iframe height if a valid height is found
-						if ( getHeight && getHeight !== 0 ) {
-							setFormIframeHeight( getHeight );
-							iframeRef.current.height = getHeight;
-						}
-					}
+					syncHeightFromDocument();
 				}
 			} );
 		};
@@ -181,14 +201,60 @@ export default ( { attributes, setAttributes, clientId } ) => {
 	}, [] );
 
 	useEffect( () => {
-		if ( iframeRef && iframeRef.current ) {
-			setLoading( true );
-
-			iframeRef.current.onload = () => {
-				modifyIframeContent();
-			};
+		if ( ! iframeRef?.current ) {
+			return;
 		}
+
+		setLoading( true );
+
+		iframeRef.current.onload = () => {
+			modifyIframeContent();
+		};
+
+		// The load event can be missed entirely: the iframe is `loading="eager"`
+		// so it may already have loaded before this effect runs, and a preview
+		// blocked by the embedder's isolation policy never fires load at all.
+		// Without this the loader would stay up for the rest of the session.
+		const loaderFallback = setTimeout( () => {
+			setLoading( false );
+			syncHeightFromDocument();
+		}, 3000 );
+
+		return () => clearTimeout( loaderFallback );
 	}, [ id, iframeRef, hasResolved, attributes.formTheme ] );
+
+	// Height over postMessage — the only channel that survives a cross-origin
+	// preview (WP 7.1's isolated editor canvas), where the document cannot be
+	// measured from here. The preview page posts its own height on load/resize.
+	// Identity is checked by comparing the event source against this iframe's
+	// contentWindow: a reference comparison needs no cross-origin access, and is
+	// stricter than an origin check when the embedder origin is opaque.
+	useEffect( () => {
+		const onPreviewMessage = ( event ) => {
+			if (
+				'srfm-preview-height' !== event.data?.type ||
+				event.source !== iframeRef.current?.contentWindow
+			) {
+				return;
+			}
+
+			const height = Number( event.data.height );
+
+			if ( ! Number.isFinite( height ) || height <= 0 ) {
+				return;
+			}
+
+			setLoading( false );
+			setFormIframeHeight( height );
+
+			if ( iframeRef.current ) {
+				iframeRef.current.height = height;
+			}
+		};
+
+		window.addEventListener( 'message', onPreviewMessage );
+		return () => window.removeEventListener( 'message', onPreviewMessage );
+	}, [] );
 
 	// Send styling updates to iframe via PostMessage
 	const sendStylingToIframe = useCallback( () => {
@@ -521,6 +587,20 @@ export default ( { attributes, setAttributes, clientId } ) => {
 						<iframe
 							loading={ 'eager' }
 							ref={ iframeRef }
+							/*
+							 * From WP 7.1 the editor is cross-origin isolated
+							 * (COEP). A framed document that does not opt in is
+							 * blocked outright, which is why the preview never
+							 * loaded. `credentialless` lets an isolated document
+							 * embed it; browsers without support ignore it. Safe
+							 * here because this iframe only ever renders published
+							 * forms (see the isMissing / status guard above), so
+							 * the preview needs no cookies. Declared in JSX rather
+							 * than via setAttribute because it only takes effect if
+							 * present before the frame starts loading.
+							 */
+							// eslint-disable-next-line react/no-unknown-property -- Valid HTML attribute React has no entry for; required at element creation.
+							credentialless="true"
 							title="srfm-iframe"
 							src={
 								formUrl +
