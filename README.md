@@ -428,7 +428,7 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 ## Changelog ##
 ### 2.12.4 - 19th August 2026 ###
 * Improvement: Email notification images are now saved to the Media Library instead of being embedded as base64, improving email deliverability and reducing message size.
-* Fix: Compatibility with the WordPress 7.1.
+* Fix: Compatibility with WordPress 7.1.
 ### 2.12.3 - 6th August 2026 ###
 * New: Added an "Entries" shortcut in the Instant Form admin bar to open a form's entries in one click.
 * Improvement: Enhanced WPML compatibility. [https://wpml.org/plugin/sureforms/](https://wpml.org/plugin/sureforms/)
