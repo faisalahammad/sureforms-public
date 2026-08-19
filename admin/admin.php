@@ -98,6 +98,20 @@ class Admin {
 	private static $thankyou_prompt_cache = null;
 
 	/**
+	 * Request memo for the dashboard setup-checklist card (#3031).
+	 *
+	 * A static property (not a function-local static) so tests can reset it via
+	 * reset_form_setup_card_cache() and exercise the populated path — a
+	 * function-local static pins the first result for the whole process. Keyed by
+	 * user id since the payload derives from that user's capabilities.
+	 * `false` means "not computed yet"; `null`/array is a computed result.
+	 *
+	 * @var array<int,array<string,mixed>|null>
+	 * @since x.x.x
+	 */
+	private static $setup_card_cache = [];
+
+	/**
 	 * Class constructor.
 	 *
 	 * @return void
@@ -160,6 +174,10 @@ class Admin {
 
 		// Enqueue the AI quick draft widget script on the dashboard screen.
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_ai_dashboard_widget_assets' ] );
+
+		// "Finish setting up" checklist widget on the main WP dashboard (#3031).
+		add_action( 'wp_dashboard_setup', [ $this, 'register_form_setup_widget' ] );
+		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_form_setup_widget_assets' ] );
 
 		// Save first form creation time stamp.
 		add_action( 'admin_init', [ $this, 'save_first_form_creation_time_stamp' ] );
@@ -395,6 +413,283 @@ class Admin {
 	 */
 	public static function reset_thankyou_prompt_cache() {
 		self::$thankyou_prompt_cache = null;
+	}
+
+	/**
+	 * Setup-checklist data for the newest starter-template form (#3031).
+	 *
+	 * Picks the most recent form the current user can edit that was created from an
+	 * Astra Sites starter template. The widget
+	 * lists a fixed set of optional next-steps for it — their completion is not
+	 * computed — so the payload carries only the form and the CTA targets. Memoized
+	 * for the request so the widget register/enqueue/render passes share one query.
+	 *
+	 * @since x.x.x
+	 * @return array<string,mixed>|null Card payload, or null when there is no candidate form.
+	 */
+	public static function get_form_setup_card() {
+		$user_id = get_current_user_id();
+
+		// Request memo, keyed per user — the payload derives from that user's
+		// capabilities. Reset via reset_form_setup_card_cache().
+		if ( array_key_exists( $user_id, self::$setup_card_cache ) ) {
+			return self::$setup_card_cache[ $user_id ];
+		}
+
+		self::$setup_card_cache[ $user_id ] = self::compute_form_setup_card();
+
+		return self::$setup_card_cache[ $user_id ];
+	}
+
+	/**
+	 * Clear the setup-card request memo (#3031).
+	 *
+	 * Lets tests exercise the populated path, and is a safe hook for anything that
+	 * changes which form qualifies (e.g. a form save).
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public static function reset_form_setup_card_cache() {
+		self::$setup_card_cache = [];
+	}
+
+	/**
+	 * REST handler: record a "Finish setting up" widget interaction (#3031).
+	 *
+	 * Records the clicked CTA/view action as an analytics event. The request
+	 * carries the displayed form id: capability is re-checked against it here —
+	 * beyond the route's generic permission callback — so only a genuine editor of
+	 * that form can act.
+	 *
+	 * @param \WP_REST_Request<array<string,mixed>> $request Request.
+	 *
+	 * @since x.x.x
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function dismiss_form_setup_card( $request ) {
+		$form_id = absint( $request->get_param( 'form_id' ) );
+
+		if ( $form_id <= 0 || ! defined( 'SRFM_FORMS_POST_TYPE' ) || SRFM_FORMS_POST_TYPE !== get_post_type( $form_id ) || ! current_user_can( 'edit_post', $form_id ) ) {
+			return new \WP_Error( 'srfm_setup_card_forbidden', __( 'You are not allowed to update this prompt.', 'sureforms' ), [ 'status' => 403 ] );
+		}
+
+		$action = sanitize_key( (string) $request->get_param( 'action' ) );
+
+		// Interaction analytics for the setup widget (#3031). Each event carries a
+		// date automatically (see BSF_Analytics_Events::track()) and dedupes per
+		// event name, matching the sibling notice's telemetry.
+		$events = [
+			'edit_form'     => 'form_setup_widget_edit_form',
+			'edit_thankyou' => 'form_setup_widget_edit_thankyou',
+			'set_up_email'  => 'form_setup_widget_set_up_email',
+			'view_form'     => 'form_setup_widget_view_form',
+		];
+
+		if ( isset( $events[ $action ] ) ) {
+			Analytics::events()->track( $events[ $action ], (string) $form_id );
+		}
+
+		return new \WP_REST_Response( [ 'success' => true ], 200 );
+	}
+
+	/**
+	 * Register the "Finish setting up" checklist widget on the main WP dashboard (#3031).
+	 *
+	 * Only for capable users, and only when there is a form still needing setup —
+	 * so the widget never appears empty. The data is memoized in get_form_setup_card()
+	 * and reused by the enqueue and render passes.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function register_form_setup_widget() {
+		if ( ! Helper::current_user_can() ) {
+			return;
+		}
+
+		if ( null === self::get_form_setup_card() ) {
+			return;
+		}
+
+		wp_add_dashboard_widget(
+			'srfm_form_setup_checklist',
+			__( 'Finish setting up your form', 'sureforms' ),
+			[ $this, 'render_form_setup_widget' ],
+			null,
+			null,
+			'normal',
+			'high'
+		);
+	}
+
+	/**
+	 * Render the setup-checklist widget content (#3031).
+	 *
+	 * A heading (with a link to view the form), a subtitle, and a fixed list of
+	 * optional next-steps — each always shown with its CTA; completion is not
+	 * computed. Each CTA deep-links into the editor (edit form / Thank You message /
+	 * email notification) and records an analytics event via the REST endpoint
+	 * wired in the enqueued inline script.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function render_form_setup_widget() {
+		$card = self::get_form_setup_card();
+
+		if ( null === $card ) {
+			return;
+		}
+
+		// Optional next-steps — always offered, their completion is not computed.
+		// 'event' is the analytics action key beaconed on click (see the widget JS).
+		$rows = [
+			[
+				'label' => __( 'Review or edit your form', 'sureforms' ),
+				'cta'   => __( 'Edit form', 'sureforms' ),
+				'url'   => $card['edit_url'],
+				'event' => 'edit_form',
+			],
+			[
+				'label' => __( 'Personalize the Thank You message', 'sureforms' ),
+				'cta'   => __( 'Edit message', 'sureforms' ),
+				'url'   => $card['thankyou_url'],
+				'event' => 'edit_thankyou',
+			],
+			[
+				'label' => __( 'Choose who gets notified of new replies', 'sureforms' ),
+				'cta'   => __( 'Set up email', 'sureforms' ),
+				'url'   => $card['email_url'],
+				'event' => 'set_up_email',
+			],
+		];
+
+		// Fall back to a generic label for an untitled form so the heading never
+		// renders "Finish setting up " with a dangling space.
+		$card_title = '' !== trim( (string) $card['title'] ) ? $card['title'] : __( 'your form', 'sureforms' );
+		$heading    = sprintf(
+			/* translators: %s: form title. */
+			__( 'Finish setting up %s', 'sureforms' ),
+			$card_title
+		);
+		?>
+		<div class="srfm-setup-checklist" id="srfm-setup-checklist">
+			<p class="srfm-setup-checklist__title">
+				<?php echo esc_html( $heading ); ?>
+				<?php if ( ! empty( $card['view_url'] ) ) { ?>
+					<a class="srfm-setup-checklist__view" data-srfm-event="view_form" href="<?php echo esc_url( $card['view_url'] ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: form title. */ __( 'View %s (opens in a new tab)', 'sureforms' ), $card['title'] ) ); ?>">
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+					</a>
+				<?php } ?>
+			</p>
+			<p class="srfm-setup-checklist__subtitle"><?php esc_html_e( 'Customize your form to get it ready for real submissions:', 'sureforms' ); ?></p>
+
+			<ul class="srfm-setup-checklist__steps">
+				<?php foreach ( $rows as $row ) { ?>
+					<li class="srfm-setup-checklist__step">
+						<span class="srfm-setup-checklist__label"><?php echo esc_html( $row['label'] ); ?></span>
+						<a class="srfm-setup-checklist__cta" data-srfm-event="<?php echo esc_attr( $row['event'] ); ?>" href="<?php echo esc_url( $row['url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $row['cta'] ); ?></a>
+					</li>
+				<?php } ?>
+			</ul>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Enqueue the setup-checklist widget's styles and behavior on the dashboard (#3031).
+	 *
+	 * Mirrors the AI widget convention: an inline-only handle carries the CSS and the
+	 * behavior (CTA click analytics), with server values —
+	 * the REST URL, nonce and form id — passed through wp_localize_script rather than
+	 * printed into the markup, so it stays Plugin-Check clean.
+	 *
+	 * @param string $hook_suffix Current admin page hook suffix.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function enqueue_form_setup_widget_assets( $hook_suffix ) {
+		if ( 'index.php' !== $hook_suffix || ! Helper::current_user_can() ) {
+			return;
+		}
+
+		$card = self::get_form_setup_card();
+
+		if ( null === $card ) {
+			return;
+		}
+
+		$css = <<<'CSS'
+#srfm_form_setup_checklist .inside { margin: 0; padding: 0; }
+.srfm-setup-checklist { padding: 12px 16px 16px; }
+.srfm-setup-checklist__title { margin: 0 0 4px; font-size: 15px; font-weight: 600; color: #1e1e1e; }
+.srfm-setup-checklist__view { display: inline-flex; align-items: center; margin-left: 6px; color: #d54e21; vertical-align: middle; }
+.srfm-setup-checklist__view:hover, .srfm-setup-checklist__view:focus { color: #b83c14; }
+.srfm-setup-checklist__subtitle { margin: 0 0 12px; color: #646970; font-size: 13px; }
+.srfm-setup-checklist__steps { margin: 0; padding: 0; list-style: none; }
+.srfm-setup-checklist__step { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; }
+.srfm-setup-checklist__step + .srfm-setup-checklist__step { margin-top: 6px; }
+.srfm-setup-checklist__step { background: #f6f7f7; }
+.srfm-setup-checklist__label { flex: 1 1 auto; font-size: 14px; color: #1e1e1e; }
+.srfm-setup-checklist__cta { margin-left: auto; border: 0; background: transparent; padding: 0; font-size: 14px; font-weight: 600; color: #d54e21; text-decoration: underline; cursor: pointer; }
+.srfm-setup-checklist__cta:hover { color: #b83c14; }
+/* Keep visited links on-brand — WP admin's a:visited would otherwise turn them blue. */
+.srfm-setup-checklist a:visited { color: #d54e21; }
+.srfm-setup-checklist a:visited:hover, .srfm-setup-checklist a:visited:focus { color: #b83c14; }
+/* Drop WP's blue focus ring on the widget's links; keep an accessible, on-brand keyboard outline. */
+.srfm-setup-checklist a:focus { outline: none; box-shadow: none; }
+.srfm-setup-checklist a:focus-visible { outline: 2px solid #d54e21; outline-offset: 2px; box-shadow: none; }
+CSS;
+
+		wp_register_style( 'srfm-setup-checklist-widget', false, [], SRFM_VER );
+		wp_enqueue_style( 'srfm-setup-checklist-widget' );
+		wp_add_inline_style( 'srfm-setup-checklist-widget', $css );
+
+		wp_register_script( 'srfm-setup-checklist-widget', '', [], SRFM_VER, true );
+		wp_enqueue_script( 'srfm-setup-checklist-widget' );
+
+		wp_localize_script(
+			'srfm-setup-checklist-widget',
+			'srfmSetupChecklist',
+			[
+				'restUrl' => esc_url_raw( rest_url( 'sureforms/v1/dismiss-form-setup-card' ) ),
+				'nonce'   => wp_create_nonce( 'wp_rest' ),
+				'formId'  => $card['id'],
+			]
+		);
+
+		$inline_script = <<<'JS'
+( function () {
+	const cfg = window.srfmSetupChecklist || {};
+	const widget = document.getElementById( 'srfm-setup-checklist' );
+	if ( ! widget ) {
+		return;
+	}
+
+	const persist = function ( action ) {
+		return fetch( cfg.restUrl, {
+			method: 'POST',
+			credentials: 'same-origin',
+			keepalive: true,
+			headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': cfg.nonce },
+			body: JSON.stringify( { form_id: cfg.formId, action: action } ),
+		} ).catch( function () {} );
+	};
+
+	// Beacon the CTA / view-form clicks for analytics. keepalive on the fetch lets
+	// the request finish even though the CTA immediately navigates away.
+	widget.addEventListener( 'click', function ( e ) {
+		const target = e.target?.closest?.( '[data-srfm-event]' );
+		if ( target ) {
+			persist( target.getAttribute( 'data-srfm-event' ) );
+		}
+	} );
+}() );
+JS;
+
+		wp_add_inline_script( 'srfm-setup-checklist-widget', $inline_script );
 	}
 
 	/**
@@ -2554,6 +2849,74 @@ JS;
 			?>
 		</div>
 		<?php
+	}
+
+	/**
+	 * Build the setup-card payload (uncached). See get_form_setup_card().
+	 *
+	 * @since x.x.x
+	 * @return array<string,mixed>|null Card payload, or null when there is no candidate.
+	 */
+	private static function compute_form_setup_card() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || ! post_type_exists( SRFM_FORMS_POST_TYPE ) ) {
+			return null;
+		}
+
+		// Only forms created from an Astra Sites starter template — those carry the
+		// `_astra_sites_imported_post` marker Astra Sites stamps on imported posts.
+		// Prime post + meta caches (the loop reads title, permalink and edit link
+		// per candidate) so this is a single query, not a follow-up per form.
+		$query = new \WP_Query(
+			[
+				'post_type'              => SRFM_FORMS_POST_TYPE,
+				'post_status'            => [ 'publish', 'draft', 'pending' ],
+				'posts_per_page'         => 10,
+				'orderby'                => 'date',
+				'order'                  => 'DESC',
+				'no_found_rows'          => true,
+				'update_post_meta_cache' => true,
+				'update_post_term_cache' => false,
+				'meta_query'             => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded to 10 recent forms; dashboard-only.
+					[
+						'key'     => '_astra_sites_imported_post',
+						'compare' => 'EXISTS',
+					],
+				],
+			]
+		);
+
+		foreach ( $query->posts as $post ) {
+			$form_id = (int) $post->ID;
+
+			if ( ! current_user_can( 'edit_post', $form_id ) ) {
+				continue;
+			}
+
+			$edit_link = get_edit_post_link( $form_id, 'raw' );
+
+			if ( empty( $edit_link ) ) {
+				continue;
+			}
+
+			// The steps are shown as optional next-steps — their completion is not
+			// computed, so the widget simply lists the actions the owner can take.
+			return [
+				'id'           => $form_id,
+				'title'        => get_the_title( $form_id ),
+				'edit_url'     => $edit_link,
+				// Deep-links to the email-notification panel where supported; falls
+				// back to opening the editor when the focus handler isn't present.
+				'email_url'    => add_query_arg( 'srfm_focus', 'notifications', $edit_link ),
+				// Deep-links to the Form Confirmation panel (the Thank You message).
+				'thankyou_url' => add_query_arg( 'srfm_focus', 'thankyou', $edit_link ),
+				// Front-end instant-form page. get_permalink() only yields a working
+				// URL for published forms; a draft/pending form has no public URL, so
+				// omit the view link there (the empty() guard hides the icon).
+				'view_url'     => 'publish' === $post->post_status ? (string) get_permalink( $form_id ) : '',
+			];
+		}
+
+		return null;
 	}
 
 	/**
