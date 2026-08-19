@@ -935,4 +935,526 @@ class Test_Getting_Started_Notice extends TestCase {
 			'A null callback should not be recognised as owned.'
 		);
 	}
+
+	/**
+	 * The first-form-created flag follows the stored timestamp option.
+	 *
+	 * Suffixed name so it doesn't collide with #3040's same-named test on merge
+	 * (both append to Test_Getting_Started_Notice); the coverage grep still matches.
+	 */
+	public function test_is_first_form_created_reflects_stored_timestamp() {
+		// No stored timestamp → first form not yet created.
+		Helper::update_srfm_option( 'first_form_created_at', false );
+		$this->assertFalse( Admin::is_first_form_created() );
+
+		// A positive integer timestamp → first form has been created.
+		Helper::update_srfm_option( 'first_form_created_at', time() );
+		$this->assertTrue( Admin::is_first_form_created() );
+
+		// A zero/invalid timestamp does not count as created.
+		Helper::update_srfm_option( 'first_form_created_at', 0 );
+		$this->assertFalse( Admin::is_first_form_created() );
+
+		Helper::update_srfm_option( 'first_form_created_at', false );
+	}
+
+	/**
+	 * The card is populated for a starter-template form, with deep-link URLs (#3031).
+	 *
+	 * Seeds the trigger meta and resets the request memo so the populated path runs
+	 * on CI — otherwise get_form_setup_card() returns null (nothing stamps the
+	 * marker) and the assertions never execute.
+	 */
+	public function test_get_form_setup_card() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$admin_user = wp_insert_user(
+			[
+				'user_login' => 'srfm_card_admin_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_card_admin_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $admin_user ) ? 0 : (int) $admin_user );
+
+		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Card Form' ] );
+		update_post_meta( $form_id, '_astra_sites_imported_post', 1 );
+
+		try {
+			Admin::reset_form_setup_card_cache();
+			$card = Admin::get_form_setup_card();
+
+			$this->assertIsArray( $card, 'A starter-template form must yield a card.' );
+			$this->assertSame( $form_id, $card['id'] );
+			$this->assertNotEmpty( $card['edit_url'] );
+			$this->assertStringContainsString( 'srfm_focus=notifications', (string) $card['email_url'] );
+			$this->assertStringContainsString( 'srfm_focus=thankyou', (string) $card['thankyou_url'] );
+
+			// A non-editor gets no card.
+			wp_set_current_user( 0 );
+			Admin::reset_form_setup_card_cache();
+			$this->assertNull( Admin::get_form_setup_card(), 'A user who cannot edit the form gets no card.' );
+		} finally {
+			Admin::reset_form_setup_card_cache();
+			wp_delete_post( $form_id, true );
+			wp_set_current_user( 0 );
+			if ( ! is_wp_error( $admin_user ) ) {
+				wp_delete_user( (int) $admin_user );
+			}
+		}
+	}
+
+	/**
+	 * Resetting the card memo lets a later read recompute (#3031).
+	 */
+	public function test_reset_form_setup_card_cache() {
+		Admin::reset_form_setup_card_cache();
+		$this->assertTrue( null === Admin::get_form_setup_card() || is_array( Admin::get_form_setup_card() ) );
+		Admin::reset_form_setup_card_cache();
+		$this->assertTrue( null === Admin::get_form_setup_card() || is_array( Admin::get_form_setup_card() ) );
+	}
+
+	/**
+	 * The setup-card REST handler records a CTA click without error (#3031).
+	 *
+	 * A CTA/analytics action ("edit_form") records telemetry and returns success;
+	 * the handler no longer writes any per-user state.
+	 */
+	public function test_dismiss_form_setup_card() {
+		$admin = Admin::get_instance();
+		$this->assertTrue( method_exists( $admin, 'dismiss_form_setup_card' ) );
+
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || ! class_exists( '\WP_REST_Request' ) ) {
+			$this->markTestSkipped( 'REST/CPT environment not available' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$user = wp_insert_user(
+			[
+				'user_login' => 'srfm_widget_admin_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_widget_admin_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $user ) ? 0 : (int) $user );
+
+		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Widget form' ] );
+
+		$req = new \WP_REST_Request( 'POST', '/sureforms/v1/dismiss-form-setup-card' );
+		$req->set_param( 'form_id', $form_id );
+		$req->set_param( 'action', 'edit_form' );
+		$res = $admin->dismiss_form_setup_card( $req );
+		$this->assertFalse( is_wp_error( $res ), 'A valid CTA action should not error.' );
+
+		wp_delete_post( $form_id, true );
+		wp_set_current_user( 0 );
+		if ( ! is_wp_error( $user ) ) {
+			wp_delete_user( (int) $user );
+		}
+	}
+
+	/**
+	 * The dashboard-widget registrar is callable (#3031).
+	 */
+	public function test_register_form_setup_widget() {
+		$this->assertTrue( method_exists( Admin::get_instance(), 'register_form_setup_widget' ) );
+	}
+
+	/**
+	 * The renderer prints the checklist markup for a qualifying form, and nothing
+	 * without one (#3031). Seeds the trigger so the populated path runs on CI.
+	 */
+	public function test_render_form_setup_widget() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+		$admin = Admin::get_instance();
+
+		$admin_user = wp_insert_user(
+			[
+				'user_login' => 'srfm_render_admin_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_render_admin_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $admin_user ) ? 0 : (int) $admin_user );
+
+		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Render Form' ] );
+		update_post_meta( $form_id, '_astra_sites_imported_post', 1 );
+
+		try {
+			// Positive: a qualifying form renders the full checklist.
+			Admin::reset_form_setup_card_cache();
+			ob_start();
+			$admin->render_form_setup_widget();
+			$output = (string) ob_get_clean();
+
+			$this->assertStringContainsString( 'srfm-setup-checklist', $output );
+			$this->assertStringContainsString( 'srfm-setup-checklist__cta', $output );
+			$this->assertStringContainsString( 'Render Form', $output );
+
+			// Negative: no card → nothing rendered.
+			wp_set_current_user( 0 );
+			Admin::reset_form_setup_card_cache();
+			ob_start();
+			$admin->render_form_setup_widget();
+			$this->assertSame( '', (string) ob_get_clean(), 'No card → the widget renders nothing.' );
+		} finally {
+			Admin::reset_form_setup_card_cache();
+			wp_delete_post( $form_id, true );
+			wp_set_current_user( 0 );
+			if ( ! is_wp_error( $admin_user ) ) {
+				wp_delete_user( (int) $admin_user );
+			}
+		}
+	}
+
+	/**
+	 * Widget assets never load off the dashboard screen (#3031).
+	 */
+	public function test_enqueue_form_setup_widget_assets() {
+		$admin = Admin::get_instance();
+
+		wp_dequeue_style( 'srfm-setup-checklist-widget' );
+		wp_deregister_style( 'srfm-setup-checklist-widget' );
+
+		// Wrong hook → the method returns before querying or enqueuing anything.
+		$admin->enqueue_form_setup_widget_assets( 'edit.php' );
+		$this->assertFalse( wp_style_is( 'srfm-setup-checklist-widget', 'enqueued' ), 'Assets must not load outside the dashboard.' );
+	}
+}
+
+/**
+ * Tests for the "Finish setting up" Thank You prompt (#3030).
+ *
+ * Separate class (not appended to Test_Getting_Started_Notice) so it doesn't
+ * collide with #3031's tests on merge — both branches otherwise declare
+ * test_is_first_form_created() in the same class.
+ */
+class Test_Thankyou_Prompt_Notice extends TestCase {
+	use Astra_Notices_Helper;
+
+	/**
+	 * Reset shared state between tests — this file has no WP_UnitTestCase rollback.
+	 *
+	 * @return void
+	 */
+	protected function tearDown(): void {
+		wp_set_current_user( 0 );
+		Admin::reset_thankyou_prompt_cache();
+		remove_all_filters( 'srfm_thankyou_prompt_forms' );
+		remove_all_filters( 'srfm_show_thankyou_prompt' );
+		parent::tearDown();
+	}
+
+	/**
+	 * The first-form-created flag follows the stored timestamp option.
+	 */
+	public function test_is_first_form_created() {
+		// No stored timestamp → first form not yet created.
+		Helper::update_srfm_option( 'first_form_created_at', false );
+		$this->assertFalse( Admin::is_first_form_created() );
+
+		// A positive integer timestamp → first form has been created.
+		Helper::update_srfm_option( 'first_form_created_at', time() );
+		$this->assertTrue( Admin::is_first_form_created() );
+
+		// A zero/invalid timestamp does not count as created.
+		Helper::update_srfm_option( 'first_form_created_at', 0 );
+		$this->assertFalse( Admin::is_first_form_created() );
+
+		Helper::update_srfm_option( 'first_form_created_at', false );
+	}
+
+	/**
+	 * A form with no stored confirmation is not the shipped default (#3030).
+	 */
+	public function test_is_default_confirmation_message() {
+		// No confirmation meta → nothing to compare → not the default.
+		$this->assertFalse( Admin::is_default_confirmation_message( 0 ) );
+
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$form_id = wp_insert_post(
+			[
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_status' => 'publish',
+				'post_title'  => 'TY detect',
+			]
+		);
+
+		$default_message = \SRFM\Inc\Global_Settings\Global_Settings::get_default_confirmation_message();
+
+		// The shipped default message on a "same page" confirmation is the default.
+		update_post_meta( $form_id, '_srfm_form_confirmation', [ [ 'confirmation_type' => 'same page', 'message' => $default_message ] ] );
+		$this->assertTrue( Admin::is_default_confirmation_message( $form_id ) );
+
+		// The same default with entities decoded — as a starter-template import can
+		// store it (literal apostrophe vs the generated &#039;) — still matches.
+		update_post_meta(
+			$form_id,
+			'_srfm_form_confirmation',
+			[ [ 'confirmation_type' => 'same page', 'message' => html_entity_decode( $default_message, ENT_QUOTES, 'UTF-8' ) ] ]
+		);
+		$this->assertTrue( Admin::is_default_confirmation_message( $form_id ) );
+
+		// A redirect confirmation never renders the message, so even the default
+		// string must NOT be flagged (it would otherwise nag with no way to clear).
+		update_post_meta( $form_id, '_srfm_form_confirmation', [ [ 'confirmation_type' => 'different page', 'message' => $default_message ] ] );
+		$this->assertFalse( Admin::is_default_confirmation_message( $form_id ) );
+
+		// Any real edit to the message flips it to non-default (the auto-clear path).
+		update_post_meta( $form_id, '_srfm_form_confirmation', [ [ 'confirmation_type' => 'same page', 'message' => 'Thanks so much - we will be in touch!' ] ] );
+		$this->assertFalse( Admin::is_default_confirmation_message( $form_id ) );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * A form with no enabled email notification has no reply destination (#3030).
+	 */
+	public function test_form_has_reply_destination() {
+		$this->assertFalse( Admin::form_has_reply_destination( 0 ) );
+
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$form_id = wp_insert_post(
+			[
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_status' => 'publish',
+				'post_title'  => 'Reply dest',
+			]
+		);
+
+		// Enabled notification with a recipient → has a destination.
+		update_post_meta( $form_id, '_srfm_email_notification', [ [ 'status' => true, 'email_to' => 'admin@example.com' ] ] );
+		$this->assertTrue( Admin::form_has_reply_destination( $form_id ) );
+
+		// A disabled notification does not count.
+		update_post_meta( $form_id, '_srfm_email_notification', [ [ 'status' => false, 'email_to' => 'admin@example.com' ] ] );
+		$this->assertFalse( Admin::form_has_reply_destination( $form_id ) );
+
+		// An enabled notification with no recipient does not count.
+		update_post_meta( $form_id, '_srfm_email_notification', [ [ 'status' => true, 'email_to' => '' ] ] );
+		$this->assertFalse( Admin::form_has_reply_destination( $form_id ) );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * The notice markup renders the title, message and all three CTAs (#3030).
+	 */
+	public function test_thankyou_notice_markup_renders_ctas() {
+		$build = new \ReflectionMethod( Admin::class, 'build_thankyou_notice_markup' );
+		$build->setAccessible( true );
+
+		$markup = $build->invoke(
+			null,
+			[
+				'title'        => 'Sample Form',
+				'days_ago'     => 2,
+				'steps'        => [ 'replies' => true, 'thankyou' => true ],
+				'edit_url'     => 'https://example.com/e',
+				'replies_url'  => 'https://example.com/r',
+				'thankyou_url' => 'https://example.com/t',
+			]
+		);
+
+		// Title carries the form name; body is the (accurate, step-agnostic) message.
+		$this->assertStringContainsString( 'Sample Form', $markup );
+		$this->assertStringContainsString( 'already created this form for you', $markup );
+
+		// All three CTAs, each with its tracking class and deep-link target.
+		$this->assertStringContainsString( 'srfm-ty-edit-form', $markup );
+		$this->assertStringContainsString( 'srfm-ty-set-replies', $markup );
+		$this->assertStringContainsString( 'srfm-ty-edit-thankyou', $markup );
+		$this->assertStringContainsString( 'https://example.com/t', $markup );
+	}
+
+	/**
+	 * The Thank You prompt query always returns an array (#3030).
+	 */
+	public function test_get_thankyou_prompt_forms() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		// The sureforms_form CPT maps edit_post to manage_options, so an admin.
+		$admin = wp_insert_user(
+			[
+				'user_login' => 'srfm_ty_admin_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_ty_admin_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $admin ) ? 0 : (int) $admin );
+
+		$default_message = \SRFM\Inc\Global_Settings\Global_Settings::get_default_confirmation_message();
+
+		// Starter-template import still on the default message → targeted.
+		$imported = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Imported TY' ] );
+		update_post_meta( $imported, '_srfm_form_confirmation', [ [ 'confirmation_type' => 'same page', 'message' => $default_message ] ] );
+		update_post_meta( $imported, Admin::ASTRA_SITES_IMPORT_META, 1 );
+
+		// Same default message but NOT an Astra Sites import → excluded by the gate.
+		$plain = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Plain TY' ] );
+		update_post_meta( $plain, '_srfm_form_confirmation', [ [ 'confirmation_type' => 'same page', 'message' => $default_message ] ] );
+
+		// Drive the uncached builder to bypass the request-memoized cache.
+		$compute = new \ReflectionMethod( Admin::class, 'compute_thankyou_prompt_forms' );
+		$compute->setAccessible( true );
+		$prompts = $compute->invoke( null );
+		$ids     = wp_list_pluck( $prompts, 'id' );
+
+		$this->assertContains( $imported, $ids, 'An Astra Sites imported form on the default message must be targeted.' );
+		$this->assertNotContains( $plain, $ids, 'A non-imported form must not be targeted.' );
+
+		// The surfaced payload carries the deep-link CTA target (?srfm_focus=thankyou).
+		$this->assertStringContainsString( 'srfm_focus=thankyou', (string) ( $prompts[0]['thankyou_url'] ?? '' ) );
+
+		wp_delete_post( $imported, true );
+		wp_delete_post( $plain, true );
+		wp_set_current_user( 0 );
+		if ( ! is_wp_error( $admin ) ) {
+			wp_delete_user( (int) $admin );
+		}
+	}
+
+	/**
+	 * The registrar adds nothing without a qualifying form, and exactly one notice
+	 * with it — asserted on the Astra_Notices registry, with real preconditions so
+	 * the method doesn't just return on its first guard (#3030).
+	 */
+	public function test_render_thankyou_prompt_notice() {
+		$admin = Admin::get_instance();
+
+		if ( ! class_exists( '\Astra_Notices' ) || ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'Astra_Notices / CPT not available.' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$prop = new \ReflectionProperty( \Astra_Notices::class, 'notices' );
+		$prop->setAccessible( true );
+		$original = $prop->getValue();
+
+		// A capable user on a NON-dashboard screen with no prior dismissal — the
+		// preconditions the method needs before it ever reaches the query.
+		$admin_user = wp_insert_user(
+			[
+				'user_login' => 'srfm_ty_render_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_ty_render_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $admin_user ) ? 0 : (int) $admin_user );
+		set_current_screen( 'plugins' );
+		delete_user_meta( is_wp_error( $admin_user ) ? 0 : (int) $admin_user, 'srfm-thankyou-prompt' );
+
+		try {
+			// Negative: no qualifying starter-template form → nothing registered.
+			Admin::reset_thankyou_prompt_cache();
+			$prop->setValue( null, [] );
+			$admin->render_thankyou_prompt_notice();
+			$this->assertSame( [], $prop->getValue(), 'No qualifying form → no notice registered.' );
+
+			// Positive: a starter-template import still on the default Thank You
+			// message → exactly the srfm-thankyou-prompt notice is registered.
+			$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Positive TY' ] );
+			update_post_meta( $form_id, Admin::ASTRA_SITES_IMPORT_META, 1 );
+			update_post_meta(
+				$form_id,
+				'_srfm_form_confirmation',
+				[ [ 'confirmation_type' => 'same page', 'message' => \SRFM\Inc\Global_Settings\Global_Settings::get_default_confirmation_message() ] ]
+			);
+
+			Admin::reset_thankyou_prompt_cache();
+			$prop->setValue( null, [] );
+			$admin->render_thankyou_prompt_notice();
+			$ids = wp_list_pluck( (array) $prop->getValue(), 'id' );
+			$this->assertContains( 'srfm-thankyou-prompt', $ids, 'A qualifying form registers exactly the prompt notice.' );
+
+			wp_delete_post( $form_id, true );
+		} finally {
+			$prop->setValue( null, is_array( $original ) ? $original : [] );
+			Admin::reset_thankyou_prompt_cache();
+			wp_set_current_user( 0 );
+			if ( ! is_wp_error( $admin_user ) ) {
+				wp_delete_user( (int) $admin_user );
+			}
+		}
+	}
+
+	/**
+	 * The Thank You notice styling prints the brand accent colour (#3030).
+	 */
+	public function test_print_thankyou_notice_styles() {
+		$admin = Admin::get_instance();
+
+		ob_start();
+		$admin->print_thankyou_notice_styles();
+		$output = (string) ob_get_clean();
+
+		$this->assertStringContainsString( 'srfm-thankyou-notice', $output );
+		$this->assertStringContainsString( '#D54407', $output );
+		// The SureForms mark is a data-URI background; assert the URI itself so a
+		// dropped esc_url() protocol allowlist (which blanks it) is caught.
+		$this->assertStringContainsString( "background: url('data:image/svg+xml,", $output );
+	}
+
+	/**
+	 * The prompt cache reset clears the request memo (#3030).
+	 */
+	public function test_reset_thankyou_prompt_cache() {
+		Admin::reset_thankyou_prompt_cache();
+		$this->assertIsArray( Admin::get_thankyou_prompt_forms() );
+
+		// After a reset the next read recomputes rather than returning a pinned value.
+		Admin::reset_thankyou_prompt_cache();
+		$this->assertIsArray( Admin::get_thankyou_prompt_forms() );
+	}
+
+	/**
+	 * The Thank You notice click-tracking enqueues a delegated dismiss beacon (#3030).
+	 *
+	 * Regression guard: the ✕ is injected by core on DOMContentLoaded, after this
+	 * inline script parses, so it must be caught by delegation from the wrapper —
+	 * a direct .notice-dismiss lookup would bind to nothing.
+	 */
+	public function test_enqueue_thankyou_notice_tracking() {
+		$admin = Admin::get_instance();
+
+		wp_dequeue_script( 'srfm-thankyou-notice-track' );
+		wp_deregister_script( 'srfm-thankyou-notice-track' );
+
+		$admin->enqueue_thankyou_notice_tracking();
+
+		$this->assertTrue( wp_script_is( 'srfm-thankyou-notice-track', 'enqueued' ) );
+
+		$after = wp_scripts()->get_data( 'srfm-thankyou-notice-track', 'after' );
+		$body  = is_array( $after ) ? implode( "\n", $after ) : (string) $after;
+
+		// Dismissal is delegated from the wrapper, not bound to .notice-dismiss.
+		$this->assertStringContainsString( "addEventListener( 'click'", $body );
+		$this->assertStringContainsString( "closest( '.notice-dismiss' )", $body );
+		$this->assertStringContainsString( 'dismissed', $body );
+
+		wp_dequeue_script( 'srfm-thankyou-notice-track' );
+		wp_deregister_script( 'srfm-thankyou-notice-track' );
+	}
 }

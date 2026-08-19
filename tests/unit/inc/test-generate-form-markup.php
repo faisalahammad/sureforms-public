@@ -16,6 +16,15 @@ class Test_Generate_Form_Markup extends TestCase {
 		$this->generate_form_markup = new Generate_Form_Markup();
 	}
 
+	protected function tearDown(): void {
+		// Reset state a failing assertion mid-test could otherwise leak into the
+		// rest of the process — a logged-in admin, or the Edit Form filters.
+		wp_set_current_user( 0 );
+		remove_all_filters( 'srfm_show_edit_form_button' );
+		remove_all_filters( 'srfm_edit_form_button_link' );
+		parent::tearDown();
+	}
+
 	public function test_get_form_markup_empty_id() {
 		$result = Generate_Form_Markup::get_form_markup( 0 );
 		$this->assertIsString( $result );
@@ -44,6 +53,60 @@ class Test_Generate_Form_Markup extends TestCase {
 		$this->assertIsString( $result );
 
 		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * The admin-only "Edit Form" pill (#3029) is capability-gated and per-form.
+	 *
+	 * The sureforms_form CPT maps edit_post to manage_options, so only
+	 * administrators qualify: the pill is absent for anonymous visitors and
+	 * subscribers, present for an administrator with an href bound to THIS form,
+	 * enqueues its stylesheet via a registered handle, a second form links to its
+	 * own editor (AC #5, multiple forms on a page), and the suppression filter
+	 * removes it. `tearDown()` resets the current user and filters.
+	 */
+	public function test_render_edit_form_button() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+
+		remove_all_actions( 'wp_insert_post_data' );
+
+		// A block is required so the container opens and the pill is emitted.
+		$block    = '<!-- wp:paragraph -->x<!-- /wp:paragraph -->';
+		$form_id  = wp_insert_post( [ 'post_title' => 'Edit Pill A', 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_content' => $block ] );
+		$form_id2 = wp_insert_post( [ 'post_title' => 'Edit Pill B', 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_content' => $block ] );
+
+		// Anonymous visitors never receive the shortcut.
+		wp_set_current_user( 0 );
+		$this->assertStringNotContainsString( 'srfm-edit-form-btn', Generate_Form_Markup::get_form_markup( $form_id ) );
+
+		// A subscriber cannot edit the form, so still no shortcut.
+		$subscriber = $this->set_current_user_with_role( 'subscriber' );
+		$this->assertStringNotContainsString( 'srfm-edit-form-btn', Generate_Form_Markup::get_form_markup( $form_id ) );
+
+		// An administrator gets the pill, its href bound to THIS form, with the
+		// stylesheet enqueued via its registered handle.
+		$admin  = $this->set_current_user_with_role( 'administrator' );
+		$markup = Generate_Form_Markup::get_form_markup( $form_id );
+		$this->assertStringContainsString( 'class="srfm-edit-form-btn"', $markup );
+		$this->assertStringContainsString( 'href="' . esc_url( get_edit_post_link( $form_id ) ) . '"', $markup );
+		$this->assertTrue( wp_style_is( 'srfm-edit-form-btn', 'enqueued' ), 'The Edit Form stylesheet should be enqueued.' );
+
+		// A second form links to its OWN editor, not the first — the multiple-forms
+		// acceptance criterion, and a guard against passing the wrong post ID.
+		$markup2 = Generate_Form_Markup::get_form_markup( $form_id2 );
+		$this->assertStringContainsString( 'href="' . esc_url( get_edit_post_link( $form_id2 ) ) . '"', $markup2 );
+		$this->assertStringNotContainsString( 'href="' . esc_url( get_edit_post_link( $form_id ) ) . '"', $markup2 );
+
+		// A suppression filter removes it even for an administrator.
+		add_filter( 'srfm_show_edit_form_button', '__return_false' );
+		$this->assertStringNotContainsString( 'srfm-edit-form-btn', Generate_Form_Markup::get_form_markup( $form_id ) );
+
+		wp_delete_user( $subscriber );
+		wp_delete_user( $admin );
+		wp_delete_post( $form_id, true );
+		wp_delete_post( $form_id2, true );
 	}
 
 	public function test_add_entries_admin_bar_node() {
