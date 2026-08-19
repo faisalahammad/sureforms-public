@@ -26,9 +26,7 @@ const Blocks = ( {
 		const blockEditor = select( 'core/block-editor' );
 		const { index } = blockEditor.getBlockInsertionPoint();
 		const clientId = blockEditor.getSelectedBlockClientId();
-		const rootClientId = blockEditor.getBlockRootClientId(
-			getSelectedBlockClientId
-		);
+		const rootClientId = blockEditor.getBlockRootClientId( clientId );
 		const allowedBlocks = blockEditor.getAllowedBlocks( clientId );
 		return {
 			blockInsertionPoint: index,
@@ -36,7 +34,7 @@ const Blocks = ( {
 			getSelectedBlockClientId: clientId,
 			getSelectedBlockAllowedBlocks: allowedBlocks || EMPTY_ALLOWED_BLOCKS,
 		};
-	} );
+	}, [] );
 	const srfmBlocks = blocks.filter( ( block ) => {
 		return defaultAllowedQuickSidebarBlocks.includes( block.name );
 	} );

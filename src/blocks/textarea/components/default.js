@@ -65,6 +65,7 @@ export const TextareaComponent = ( { attributes, blockID, setAttributes } ) => {
 								formats={ formats }
 								value={ defaultValue }
 								modules={ quillModules }
+								readOnly={ true }
 							/>
 						) }
 					</div>
@@ -74,6 +75,7 @@ export const TextareaComponent = ( { attributes, blockID, setAttributes } ) => {
 						label={ label }
 						placeholder={ placeholder }
 						value={ defaultValue }
+						readOnly={ true }
 						rows={ rows }
 						cols={ cols }
 						data-minlength={ minLength || undefined }
