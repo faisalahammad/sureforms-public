@@ -51,6 +51,19 @@ class Admin {
 	public const ASTRA_SITES_IMPORT_META = '_astra_sites_imported_post';
 
 	/**
+	 * Negative-cache transient: no form on this site carries the import marker.
+	 *
+	 * Set only when the marker query itself returns zero posts, which is a
+	 * site-wide fact rather than a per-user one, and cleared as soon as any post is
+	 * stamped with the marker (see invalidate_starter_template_cache()). This keeps
+	 * the query off the majority of installs without tying the features to whether
+	 * Starter Templates happens to still be active — the marker outlives it.
+	 *
+	 * @since 2.12.4
+	 */
+	public const NO_IMPORTED_FORMS_TRANSIENT = 'srfm_no_starter_template_forms';
+
+	/**
 	 * Inline CSS for Quill 1.x (react-quill) list markers.
 	 *
 	 * Quill 1.x renders bullet/numbered list markers via CSS ::before pseudo-elements,
@@ -178,6 +191,12 @@ class Admin {
 		// "Finish setting up" checklist widget on the main WP dashboard (#3031).
 		add_action( 'wp_dashboard_setup', [ $this, 'register_form_setup_widget' ] );
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_form_setup_widget_assets' ] );
+
+		// Drop the "no imported forms" negative cache as soon as a post is stamped
+		// with the import marker, so a template imported after the cache was written
+		// surfaces immediately instead of waiting for the transient to expire.
+		add_action( 'added_post_meta', [ $this, 'invalidate_starter_template_cache' ], 10, 3 );
+		add_action( 'updated_post_meta', [ $this, 'invalidate_starter_template_cache' ], 10, 3 );
 
 		// Save first form creation time stamp.
 		add_action( 'admin_init', [ $this, 'save_first_form_creation_time_stamp' ] );
@@ -439,6 +458,39 @@ class Admin {
 		self::$setup_card_cache[ $user_id ] = self::compute_form_setup_card();
 
 		return self::$setup_card_cache[ $user_id ];
+	}
+
+	/**
+	 * Drop the "no imported forms" negative cache when the marker is written.
+	 *
+	 * Hooked to added_post_meta/updated_post_meta. Without this, a starter template
+	 * imported after the negative cache was written would show neither the Thank You
+	 * prompt nor the setup widget until the transient expired.
+	 *
+	 * Arguments are read from func_get_args() rather than declared: the hook passes
+	 * ( $meta_id, $post_id, $meta_key ) and the meta id is never needed, so declaring
+	 * it would leave an unused parameter that the coding-standards gate rejects.
+	 *
+	 * @since 2.12.4
+	 * @return void
+	 */
+	public function invalidate_starter_template_cache() {
+		$args     = func_get_args();
+		$post_id  = isset( $args[1] ) ? (int) $args[1] : 0;
+		$meta_key = isset( $args[2] ) ? (string) $args[2] : '';
+
+		if ( self::ASTRA_SITES_IMPORT_META !== $meta_key ) {
+			return;
+		}
+
+		// A full-site import stamps this marker on every post it creates, so narrow to
+		// our own post type: both features only ever query sureforms_form, and this
+		// avoids clearing the cache repeatedly for pages and products during an import.
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || SRFM_FORMS_POST_TYPE !== get_post_type( $post_id ) ) {
+			return;
+		}
+
+		delete_transient( self::NO_IMPORTED_FORMS_TRANSIENT );
 	}
 
 	/**
@@ -2862,10 +2914,13 @@ JS;
 			return null;
 		}
 
-		// Starter Templates stamps the marker this query looks for, so without that
-		// plugin the meta can never exist and the query below can never match. Bail
-		// before running it rather than repeating it on every dashboard load.
-		if ( ! defined( 'ASTRA_SITES_VER' ) ) {
+		// Negative cache. Deliberately not a `defined( 'ASTRA_SITES_VER' )` check:
+		// Starter Templates defines that constant in its main plugin file, so it only
+		// exists while the plugin is active, yet neither its uninstall.php nor its
+		// deactivation hook removes the import marker. Gating on the constant would
+		// silently switch this feature off for the very people it targets — anyone who
+		// imported a starter template and then removed the one-shot import plugin.
+		if ( 'no' === get_transient( self::NO_IMPORTED_FORMS_TRANSIENT ) ) {
 			return null;
 		}
 
@@ -2896,6 +2951,14 @@ JS;
 				],
 			]
 		);
+
+		// Nothing on this site carries the marker — remember that, so the query does
+		// not repeat on every load. Keyed on the query result rather than on anything
+		// user-specific, so it is safe to share, and invalidated the moment a post is
+		// stamped (see invalidate_starter_template_cache()).
+		if ( empty( $query->posts ) ) {
+			set_transient( self::NO_IMPORTED_FORMS_TRANSIENT, 'no', WEEK_IN_SECONDS );
+		}
 
 		foreach ( $query->posts as $post ) {
 			$form_id = (int) $post->ID;
@@ -2942,11 +3005,11 @@ JS;
 			return [];
 		}
 
-		// Starter Templates stamps the marker below, so on an install without that
-		// plugin the meta cannot exist and this query can never match. This notice
-		// renders on every admin screen, so bailing here is what keeps the query
-		// off every admin pageview on the majority of installs.
-		if ( ! defined( 'ASTRA_SITES_VER' ) ) {
+		// Negative cache — this notice renders on every admin screen, so keeping the
+		// query off installs that can never match is what matters here. See
+		// self::NO_IMPORTED_FORMS_TRANSIENT for why this is not gated on whether
+		// Starter Templates is still active: the marker outlives the plugin.
+		if ( 'no' === get_transient( self::NO_IMPORTED_FORMS_TRANSIENT ) ) {
 			return [];
 		}
 
@@ -2976,6 +3039,14 @@ JS;
 				],
 			]
 		);
+
+		// Nothing on this site carries the marker — remember that, so the query does
+		// not repeat on every load. Keyed on the query result rather than on anything
+		// user-specific, so it is safe to share, and invalidated the moment a post is
+		// stamped (see invalidate_starter_template_cache()).
+		if ( empty( $query->posts ) ) {
+			set_transient( self::NO_IMPORTED_FORMS_TRANSIENT, 'no', WEEK_IN_SECONDS );
+		}
 
 		$prompts = [];
 		$now     = time();

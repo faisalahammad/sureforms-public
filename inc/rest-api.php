@@ -1431,7 +1431,7 @@ class Rest_Api {
 					 * @return \WP_REST_Response|\WP_Error
 					 */
 					'callback'            => static function ( $request ) {
-						/** @phpstan-ignore-next-line -- PHPStan resolves SRFM\Admin\Admin via tests/php/stubs/srfm-stubs.php (admin/ is outside its `paths`), and that generated stub predates this method. The method exists at admin/admin.php:470. */
+						// @phpstan-ignore-next-line -- PHPStan resolves SRFM\Admin\Admin via tests/php/stubs/srfm-stubs.php (admin/ is outside its `paths`) and that generated stub predates this method. Real location: admin/admin.php:470.
 						return \SRFM\Admin\Admin::get_instance()->dismiss_form_setup_card( $request );
 					},
 					'permission_callback' => [ Helper::class, 'get_items_permissions_check' ],
