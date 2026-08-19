@@ -1413,6 +1413,29 @@ class Rest_Api {
 					'callback'            => [ Field_Mapping::get_instance(), 'generate_gutenberg_fields_from_questions' ],
 					'permission_callback' => [ Helper::class, 'get_items_permissions_check' ],
 				],
+				// Record a "Finish setting up" card CTA click for a form (#3031).
+				// Per-form capability is re-checked in the handler.
+				'dismiss-form-setup-card'   => [
+					'methods'             => 'POST',
+					'callback'            => [ \SRFM\Admin\Admin::get_instance(), 'dismiss_form_setup_card' ],
+					'permission_callback' => [ Helper::class, 'get_items_permissions_check' ],
+					'args'                => [
+						'form_id' => [
+							'required'          => true,
+							'sanitize_callback' => 'absint',
+						],
+						'action'  => [
+							'required'          => true,
+							'type'              => 'string',
+							'enum'              => [ 'edit_form', 'edit_thankyou', 'set_up_email', 'view_form' ],
+							// Core only enforces `enum` via the default arg sanitizer, which
+							// is skipped once a sanitize_callback is set — so pair it with an
+							// explicit validate_callback, matching this file's other routes.
+							'validate_callback' => 'rest_validate_request_arg',
+							'sanitize_callback' => 'sanitize_text_field',
+						],
+					],
+				],
 				// This route is used to initiate auth process when user tries to authenticate on billing portal.
 				'initiate-auth'             => [
 					'methods'             => 'GET',

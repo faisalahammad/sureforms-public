@@ -1,6 +1,7 @@
 import { __, _x } from '@wordpress/i18n';
 import parse from 'html-react-parser';
 import svgIcons from '@Svg/svgs.json';
+import apiFetch from '@wordpress/api-fetch';
 
 // Undo and redo functions for Custom Toolbar
 function undoChange() {
@@ -10,8 +11,11 @@ function redoChange() {
 	this.quill.history.redo();
 }
 
-// Custom image handler to add attributes to the image tag.
+// Custom image handler — uploads the file to the WordPress Media Library
+// and inserts the returned URL. This avoids base64 data URLs which are
+// stripped by wp_kses_post() on the PHP save path.
 function imageHandler() {
+	const quill = this.quill;
 	const input = document.createElement( 'input' );
 	input.setAttribute( 'type', 'file' );
 	input.setAttribute( 'accept', 'image/*' );
@@ -19,24 +23,37 @@ function imageHandler() {
 
 	input.onchange = ( e ) => {
 		const file = e.target.files[ 0 ];
-		if ( /^image\//.test( file.type ) ) {
-			const reader = new FileReader();
-			reader.onload = () => {
-				const base64Image = reader.result;
-				const range = this.quill.getSelection();
-				this.quill.insertEmbed( range.index, 'image', {
-					src: base64Image,
-					alt: '',
+		if ( ! /^image\//.test( file.type ) ) {
+			console.warn( 'You could only upload images.' );
+			return;
+		}
+
+		const formData = new window.FormData();
+		formData.append( 'file', file );
+
+		apiFetch( {
+			path: '/wp/v2/media',
+			method: 'POST',
+			body: formData,
+		} )
+			.then( ( response ) => {
+				const url =
+					response?.source_url ||
+					response?.media_details?.sizes?.full?.source_url;
+				if ( ! url ) {
+					console.error( 'Media upload succeeded but no URL returned.' );
+					return;
+				}
+				const range = quill.getSelection( true );
+				quill.insertEmbed( range.index, 'image', {
+					src: url,
+					alt: response?.alt_text || '',
 					'aria-hidden': 'true',
 				} );
-			};
-			reader.onerror = () => {
-				console.error( 'Error while reading the file.' );
-			};
-			reader.readAsDataURL( file );
-		} else {
-			console.warn( 'You could only upload images.' );
-		}
+			} )
+			.catch( ( err ) => {
+				console.error( 'Image upload failed:', err );
+			} );
 	};
 }
 

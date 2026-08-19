@@ -2,6 +2,7 @@
 import {
 	useLayoutEffect,
 	useEffect,
+	useMemo,
 	useState,
 	useRef,
 } from '@wordpress/element';
@@ -17,7 +18,34 @@ import SRFMHelpText from '@Components/help-text';
 import { applyFilters } from '@wordpress/hooks';
 import EditorSmartTagList from '@Components/misc/EditorSmartTagList';
 
-const SRFMTextControl = ( props ) => {
+const SRFM_TEXT_CONTROL_DEFAULTS = {
+	label: '',
+	type: 'text',
+	className: '',
+	allowReset: true,
+	resetFallbackValue: '',
+	placeholder: null,
+	variant: 'full-width',
+	autoComplete: 'off',
+	showHeaderControls: true,
+	dynamicContentType: 'url', // url | text
+	enableDynamicContent: false,
+	help: false,
+	isFormSpecific: false,
+	withSmartTagDropdown: false,
+	disabled: false,
+};
+
+const SRFMTextControl = ( rawProps ) => {
+	// Memoize the defaults-merged props on rawProps identity so `props` keeps a
+	// stable reference across the component's own re-renders — matching how React
+	// reused the single defaultProps-merged object before this refactor. Without
+	// this, a fresh object every render makes the [ props ] effect below fire on
+	// self-renders and overwrite in-progress input (e.g. the Slug field).
+	const props = useMemo(
+		() => ( { ...SRFM_TEXT_CONTROL_DEFAULTS, ...rawProps } ),
+		[ rawProps ]
+	);
 	const [ panelNameForHook, setPanelNameForHook ] = useState( null );
 	const panelRef = useRef( null );
 	const [ inputData, setInputData ] = useState( props?.value );
@@ -223,24 +251,6 @@ const SRFMTextControl = ( props ) => {
 			{ controlAfterDomElement }
 		</div>
 	);
-};
-
-SRFMTextControl.defaultProps = {
-	label: '',
-	type: 'text',
-	className: '',
-	allowReset: true,
-	resetFallbackValue: '',
-	placeholder: null,
-	variant: 'full-width',
-	autoComplete: 'off',
-	showHeaderControls: true,
-	dynamicContentType: 'url', // url | text
-	enableDynamicContent: false,
-	help: false,
-	isFormSpecific: false,
-	withSmartTagDropdown: false,
-	disabled: false,
 };
 
 export default SRFMTextControl;

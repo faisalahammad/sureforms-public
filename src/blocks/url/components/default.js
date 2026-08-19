@@ -38,6 +38,7 @@ export const UrlComponent = ( { attributes, blockID, setAttributes } ) => {
 					className={ `srfm-input-common srfm-input-${ slug }` }
 					placeholder={ placeholder }
 					required={ required }
+					readOnly={ true }
 				/>
 			</div>
 		</>
