@@ -175,7 +175,7 @@ const addInitialAttr = ( ChildComponent ) => {
 			];
 
 			if ( ! REUSABLE_BLOCK_ISSUE_RESOLVED_BLOCKS.includes( name ) ) {
-				const getAllBlocks = select( 'core/editor' )?.getBlocks();
+				const getAllBlocks = select( 'core/block-editor' )?.getBlocks();
 				const { blockIds, clientIds } = getAllBlocks
 					? getUniqId( getAllBlocks )
 					: { blockIds: [], clientIds: [] };

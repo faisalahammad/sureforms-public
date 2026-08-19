@@ -36,13 +36,13 @@ class Post_Types {
 		add_action( 'init', [ $this, 'register_post_metas' ] );
 		add_shortcode( 'sureforms', [ $this, 'forms_shortcode' ] );
 		add_action( 'manage_posts_extra_tablenav', [ $this, 'maybe_render_blank_form_state' ] );
-		add_action( 'admin_bar_menu', [ $this, 'remove_admin_bar_menu_item' ], 80, 1 );
 		add_action( 'template_redirect', [ $this, 'srfm_instant_form_redirect' ] );
 		add_action( 'template_redirect', [ $this, 'disable_sureforms_archive_page' ], 9 );
 		add_action( 'load-edit.php', [ $this, 'redirect_forms_listing_page' ] );
 
 		add_filter( 'rest_prepare_sureforms_form', [ $this, 'sureforms_normalize_meta_for_rest' ], 10, 2 );
 		add_action( 'admin_bar_menu', [ $this, 'add_edit_form_to_admin_bar_menu' ], 100 );
+		add_action( 'admin_bar_menu', [ $this, 'add_new_form_to_admin_bar_menu' ], 100 );
 	}
 
 	/**
@@ -99,6 +99,45 @@ class Post_Types {
 					'title' => esc_attr__( 'Edit this form', 'sureforms' ),
 				],
 				'html'  => true,
+			]
+		);
+	}
+
+	/**
+	 * Add a "Form" shortcut to the admin bar "+ New" menu (#3026).
+	 *
+	 * Mirrors how core post types appear under "+ New", but added manually rather
+	 * than via `show_in_admin_bar` so it does not also register a second front-end
+	 * "Edit" node alongside the custom one in add_edit_form_to_admin_bar_menu().
+	 * Gated on the form CPT's own create capability (manage_options for this CPT),
+	 * so it only shows for users who can actually create a form.
+	 *
+	 * @param WP_Admin_Bar $wp_admin_bar WP_Admin_Bar instance.
+	 * @since 2.12.4
+	 * @return void
+	 */
+	public function add_new_form_to_admin_bar_menu( $wp_admin_bar ) {
+		if ( ! is_admin_bar_showing() || ! $wp_admin_bar instanceof WP_Admin_Bar ) {
+			return;
+		}
+
+		$post_type = get_post_type_object( SRFM_FORMS_POST_TYPE );
+
+		if ( ! $post_type || empty( $post_type->cap->create_posts ) || ! current_user_can( $post_type->cap->create_posts ) ) {
+			return;
+		}
+
+		// Core registers the "+ New" (new-content) group at priority 70, so running at
+		// 100 places this node inside it. If core skipped the group (the user can create
+		// nothing else), WP_Admin_Bar::_bind() drops this orphan node silently.
+		// name_admin_bar is the label core uses for "+ New" children; escaped because
+		// WP_Admin_Bar echoes node titles unescaped.
+		$wp_admin_bar->add_node(
+			[
+				'id'     => 'new-' . SRFM_FORMS_POST_TYPE,
+				'parent' => 'new-content',
+				'title'  => esc_html( $post_type->labels->name_admin_bar ),
+				'href'   => esc_url( admin_url( 'post-new.php?post_type=' . SRFM_FORMS_POST_TYPE ) ),
 			]
 		);
 	}
@@ -290,18 +329,6 @@ class Post_Types {
 			wp_safe_redirect( home_url(), 301 );
 			exit;
 		}
-	}
-
-	/**
-	 * Remove add new form menu item.
-	 *
-	 * @param WP_Admin_Bar $wp_admin_bar WP_Admin_Bar instance.
-	 *
-	 * @return void
-	 * @since 0.0.1
-	 */
-	public function remove_admin_bar_menu_item( $wp_admin_bar ) {
-		$wp_admin_bar->remove_node( 'new-sureforms_form' );
 	}
 
 	/**
