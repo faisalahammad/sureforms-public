@@ -1068,17 +1068,6 @@ class Test_Getting_Started_Notice extends TestCase {
 			$card = Admin::get_form_setup_card();
 			$this->assertIsArray( $card, 'With the cache cleared the qualifying form is found.' );
 			$this->assertSame( $form_id, $card['id'] );
-
-			// Writing the marker clears the cache, so an import after the cache was
-			// recorded surfaces immediately instead of waiting for expiry.
-			set_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT, 'no', HOUR_IN_SECONDS );
-			Admin::get_instance()->invalidate_starter_template_cache( 0, $form_id, Admin::ASTRA_SITES_IMPORT_META );
-			$this->assertFalse( get_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT ), 'Stamping the marker must drop the negative cache.' );
-
-			// An unrelated meta key must leave it alone.
-			set_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT, 'no', HOUR_IN_SECONDS );
-			Admin::get_instance()->invalidate_starter_template_cache( 0, $form_id, '_srfm_unrelated_key' );
-			$this->assertSame( 'no', get_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT ), 'An unrelated meta key must not drop the cache.' );
 		} finally {
 			delete_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT );
 			Admin::reset_form_setup_card_cache();
@@ -1088,6 +1077,58 @@ class Test_Getting_Started_Notice extends TestCase {
 			if ( ! is_wp_error( $admin_user ) ) {
 				wp_delete_user( (int) $admin_user );
 			}
+		}
+	}
+
+	/**
+	 * Stamping the import marker drops the negative cache (#3031, #3030).
+	 *
+	 * Without this, a starter template imported after the cache was written would
+	 * show neither feature until the transient expired a week later. Narrowed to our
+	 * post type on purpose: a full-site import stamps this marker on every post it
+	 * creates, and both features only ever query sureforms_form.
+	 */
+	public function test_invalidate_starter_template_cache() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$admin  = Admin::get_instance();
+		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Marker Form' ] );
+		$page_id = wp_insert_post( [ 'post_type' => 'page', 'post_status' => 'publish', 'post_title' => 'Imported Page' ] );
+
+		try {
+			// The marker on one of our forms drops the cache.
+			set_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT, 'no', HOUR_IN_SECONDS );
+			$admin->invalidate_starter_template_cache( 0, $form_id, Admin::ASTRA_SITES_IMPORT_META );
+			$this->assertFalse(
+				get_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT ),
+				'Stamping the marker on a form must drop the negative cache.'
+			);
+
+			// An unrelated meta key leaves it alone.
+			set_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT, 'no', HOUR_IN_SECONDS );
+			$admin->invalidate_starter_template_cache( 0, $form_id, '_srfm_unrelated_key' );
+			$this->assertSame(
+				'no',
+				get_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT ),
+				'An unrelated meta key must not drop the cache.'
+			);
+
+			// The same marker on a non-form post leaves it alone — a full-site import
+			// stamps pages and products too, and neither feature queries those.
+			set_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT, 'no', HOUR_IN_SECONDS );
+			$admin->invalidate_starter_template_cache( 0, $page_id, Admin::ASTRA_SITES_IMPORT_META );
+			$this->assertSame(
+				'no',
+				get_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT ),
+				'The marker on a non-form post must not drop the cache.'
+			);
+		} finally {
+			delete_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT );
+			wp_delete_post( $form_id, true );
+			wp_delete_post( $page_id, true );
 		}
 	}
 
