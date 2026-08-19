@@ -427,10 +427,6 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 
 ## Changelog ##
 ### 2.12.4 - 19th August 2026 ###
-* New: Added a "Finish setting up" card on the dashboard that guides new forms to completion.
-* New: Added a "Form" option to the WordPress admin bar's "+ New" menu so you can start a new form from anywhere in wp-admin.
-* New: Added a dashboard prompt that helps you personalise a new form's Thank You message.
-* New: Added an admin-only "Edit Form" shortcut on embedded forms to jump straight from the page to the form editor.
 * Improvement: Email notification images are now saved to the Media Library instead of being embedded as base64, improving email deliverability and reducing message size.
 * Fix: Compatibility with the WordPress 7.1.
 ### 2.12.3 - 6th August 2026 ###
