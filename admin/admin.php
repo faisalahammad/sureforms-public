@@ -46,7 +46,7 @@ class Admin {
 	 * forms only. Owned by a plugin that is NOT a SureForms dependency: on installs
 	 * without Starter Templates nothing carries this meta and the prompt never shows.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 */
 	public const ASTRA_SITES_IMPORT_META = '_astra_sites_imported_post';
 
@@ -93,7 +93,7 @@ class Admin {
 	 * the value for the whole process and the feature is untestable.
 	 *
 	 * @var array<int,array<string,mixed>>|null
-	 * @since x.x.x
+	 * @since 2.12.4
 	 */
 	private static $thankyou_prompt_cache = null;
 
@@ -107,7 +107,7 @@ class Admin {
 	 * `false` means "not computed yet"; `null`/array is a computed result.
 	 *
 	 * @var array<int,array<string,mixed>|null>
-	 * @since x.x.x
+	 * @since 2.12.4
 	 */
 	private static $setup_card_cache = [];
 
@@ -308,7 +308,7 @@ class Admin {
 	 *
 	 * @param int $form_id Form post ID.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return bool
 	 */
 	public static function is_default_confirmation_message( $form_id ) {
@@ -349,7 +349,7 @@ class Admin {
 	 *
 	 * @param int $form_id Form post ID.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return bool
 	 */
 	public static function form_has_reply_destination( $form_id ) {
@@ -378,7 +378,7 @@ class Admin {
 	 * message, or no reply destination). Dismissal is enforced by the caller,
 	 * before this query runs.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return array<int,array<string,mixed>> One entry, or none.
 	 */
 	public static function get_thankyou_prompt_forms() {
@@ -394,7 +394,7 @@ class Admin {
 		 *
 		 * @param array<int,array<string,mixed>> $prompts Candidate prompt payloads.
 		 *
-		 * @since x.x.x
+		 * @since 2.12.4
 		 */
 		$filtered                    = apply_filters( 'srfm_thankyou_prompt_forms', self::compute_thankyou_prompt_forms() );
 		self::$thankyou_prompt_cache = is_array( $filtered ) ? $filtered : [];
@@ -408,7 +408,7 @@ class Admin {
 	 * Lets tests exercise the memoized public path, and is a safe hook for anything
 	 * that changes which form qualifies (e.g. a form save).
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return void
 	 */
 	public static function reset_thankyou_prompt_cache() {
@@ -424,7 +424,7 @@ class Admin {
 	 * computed — so the payload carries only the form and the CTA targets. Memoized
 	 * for the request so the widget register/enqueue/render passes share one query.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return array<string,mixed>|null Card payload, or null when there is no candidate form.
 	 */
 	public static function get_form_setup_card() {
@@ -447,7 +447,7 @@ class Admin {
 	 * Lets tests exercise the populated path, and is a safe hook for anything that
 	 * changes which form qualifies (e.g. a form save).
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return void
 	 */
 	public static function reset_form_setup_card_cache() {
@@ -464,7 +464,7 @@ class Admin {
 	 *
 	 * @param \WP_REST_Request<array<string,mixed>> $request Request.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return \WP_REST_Response|\WP_Error
 	 */
 	public function dismiss_form_setup_card( $request ) {
@@ -500,7 +500,7 @@ class Admin {
 	 * so the widget never appears empty. The data is memoized in get_form_setup_card()
 	 * and reused by the enqueue and render passes.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return void
 	 */
 	public function register_form_setup_widget() {
@@ -532,7 +532,7 @@ class Admin {
 	 * email notification) and records an analytics event via the REST endpoint
 	 * wired in the enqueued inline script.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return void
 	 */
 	public function render_form_setup_widget() {
@@ -607,7 +607,7 @@ class Admin {
 	 *
 	 * @param string $hook_suffix Current admin page hook suffix.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return void
 	 */
 	public function enqueue_form_setup_widget_assets( $hook_suffix ) {
@@ -702,7 +702,7 @@ JS;
 	 * stable notice id so the library's built-in ✕ dismissal is one persistent
 	 * choice ("stop nudging me"), not a per-form row.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return void
 	 */
 	public function render_thankyou_prompt_notice() {
@@ -715,7 +715,7 @@ JS;
 		 *
 		 * @param bool $show Whether to show the notice. Default true.
 		 *
-		 * @since x.x.x
+		 * @since 2.12.4
 		 */
 		if ( ! apply_filters( 'srfm_show_thankyou_prompt', true ) ) {
 			return;
@@ -790,7 +790,7 @@ JS;
 	 * when a CTA or the dismiss ✕ is clicked. Uses `keepalive` so the beacon
 	 * survives the navigation the CTA links trigger.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return void
 	 */
 	public function enqueue_thankyou_notice_tracking() {
@@ -865,7 +865,7 @@ JS;
 	 * Fired via astra_notice_before_markup_{id} so it lands right before the notice
 	 * and only when the notice actually renders.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return void
 	 */
 	public function print_thankyou_notice_styles() {
@@ -2854,7 +2854,7 @@ JS;
 	/**
 	 * Build the setup-card payload (uncached). See get_form_setup_card().
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return array<string,mixed>|null Card payload, or null when there is no candidate.
 	 */
 	private static function compute_form_setup_card() {
@@ -2922,7 +2922,7 @@ JS;
 	/**
 	 * Build the Thank You prompt payload (uncached). See get_thankyou_prompt_forms().
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return array<int,array<string,mixed>> One entry, or none.
 	 */
 	private static function compute_thankyou_prompt_forms() {
@@ -3010,7 +3010,7 @@ JS;
 	 *
 	 * @param array<string,mixed> $form Prompt payload from get_thankyou_prompt_forms().
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return string
 	 */
 	private static function build_thankyou_notice_markup( $form ) {

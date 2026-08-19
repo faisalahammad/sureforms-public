@@ -2,9 +2,9 @@
 Contributors: brainstormforce
 Tags: forms, ai forms, contact form, form builder, payment form
 Requires at least: 6.4
-Tested up to: 7.0.2
+Tested up to: 7.0.4
 Requires PHP: 7.4
-Stable tag: 2.12.3
+Stable tag: 2.12.4
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -426,6 +426,14 @@ Visit the [SureForms features page](https://sureforms.com/features/?utm_source=w
 You can report security issues through our [Bug Bounty Program](https://brainstormforce.com/bug-bounty-program/). We collaborate with Patchstack to validate, triage, and handle security reports.
 
 == Changelog ==
+= 2.12.4 - 19th August 2026 =
+* New: Added a "Finish setting up" card on the dashboard that guides a newly created form through its remaining setup steps.
+* New: Added a dashboard prompt to help you personalise a new form's Thank You message.
+* New: Added a Form shortcut to the admin bar "+ New" menu so you can start a form from anywhere in the admin.
+* New: Added an Edit Form shortcut on embedded forms, visible only to administrators, for quicker edits from the front end.
+* Fix: Email body images are now uploaded to the Media Library instead of being embedded as base64, keeping notification emails lighter.
+* Fix: Replaced a deprecated defaultProps usage so the block editor no longer logs warnings.
+* Fix: Resolved block editor compatibility issues on WordPress 7.1.
 = 2.12.3 - 6th August 2026 =
 * New: Added an "Entries" shortcut in the Instant Form admin bar to open a form's entries in one click.
 * Improvement: Enhanced WPML compatibility. [https://wpml.org/plugin/sureforms/](https://wpml.org/plugin/sureforms/)
@@ -440,12 +448,6 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 = 2.12.2 - 20th July 2026 =
 * New: Added a Payment History widget for Elementor and Bricks.
 * Fix: Custom CSS now applies correctly on the single form view.
-= 2.12.1 - 8th July 2026 =
-* New: Added an AI-powered quick draft flow on the dashboard to generate forms faster, with built-in usage tracking.
-* Improvement: Email fields now enforce standard RFC 5321 length limits (a 64-character local part and 255-character domain) to prevent oversized submissions, with a filter to customize the limits.
-* Fix: Reset form option not working for some fields.
-* Fix: Resolved a Stripe one-time payment error that could cause card payments to fail with an HTTP 400 response.
-* Fix: Restored bullet point visibility in the rich text admin editor so formatted lists display correctly.
 The full changelog is available [here](https://sureforms.com/whats-new/?utm_source=wordpress.org&utm_medium=whats_new).
 
 == Upgrade Notice ==
