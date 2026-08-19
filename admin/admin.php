@@ -41,15 +41,14 @@ class Admin {
 	public const RATING_NOTICE_THRESHOLD = 3;
 
 	/**
-	 * Inline CSS for Quill 1.x (react-quill) list markers.
+	 * Post meta the Starter Templates (Astra Sites) plugin stamps on every post it
+	 * imports. The "Finish setting up" Thank You prompt (#3030) scopes to these
+	 * forms only. Owned by a plugin that is NOT a SureForms dependency: on installs
+	 * without Starter Templates nothing carries this meta and the prompt never shows.
 	 *
-	 * Quill 1.x renders bullet/numbered list markers via CSS ::before pseudo-elements,
-	 * whereas the vendor quill.snow.css targets .ql-ui child elements (Quill 2.x approach).
-	 * This constant is shared by enqueue_styles() and enqueue_scripts() to prevent drift.
-	 *
-	 * @since 2.5.2
+	 * @since x.x.x
 	 */
-	public const QUILL_1X_INLINE_CSS = '.ql-editor ul,.ql-editor ol{padding-left:1.5em}.ql-editor ul>li,.ql-editor ol>li{list-style-type:none}.ql-editor ol li:not(.ql-direction-rtl),.ql-editor ul li:not(.ql-direction-rtl){padding-left:1.5em}.ql-editor ol li.ql-direction-rtl,.ql-editor ul li.ql-direction-rtl{padding-right:1.5em}.ql-editor ul>li::before{content:"\2022"}.ql-editor li::before{display:inline-block;white-space:nowrap;width:1.2em}.ql-editor li:not(.ql-direction-rtl)::before{margin-left:-1.5em;margin-right:.3em;text-align:right}.ql-editor li.ql-direction-rtl::before{margin-left:.3em;margin-right:-1.5em}.ql-editor ol li{counter-reset:list-1 list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9;counter-increment:list-0}.ql-editor ol li::before{content:counter(list-0,decimal) ". "}.ql-editor ol li.ql-indent-1{counter-increment:list-1;counter-reset:list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-1::before{content:counter(list-1,lower-alpha) ". "}.ql-editor ol li.ql-indent-2{counter-increment:list-2;counter-reset:list-3 list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-2::before{content:counter(list-2,lower-roman) ". "}.ql-editor ol li.ql-indent-3{counter-increment:list-3;counter-reset:list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-3::before{content:counter(list-3,decimal) ". "}.ql-editor ol li.ql-indent-4{counter-increment:list-4;counter-reset:list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-4::before{content:counter(list-4,lower-alpha) ". "}.ql-editor ol li.ql-indent-5{counter-increment:list-5;counter-reset:list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-5::before{content:counter(list-5,lower-roman) ". "}.ql-editor ol li.ql-indent-6{counter-increment:list-6;counter-reset:list-7 list-8 list-9}.ql-editor ol li.ql-indent-6::before{content:counter(list-6,decimal) ". "}.ql-editor ol li.ql-indent-7{counter-increment:list-7;counter-reset:list-8 list-9}.ql-editor ol li.ql-indent-7::before{content:counter(list-7,lower-alpha) ". "}.ql-editor ol li.ql-indent-8{counter-increment:list-8;counter-reset:list-9}.ql-editor ol li.ql-indent-8::before{content:counter(list-8,lower-roman) ". "}.ql-editor ol li.ql-indent-9{counter-increment:list-9}.ql-editor ol li.ql-indent-9::before{content:counter(list-9,decimal) ". "}';
+	public const ASTRA_SITES_IMPORT_META = '_astra_sites_imported_post';
 
 	/**
 	 * User meta: unix time until which the "Finish setting up" widget is snoozed
@@ -59,6 +58,17 @@ class Admin {
 	 * @since x.x.x
 	 */
 	public const SETUP_WIDGET_SNOOZE_USER_META = 'srfm_setup_widget_snooze_until';
+
+	/**
+	 * Inline CSS for Quill 1.x (react-quill) list markers.
+	 *
+	 * Quill 1.x renders bullet/numbered list markers via CSS ::before pseudo-elements,
+	 * whereas the vendor quill.snow.css targets .ql-ui child elements (Quill 2.x approach).
+	 * This constant is shared by enqueue_styles() and enqueue_scripts() to prevent drift.
+	 *
+	 * @since 2.5.2
+	 */
+	public const QUILL_1X_INLINE_CSS = '.ql-editor ul,.ql-editor ol{padding-left:1.5em}.ql-editor ul>li,.ql-editor ol>li{list-style-type:none}.ql-editor ol li:not(.ql-direction-rtl),.ql-editor ul li:not(.ql-direction-rtl){padding-left:1.5em}.ql-editor ol li.ql-direction-rtl,.ql-editor ul li.ql-direction-rtl{padding-right:1.5em}.ql-editor ul>li::before{content:"\2022"}.ql-editor li::before{display:inline-block;white-space:nowrap;width:1.2em}.ql-editor li:not(.ql-direction-rtl)::before{margin-left:-1.5em;margin-right:.3em;text-align:right}.ql-editor li.ql-direction-rtl::before{margin-left:.3em;margin-right:-1.5em}.ql-editor ol li{counter-reset:list-1 list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9;counter-increment:list-0}.ql-editor ol li::before{content:counter(list-0,decimal) ". "}.ql-editor ol li.ql-indent-1{counter-increment:list-1;counter-reset:list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-1::before{content:counter(list-1,lower-alpha) ". "}.ql-editor ol li.ql-indent-2{counter-increment:list-2;counter-reset:list-3 list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-2::before{content:counter(list-2,lower-roman) ". "}.ql-editor ol li.ql-indent-3{counter-increment:list-3;counter-reset:list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-3::before{content:counter(list-3,decimal) ". "}.ql-editor ol li.ql-indent-4{counter-increment:list-4;counter-reset:list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-4::before{content:counter(list-4,lower-alpha) ". "}.ql-editor ol li.ql-indent-5{counter-increment:list-5;counter-reset:list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-5::before{content:counter(list-5,lower-roman) ". "}.ql-editor ol li.ql-indent-6{counter-increment:list-6;counter-reset:list-7 list-8 list-9}.ql-editor ol li.ql-indent-6::before{content:counter(list-6,decimal) ". "}.ql-editor ol li.ql-indent-7{counter-increment:list-7;counter-reset:list-8 list-9}.ql-editor ol li.ql-indent-7::before{content:counter(list-7,lower-alpha) ". "}.ql-editor ol li.ql-indent-8{counter-increment:list-8;counter-reset:list-9}.ql-editor ol li.ql-indent-8::before{content:counter(list-8,lower-roman) ". "}.ql-editor ol li.ql-indent-9{counter-increment:list-9}.ql-editor ol li.ql-indent-9::before{content:counter(list-9,decimal) ". "}';
 
 	/**
 	 * Dashboard widget entries data.
@@ -83,6 +93,18 @@ class Admin {
 	 * @since 1.12.2
 	 */
 	private static $sureforms_page_default_capability = 'manage_options';
+
+	/**
+	 * Request memo for the "Finish setting up" Thank You prompt (#3030).
+	 *
+	 * A static property (not a function-local static) so tests can reset it via
+	 * reflection / reset_thankyou_prompt_cache() — otherwise the first call pins
+	 * the value for the whole process and the feature is untestable.
+	 *
+	 * @var array<int,array<string,mixed>>|null
+	 * @since x.x.x
+	 */
+	private static $thankyou_prompt_cache = null;
 
 	/**
 	 * Request memo for the dashboard setup-checklist card (#3031).
@@ -162,14 +184,14 @@ class Admin {
 		// Enqueue the AI quick draft widget script on the dashboard screen.
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_ai_dashboard_widget_assets' ] );
 
-		// "Finish setting up" checklist widget on the main WP dashboard (#3031).
-		add_action( 'wp_dashboard_setup', [ $this, 'register_form_setup_widget' ] );
-		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_form_setup_widget_assets' ] );
-
 		// Save first form creation time stamp.
 		add_action( 'admin_init', [ $this, 'save_first_form_creation_time_stamp' ] );
 		add_action( 'admin_notices', [ $this, 'display_srfm_rating_notice' ] );
 		add_action( 'admin_notices', [ $this, 'display_srfm_getting_started_notice' ] );
+
+		// "Finish setting up" prompt, shown as an Astra Notices admin notice on
+		// every admin screen except the dashboard (#3030).
+		add_action( 'admin_notices', [ $this, 'render_thankyou_prompt_notice' ] );
 
 		/**
 		 * Suppress foreign (third-party) admin notices on SureForms admin screens.
@@ -275,6 +297,130 @@ class Admin {
 	}
 
 	/**
+	 * Whether a form's confirmation message is still the shipped default.
+	 *
+	 * Compared on tag-stripped, entity-decoded, whitespace-collapsed text rather
+	 * than raw HTML: the default is stored with a base64 icon on creation but
+	 * regenerated with a URL icon, so the markup differs while the wording does
+	 * not, and a starter-template import can store a literal apostrophe where the
+	 * generated default carries the encoded `&#039;` — decoding entities makes both
+	 * compare equal. Any real edit to the heading or body text changes the text and
+	 * flips this to false, which is exactly when the prompt should stop showing.
+	 *
+	 * Locale caveat: the comparison target is translated at call time, so a form
+	 * whose default was stored under a different active locale won't match. That
+	 * fails safe — the prompt simply doesn't show — never a false nag.
+	 *
+	 * @param int $form_id Form post ID.
+	 *
+	 * @since x.x.x
+	 * @return bool
+	 */
+	public static function is_default_confirmation_message( $form_id ) {
+		$confirmation = get_post_meta( (int) $form_id, '_srfm_form_confirmation', true );
+
+		if ( ! is_array( $confirmation ) || ! isset( $confirmation[0]['message'] ) || ! is_string( $confirmation[0]['message'] ) ) {
+			return false;
+		}
+
+		// The default message is only ever shown for a "same page" confirmation.
+		// A redirect ("different page" / "custom url") never renders it, yet the
+		// stored settings still seed the default message string — so without this
+		// guard a redirect form would be nagged forever about a message no visitor
+		// sees, with no way to clear the prompt by doing what it asks.
+		if ( ! isset( $confirmation[0]['confirmation_type'] ) || 'same page' !== $confirmation[0]['confirmation_type'] ) {
+			return false;
+		}
+
+		$message = $confirmation[0]['message'];
+
+		if ( '' === trim( $message ) ) {
+			return false;
+		}
+
+		$normalize = static function ( $html ) {
+			// Decode entities too, so an encoded apostrophe (&#039;) in the generated
+			// default matches a literal one stored by a template import.
+			$text = html_entity_decode( wp_strip_all_tags( (string) $html ), ENT_QUOTES, 'UTF-8' );
+			return trim( (string) preg_replace( '/\s+/', ' ', $text ) );
+		};
+
+		return $normalize( $message ) === $normalize( Global_Settings::get_default_confirmation_message() );
+	}
+
+	/**
+	 * Whether a form has somewhere to send replies (an enabled email notification
+	 * with a non-empty recipient).
+	 *
+	 * @param int $form_id Form post ID.
+	 *
+	 * @since x.x.x
+	 * @return bool
+	 */
+	public static function form_has_reply_destination( $form_id ) {
+		$notifications = get_post_meta( (int) $form_id, '_srfm_email_notification', true );
+
+		if ( ! is_array( $notifications ) ) {
+			return false;
+		}
+
+		foreach ( $notifications as $notification ) {
+			if ( is_array( $notification ) && ! empty( $notification['status'] ) && ! empty( $notification['email_to'] ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * The most recently created form still needing setup (default Thank You
+	 * message, or no reply destination).
+	 *
+	 * Powers the "Finish setting up" prompt (#3030). Limited to the single latest
+	 * such form to avoid clutter, and to forms the current user may actually edit.
+	 * A form is a candidate when it still has an unfinished step (default Thank You
+	 * message, or no reply destination). Dismissal is enforced by the caller,
+	 * before this query runs.
+	 *
+	 * @since x.x.x
+	 * @return array<int,array<string,mixed>> One entry, or none.
+	 */
+	public static function get_thankyou_prompt_forms() {
+		// Memoized for the request so repeated reads (e.g. the notice render plus
+		// any add-on consumer) share a single query. Sentinel is null, not false,
+		// so a filter returning false (__return_false to disable) still memoizes.
+		if ( null !== self::$thankyou_prompt_cache ) {
+			return self::$thankyou_prompt_cache;
+		}
+
+		/**
+		 * Filter the forms the "Finish setting up" Thank You notice may surface.
+		 *
+		 * @param array<int,array<string,mixed>> $prompts Candidate prompt payloads.
+		 *
+		 * @since x.x.x
+		 */
+		$filtered                    = apply_filters( 'srfm_thankyou_prompt_forms', self::compute_thankyou_prompt_forms() );
+		self::$thankyou_prompt_cache = is_array( $filtered ) ? $filtered : [];
+
+		return self::$thankyou_prompt_cache;
+	}
+
+	/**
+	 * Clear the request memo for the Thank You prompt (#3030).
+	 *
+	 * Lets tests exercise the memoized public path, and is a safe hook for anything
+	 * that changes which form qualifies (e.g. a form save).
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public static function reset_thankyou_prompt_cache() {
+		self::$thankyou_prompt_cache = null;
+	}
+
+	/**
 	 * Setup-checklist data for the newest starter-template form (#3031).
 	 *
 	 * Picks the most recent form the current user can edit that was created from an
@@ -357,6 +503,433 @@ class Admin {
 		}
 
 		return new \WP_REST_Response( [ 'success' => true ], 200 );
+	}
+
+	/**
+	 * Register the "Finish setting up" checklist widget on the main WP dashboard (#3031).
+	 *
+	 * Only for capable users, and only when there is a form still needing setup —
+	 * so the widget never appears empty. The data is memoized in get_form_setup_card()
+	 * and reused by the enqueue and render passes.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function register_form_setup_widget() {
+		if ( ! Helper::current_user_can() ) {
+			return;
+		}
+
+		if ( null === self::get_form_setup_card() ) {
+			return;
+		}
+
+		wp_add_dashboard_widget(
+			'srfm_form_setup_checklist',
+			__( 'Finish setting up your form', 'sureforms' ),
+			[ $this, 'render_form_setup_widget' ],
+			null,
+			null,
+			'normal',
+			'high'
+		);
+	}
+
+	/**
+	 * Render the setup-checklist widget content (#3031).
+	 *
+	 * A heading (with a link to view the form), a subtitle, and a fixed list of
+	 * optional next-steps — each always shown with its CTA; completion is not
+	 * computed. Each CTA deep-links into the editor (edit form / Thank You message /
+	 * email notification). The "Remind me in two weeks" snooze is wired in the
+	 * enqueued inline script against the REST endpoint.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function render_form_setup_widget() {
+		$card = self::get_form_setup_card();
+
+		if ( null === $card ) {
+			return;
+		}
+
+		// Optional next-steps — always offered, their completion is not computed.
+		// 'event' is the analytics action key beaconed on click (see the widget JS).
+		$rows = [
+			[
+				'label' => __( 'Review or edit your form', 'sureforms' ),
+				'cta'   => __( 'Edit form', 'sureforms' ),
+				'url'   => $card['edit_url'],
+				'event' => 'edit_form',
+			],
+			[
+				'label' => __( 'Personalize the Thank You message', 'sureforms' ),
+				'cta'   => __( 'Edit message', 'sureforms' ),
+				'url'   => $card['thankyou_url'],
+				'event' => 'edit_thankyou',
+			],
+			[
+				'label' => __( 'Choose who gets notified of new replies', 'sureforms' ),
+				'cta'   => __( 'Set up email', 'sureforms' ),
+				'url'   => $card['email_url'],
+				'event' => 'set_up_email',
+			],
+		];
+
+		// Fall back to a generic label for an untitled form so the heading never
+		// renders "Finish setting up " with a dangling space.
+		$card_title = '' !== trim( (string) $card['title'] ) ? $card['title'] : __( 'your form', 'sureforms' );
+		$heading    = sprintf(
+			/* translators: %s: form title. */
+			__( 'Finish setting up %s', 'sureforms' ),
+			$card_title
+		);
+		?>
+		<div class="srfm-setup-checklist" id="srfm-setup-checklist">
+			<p class="srfm-setup-checklist__title">
+				<?php echo esc_html( $heading ); ?>
+				<?php if ( ! empty( $card['view_url'] ) ) { ?>
+					<a class="srfm-setup-checklist__view" data-srfm-event="view_form" href="<?php echo esc_url( $card['view_url'] ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: form title. */ __( 'View %s (opens in a new tab)', 'sureforms' ), $card['title'] ) ); ?>">
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+					</a>
+				<?php } ?>
+			</p>
+			<p class="srfm-setup-checklist__subtitle"><?php esc_html_e( 'Customize your form to get it ready for real submissions:', 'sureforms' ); ?></p>
+
+			<ul class="srfm-setup-checklist__steps">
+				<?php foreach ( $rows as $row ) { ?>
+					<li class="srfm-setup-checklist__step">
+						<span class="srfm-setup-checklist__label"><?php echo esc_html( $row['label'] ); ?></span>
+						<a class="srfm-setup-checklist__cta" data-srfm-event="<?php echo esc_attr( $row['event'] ); ?>" href="<?php echo esc_url( $row['url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $row['cta'] ); ?></a>
+					</li>
+				<?php } ?>
+			</ul>
+
+			<button type="button" class="srfm-setup-checklist__snooze" id="srfm-setup-checklist-snooze"><?php esc_html_e( 'Remind me in two weeks', 'sureforms' ); ?></button>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Enqueue the setup-checklist widget's styles and behavior on the dashboard (#3031).
+	 *
+	 * Mirrors the AI widget convention: an inline-only handle carries the CSS and the
+	 * behavior (dismiss / snooze / reveal-and-copy embed code), with server values —
+	 * the REST URL, nonce and form id — passed through wp_localize_script rather than
+	 * printed into the markup, so it stays Plugin-Check clean.
+	 *
+	 * @param string $hook_suffix Current admin page hook suffix.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function enqueue_form_setup_widget_assets( $hook_suffix ) {
+		if ( 'index.php' !== $hook_suffix || ! Helper::current_user_can() ) {
+			return;
+		}
+
+		$card = self::get_form_setup_card();
+
+		if ( null === $card ) {
+			return;
+		}
+
+		$css = <<<'CSS'
+#srfm_form_setup_checklist .inside { margin: 0; padding: 0; }
+.srfm-setup-checklist { padding: 12px 16px 16px; }
+.srfm-setup-checklist__title { margin: 0 0 4px; font-size: 15px; font-weight: 600; color: #1e1e1e; }
+.srfm-setup-checklist__view { display: inline-flex; align-items: center; margin-left: 6px; color: #d54e21; vertical-align: middle; }
+.srfm-setup-checklist__view:hover, .srfm-setup-checklist__view:focus { color: #b83c14; }
+.srfm-setup-checklist__subtitle { margin: 0 0 12px; color: #646970; font-size: 13px; }
+.srfm-setup-checklist__steps { margin: 0; padding: 0; list-style: none; }
+.srfm-setup-checklist__step { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; }
+.srfm-setup-checklist__step + .srfm-setup-checklist__step { margin-top: 6px; }
+.srfm-setup-checklist__step { background: #f6f7f7; }
+.srfm-setup-checklist__label { flex: 1 1 auto; font-size: 14px; color: #1e1e1e; }
+.srfm-setup-checklist__cta { margin-left: auto; border: 0; background: transparent; padding: 0; font-size: 14px; font-weight: 600; color: #d54e21; text-decoration: underline; cursor: pointer; }
+.srfm-setup-checklist__cta:hover { color: #b83c14; }
+/* Keep visited links on-brand — WP admin's a:visited would otherwise turn them blue. */
+.srfm-setup-checklist a:visited { color: #d54e21; }
+.srfm-setup-checklist a:visited:hover, .srfm-setup-checklist a:visited:focus { color: #b83c14; }
+/* Drop WP's blue focus ring on the widget's links; keep an accessible, on-brand keyboard outline. */
+.srfm-setup-checklist a:focus { outline: none; box-shadow: none; }
+.srfm-setup-checklist a:focus-visible { outline: 2px solid #d54e21; outline-offset: 2px; box-shadow: none; }
+.srfm-setup-checklist__snooze { display: inline-block; margin-top: 14px; border: 0; background: transparent; padding: 0; font-size: 13px; color: #646970; text-decoration: underline; cursor: pointer; }
+.srfm-setup-checklist__snooze:hover { color: #1e1e1e; }
+CSS;
+
+		wp_register_style( 'srfm-setup-checklist-widget', false, [], SRFM_VER );
+		wp_enqueue_style( 'srfm-setup-checklist-widget' );
+		wp_add_inline_style( 'srfm-setup-checklist-widget', $css );
+
+		wp_register_script( 'srfm-setup-checklist-widget', '', [], SRFM_VER, true );
+		wp_enqueue_script( 'srfm-setup-checklist-widget' );
+
+		wp_localize_script(
+			'srfm-setup-checklist-widget',
+			'srfmSetupChecklist',
+			[
+				'restUrl' => esc_url_raw( rest_url( 'sureforms/v1/dismiss-form-setup-card' ) ),
+				'nonce'   => wp_create_nonce( 'wp_rest' ),
+				'formId'  => $card['id'],
+			]
+		);
+
+		$inline_script = <<<'JS'
+( function () {
+	const cfg = window.srfmSetupChecklist || {};
+	const widget = document.getElementById( 'srfm-setup-checklist' );
+	if ( ! widget ) {
+		return;
+	}
+
+	const persist = function ( action ) {
+		return fetch( cfg.restUrl, {
+			method: 'POST',
+			credentials: 'same-origin',
+			keepalive: true,
+			headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': cfg.nonce },
+			body: JSON.stringify( { form_id: cfg.formId, action: action } ),
+		} ).catch( function () {} );
+	};
+
+	const removeWidget = function () {
+		// Remove the whole postbox; removing only the inner node would leave an
+		// empty box with its title still showing.
+		const box = document.getElementById( 'srfm_form_setup_checklist' );
+		if ( box ) {
+			box.remove();
+		}
+	};
+
+	// Beacon the CTA / view-form clicks for analytics. keepalive on the fetch lets
+	// the request finish even though the CTA immediately navigates away.
+	widget.addEventListener( 'click', function ( e ) {
+		const target = e.target?.closest?.( '[data-srfm-event]' );
+		if ( target ) {
+			persist( target.getAttribute( 'data-srfm-event' ) );
+		}
+	} );
+
+	const snoozeBtn = document.getElementById( 'srfm-setup-checklist-snooze' );
+	if ( snoozeBtn ) {
+		snoozeBtn.addEventListener( 'click', function () {
+			// Only hide the widget once the snooze actually persisted — the
+			// render-time wp_rest nonce can expire on a long-open dashboard, and
+			// hiding on a 403 would make the widget silently reappear next load.
+			persist( 'snooze' ).then( function ( res ) {
+				if ( res && res.ok ) {
+					removeWidget();
+				}
+			} );
+		} );
+	}
+}() );
+JS;
+
+		wp_add_inline_script( 'srfm-setup-checklist-widget', $inline_script );
+	}
+
+	/**
+	 * Register the "Finish setting up" prompt as an Astra Notices admin notice (#3030).
+	 *
+	 * Hooked to admin_notices so it registers before the Astra Notices library
+	 * renders (priority 30). Shown on every admin screen EXCEPT the main dashboard,
+	 * for the newest form the current user can edit that still has an unfinished
+	 * step (default Thank You message, or no reply destination). Uses a single
+	 * stable notice id so the library's built-in ✕ dismissal is one persistent
+	 * choice ("stop nudging me"), not a per-form row.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function render_thankyou_prompt_notice() {
+		if ( ! Helper::current_user_can() || ! class_exists( 'Astra_Notices' ) ) {
+			return;
+		}
+
+		/**
+		 * Short-circuit the "Finish setting up" Thank You notice.
+		 *
+		 * @param bool $show Whether to show the notice. Default true.
+		 *
+		 * @since x.x.x
+		 */
+		if ( ! apply_filters( 'srfm_show_thankyou_prompt', true ) ) {
+			return;
+		}
+
+		// Everywhere in wp-admin except the main dashboard. A null screen fails
+		// closed (return) rather than registering the notice on an unknown screen.
+		$screen = get_current_screen();
+
+		if ( ! $screen || 'dashboard' === $screen->id ) {
+			return;
+		}
+
+		// A single stable notice id (not per-form): keeps both the autoloaded
+		// `allowed_astra_notices` option and the per-user dismissal meta bounded to
+		// one row, and lets a dismissed user short-circuit before the query runs.
+		$notice_id = 'srfm-thankyou-prompt';
+
+		// The library only checks dismissal at render (priority 30, after this
+		// query would already have run). Check it up front so a user who dismissed
+		// the prompt never pays for the WP_Query on subsequent admin page views.
+		if ( 'notice-dismissed' === get_user_meta( get_current_user_id(), $notice_id, true ) ) {
+			return;
+		}
+
+		// array_values so a filter returning a key-preserving array (e.g. the
+		// result of array_filter()) still exposes the newest prompt at index 0.
+		$prompts = array_values( (array) self::get_thankyou_prompt_forms() );
+
+		// Validate every key build_thankyou_notice_markup() reads, not just id/edit_url
+		// — a filter returning a partial payload would otherwise trip "Undefined array
+		// key" warnings and esc_url( null ) deprecations on every admin page.
+		if (
+			empty( $prompts[0] ) || ! is_array( $prompts[0] )
+			|| empty( $prompts[0]['id'] ) || empty( $prompts[0]['edit_url'] )
+			|| empty( $prompts[0]['thankyou_url'] ) || empty( $prompts[0]['replies_url'] )
+			|| ! isset( $prompts[0]['title'] )
+		) {
+			return;
+		}
+
+		$form = $prompts[0];
+
+		\Astra_Notices::add_notice(
+			[
+				'id'                         => $notice_id,
+				'type'                       => 'info',
+				'message'                    => self::build_thankyou_notice_markup( $form ),
+				'class'                      => 'srfm-thankyou-notice',
+				'is_dismissible'             => true,
+				'display-with-other-notices' => true,
+				// Render late so this nudge never pre-empts higher-priority notices
+				// (e.g. Astra's minimum-version warnings, which are display-with-
+				// other-notices => false and would be skipped once ours renders).
+				'priority'                   => 100,
+			]
+		);
+
+		// The message is wp_kses_post'd by the library, so the brand-orange styling
+		// is printed through the notice's pre-markup hook instead of inline.
+		add_action( 'astra_notice_before_markup_' . $notice_id, [ $this, 'print_thankyou_notice_styles' ] );
+
+		// Track clicks on the CTAs and the dismiss ✕ via the shared notice-response
+		// endpoint, enqueued only when the notice actually renders.
+		add_action( 'astra_notice_after_markup_' . $notice_id, [ $this, 'enqueue_thankyou_notice_tracking' ] );
+	}
+
+	/**
+	 * Enqueue the click-tracking for the Thank You notice (#3030).
+	 *
+	 * Sends an analytics beacon to the shared `srfm_notice_response` AJAX handler
+	 * when a CTA or the dismiss ✕ is clicked. Uses `keepalive` so the beacon
+	 * survives the navigation the CTA links trigger.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function enqueue_thankyou_notice_tracking() {
+		if ( wp_script_is( 'srfm-thankyou-notice-track', 'enqueued' ) ) {
+			return;
+		}
+
+		wp_register_script( 'srfm-thankyou-notice-track', '', [], SRFM_VER, true );
+		wp_enqueue_script( 'srfm-thankyou-notice-track' );
+
+		$config = wp_json_encode(
+			[
+				'ajaxurl' => admin_url( 'admin-ajax.php' ),
+				'nonce'   => wp_create_nonce( 'srfm_notice_response' ),
+			]
+		);
+
+		wp_add_inline_script( 'srfm-thankyou-notice-track', 'window.srfmThankYouNoticeTrack = ' . $config . ';', 'before' );
+
+		$inline_script = <<<'JS'
+( function () {
+	const cfg = window.srfmThankYouNoticeTrack || {};
+	const wrap = document.querySelector( '.srfm-thankyou-notice' );
+	if ( ! wrap ) {
+		return;
+	}
+	const noticeId = wrap.id || '';
+	const send = function ( button ) {
+		const body = new URLSearchParams();
+		body.append( 'action', 'srfm_notice_response' );
+		body.append( 'nonce', cfg.nonce );
+		body.append( 'notice_id', noticeId );
+		body.append( 'button', button );
+		fetch( cfg.ajaxurl, {
+			method: 'POST',
+			credentials: 'same-origin',
+			keepalive: true,
+			headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+			body: body.toString(),
+		} ).catch( function () {} );
+	};
+	// Delegate from the wrapper: this inline script runs at parse time, before
+	// core's common.js injects the .notice-dismiss ✕ (on DOMContentLoaded), so a
+	// direct querySelector for it would find nothing and the dismiss beacon would
+	// never fire. Delegation catches the ✕ and the CTAs whenever they exist.
+	const ctas = [
+		[ '.srfm-ty-edit-form', 'edit_form' ],
+		[ '.srfm-ty-set-replies', 'set_replies' ],
+		[ '.srfm-ty-edit-thankyou', 'edit_thankyou' ],
+	];
+	wrap.addEventListener( 'click', function ( e ) {
+		if ( e.target.closest( '.notice-dismiss' ) ) {
+			send( 'dismissed' );
+			return;
+		}
+		for ( let i = 0; i < ctas.length; i++ ) {
+			if ( e.target.closest( ctas[ i ][ 0 ] ) ) {
+				send( ctas[ i ][ 1 ] );
+				return;
+			}
+		}
+	} );
+}() );
+JS;
+
+		wp_add_inline_script( 'srfm-thankyou-notice-track', $inline_script );
+	}
+
+	/**
+	 * Print the Thank You notice's brand-orange styling (#3030).
+	 *
+	 * Fired via astra_notice_before_markup_{id} so it lands right before the notice
+	 * and only when the notice actually renders.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function print_thankyou_notice_styles() {
+		// The library wp_kses_post()'s the message, which strips <svg> and data:
+		// image srcs, so the SureForms mark is painted as a CSS background here
+		// (this hook fires outside that kses call). URL-encoded, not base64, so the
+		// value is fully percent-encoded and safe to pass through esc_url.
+		$icon = 'data:image/svg+xml,' . rawurlencode(
+			'<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 32 32"><path fill="#D54407" fill-rule="evenodd" clip-rule="evenodd" d="M32 0H0V32H32V0ZM22.8573 6.85728H9.14304V11.4287V13.7144L11.4288 11.4287H22.8573V6.85728ZM20.5717 13.7146H9.14314V18.286V20.5714V20.5718V25.1428H16.0003V20.5714H9.14351L11.4289 18.286H20.5717V13.7146Z"/></svg>'
+		);
+		?>
+		<style id="srfm-thankyou-notice-styles">
+			.srfm-thankyou-notice.notice { border-left-color: #D54407; }
+			/* Stack our blocks (the library lays the container out as a flex row) and reserve room on the left for the SureForms mark. */
+			.srfm-thankyou-notice .astra-notice-container { display: block; padding: 4px 0 4px 52px; background: url('<?php echo esc_url( $icon, [ 'data' ] ); ?>') no-repeat 4px 6px; background-size: 32px 32px; }
+			.srfm-thankyou-notice .srfm-thankyou-notice__title { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: #1d2327; }
+			.srfm-thankyou-notice .srfm-thankyou-notice__text { margin: 0 0 10px; color: #50575e; }
+			.srfm-thankyou-notice .srfm-thankyou-notice__actions { margin: 12px 0 2px; display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; }
+			.srfm-thankyou-notice .button-primary { background: #D54407; border-color: #D54407; color: #fff; box-shadow: none; text-shadow: none; }
+			.srfm-thankyou-notice .button-primary:hover, .srfm-thankyou-notice .button-primary:focus { background: #C83B00; border-color: #C83B00; color: #fff; box-shadow: none; }
+			.srfm-thankyou-notice .button:not(.button-primary) { background: transparent; border-color: transparent; color: #D54407; box-shadow: none; padding: 0; }
+			.srfm-thankyou-notice .button:not(.button-primary):hover, .srfm-thankyou-notice .button:not(.button-primary):focus { background: transparent; border-color: transparent; color: #C83B00; box-shadow: none; }
+			.srfm-thankyou-notice .button-primary:focus { outline: 2px solid #D54407; outline-offset: 1px; }
+		</style>
+		<?php
 	}
 
 	/**
@@ -1892,6 +2465,13 @@ class Admin {
 				'maybe_later'    => 'rating_notice_snooze',
 				'dismissed'      => 'rating_notice_dismiss',
 			],
+			// The "Finish setting up" prompt (#3030): three CTAs, plus the ✕.
+			'srfm-thankyou-prompt'        => [
+				'edit_form'     => 'thankyou_notice_edit_form',
+				'set_replies'   => 'thankyou_notice_set_replies',
+				'edit_thankyou' => 'thankyou_notice_edit_thankyou',
+				'dismissed'     => 'thankyou_notice_dismiss',
+			],
 		];
 
 		if ( ! isset( $valid[ $notice_id ][ $button ] ) ) {
@@ -2235,232 +2815,6 @@ JS;
 	}
 
 	/**
-	 * Register the "Finish setting up" checklist widget on the main WP dashboard (#3031).
-	 *
-	 * Only for capable users, and only when there is a form still needing setup —
-	 * so the widget never appears empty. The data is memoized in get_form_setup_card()
-	 * and reused by the enqueue and render passes.
-	 *
-	 * @since x.x.x
-	 * @return void
-	 */
-	public function register_form_setup_widget() {
-		if ( ! Helper::current_user_can() ) {
-			return;
-		}
-
-		if ( null === self::get_form_setup_card() ) {
-			return;
-		}
-
-		wp_add_dashboard_widget(
-			'srfm_form_setup_checklist',
-			__( 'Finish setting up your form', 'sureforms' ),
-			[ $this, 'render_form_setup_widget' ],
-			null,
-			null,
-			'normal',
-			'high'
-		);
-	}
-
-	/**
-	 * Render the setup-checklist widget content (#3031).
-	 *
-	 * A heading (with a link to view the form), a subtitle, and a fixed list of
-	 * optional next-steps — each always shown with its CTA; completion is not
-	 * computed. Each CTA deep-links into the editor (edit form / Thank You message /
-	 * email notification). The "Remind me in two weeks" snooze is wired in the
-	 * enqueued inline script against the REST endpoint.
-	 *
-	 * @since x.x.x
-	 * @return void
-	 */
-	public function render_form_setup_widget() {
-		$card = self::get_form_setup_card();
-
-		if ( null === $card ) {
-			return;
-		}
-
-		// Optional next-steps — always offered, their completion is not computed.
-		// 'event' is the analytics action key beaconed on click (see the widget JS).
-		$rows = [
-			[
-				'label' => __( 'Review or edit your form', 'sureforms' ),
-				'cta'   => __( 'Edit form', 'sureforms' ),
-				'url'   => $card['edit_url'],
-				'event' => 'edit_form',
-			],
-			[
-				'label' => __( 'Personalize the Thank You message', 'sureforms' ),
-				'cta'   => __( 'Edit message', 'sureforms' ),
-				'url'   => $card['thankyou_url'],
-				'event' => 'edit_thankyou',
-			],
-			[
-				'label' => __( 'Choose who gets notified of new replies', 'sureforms' ),
-				'cta'   => __( 'Set up email', 'sureforms' ),
-				'url'   => $card['email_url'],
-				'event' => 'set_up_email',
-			],
-		];
-
-		// Fall back to a generic label for an untitled form so the heading never
-		// renders "Finish setting up " with a dangling space.
-		$card_title = '' !== trim( (string) $card['title'] ) ? $card['title'] : __( 'your form', 'sureforms' );
-		$heading    = sprintf(
-			/* translators: %s: form title. */
-			__( 'Finish setting up %s', 'sureforms' ),
-			$card_title
-		);
-		?>
-		<div class="srfm-setup-checklist" id="srfm-setup-checklist">
-			<p class="srfm-setup-checklist__title">
-				<?php echo esc_html( $heading ); ?>
-				<?php if ( ! empty( $card['view_url'] ) ) { ?>
-					<a class="srfm-setup-checklist__view" data-srfm-event="view_form" href="<?php echo esc_url( $card['view_url'] ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: form title. */ __( 'View %s (opens in a new tab)', 'sureforms' ), $card['title'] ) ); ?>">
-						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-					</a>
-				<?php } ?>
-			</p>
-			<p class="srfm-setup-checklist__subtitle"><?php esc_html_e( 'Customize your form to get it ready for real submissions:', 'sureforms' ); ?></p>
-
-			<ul class="srfm-setup-checklist__steps">
-				<?php foreach ( $rows as $row ) { ?>
-					<li class="srfm-setup-checklist__step">
-						<span class="srfm-setup-checklist__label"><?php echo esc_html( $row['label'] ); ?></span>
-						<a class="srfm-setup-checklist__cta" data-srfm-event="<?php echo esc_attr( $row['event'] ); ?>" href="<?php echo esc_url( $row['url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $row['cta'] ); ?></a>
-					</li>
-				<?php } ?>
-			</ul>
-
-			<button type="button" class="srfm-setup-checklist__snooze" id="srfm-setup-checklist-snooze"><?php esc_html_e( 'Remind me in two weeks', 'sureforms' ); ?></button>
-		</div>
-		<?php
-	}
-
-	/**
-	 * Enqueue the setup-checklist widget's styles and behavior on the dashboard (#3031).
-	 *
-	 * Mirrors the AI widget convention: an inline-only handle carries the CSS and the
-	 * behavior (dismiss / snooze / reveal-and-copy embed code), with server values —
-	 * the REST URL, nonce and form id — passed through wp_localize_script rather than
-	 * printed into the markup, so it stays Plugin-Check clean.
-	 *
-	 * @param string $hook_suffix Current admin page hook suffix.
-	 *
-	 * @since x.x.x
-	 * @return void
-	 */
-	public function enqueue_form_setup_widget_assets( $hook_suffix ) {
-		if ( 'index.php' !== $hook_suffix || ! Helper::current_user_can() ) {
-			return;
-		}
-
-		$card = self::get_form_setup_card();
-
-		if ( null === $card ) {
-			return;
-		}
-
-		$css = <<<'CSS'
-#srfm_form_setup_checklist .inside { margin: 0; padding: 0; }
-.srfm-setup-checklist { padding: 12px 16px 16px; }
-.srfm-setup-checklist__title { margin: 0 0 4px; font-size: 15px; font-weight: 600; color: #1e1e1e; }
-.srfm-setup-checklist__view { display: inline-flex; align-items: center; margin-left: 6px; color: #d54e21; vertical-align: middle; }
-.srfm-setup-checklist__view:hover, .srfm-setup-checklist__view:focus { color: #b83c14; }
-.srfm-setup-checklist__subtitle { margin: 0 0 12px; color: #646970; font-size: 13px; }
-.srfm-setup-checklist__steps { margin: 0; padding: 0; list-style: none; }
-.srfm-setup-checklist__step { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; }
-.srfm-setup-checklist__step + .srfm-setup-checklist__step { margin-top: 6px; }
-.srfm-setup-checklist__step { background: #f6f7f7; }
-.srfm-setup-checklist__label { flex: 1 1 auto; font-size: 14px; color: #1e1e1e; }
-.srfm-setup-checklist__cta { margin-left: auto; border: 0; background: transparent; padding: 0; font-size: 14px; font-weight: 600; color: #d54e21; text-decoration: underline; cursor: pointer; }
-.srfm-setup-checklist__cta:hover { color: #b83c14; }
-/* Keep visited links on-brand — WP admin's a:visited would otherwise turn them blue. */
-.srfm-setup-checklist a:visited { color: #d54e21; }
-.srfm-setup-checklist a:visited:hover, .srfm-setup-checklist a:visited:focus { color: #b83c14; }
-/* Drop WP's blue focus ring on the widget's links; keep an accessible, on-brand keyboard outline. */
-.srfm-setup-checklist a:focus { outline: none; box-shadow: none; }
-.srfm-setup-checklist a:focus-visible { outline: 2px solid #d54e21; outline-offset: 2px; box-shadow: none; }
-.srfm-setup-checklist__snooze { display: inline-block; margin-top: 14px; border: 0; background: transparent; padding: 0; font-size: 13px; color: #646970; text-decoration: underline; cursor: pointer; }
-.srfm-setup-checklist__snooze:hover { color: #1e1e1e; }
-CSS;
-
-		wp_register_style( 'srfm-setup-checklist-widget', false, [], SRFM_VER );
-		wp_enqueue_style( 'srfm-setup-checklist-widget' );
-		wp_add_inline_style( 'srfm-setup-checklist-widget', $css );
-
-		wp_register_script( 'srfm-setup-checklist-widget', '', [], SRFM_VER, true );
-		wp_enqueue_script( 'srfm-setup-checklist-widget' );
-
-		wp_localize_script(
-			'srfm-setup-checklist-widget',
-			'srfmSetupChecklist',
-			[
-				'restUrl' => esc_url_raw( rest_url( 'sureforms/v1/dismiss-form-setup-card' ) ),
-				'nonce'   => wp_create_nonce( 'wp_rest' ),
-				'formId'  => $card['id'],
-			]
-		);
-
-		$inline_script = <<<'JS'
-( function () {
-	const cfg = window.srfmSetupChecklist || {};
-	const widget = document.getElementById( 'srfm-setup-checklist' );
-	if ( ! widget ) {
-		return;
-	}
-
-	const persist = function ( action ) {
-		return fetch( cfg.restUrl, {
-			method: 'POST',
-			credentials: 'same-origin',
-			keepalive: true,
-			headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': cfg.nonce },
-			body: JSON.stringify( { form_id: cfg.formId, action: action } ),
-		} ).catch( function () {} );
-	};
-
-	const removeWidget = function () {
-		// Remove the whole postbox; removing only the inner node would leave an
-		// empty box with its title still showing.
-		const box = document.getElementById( 'srfm_form_setup_checklist' );
-		if ( box ) {
-			box.remove();
-		}
-	};
-
-	// Beacon the CTA / view-form clicks for analytics. keepalive on the fetch lets
-	// the request finish even though the CTA immediately navigates away.
-	widget.addEventListener( 'click', function ( e ) {
-		const target = e.target?.closest?.( '[data-srfm-event]' );
-		if ( target ) {
-			persist( target.getAttribute( 'data-srfm-event' ) );
-		}
-	} );
-
-	const snoozeBtn = document.getElementById( 'srfm-setup-checklist-snooze' );
-	if ( snoozeBtn ) {
-		snoozeBtn.addEventListener( 'click', function () {
-			// Only hide the widget once the snooze actually persisted — the
-			// render-time wp_rest nonce can expire on a long-open dashboard, and
-			// hiding on a 403 would make the widget silently reappear next load.
-			persist( 'snooze' ).then( function ( res ) {
-				if ( res && res.ok ) {
-					removeWidget();
-				}
-			} );
-		} );
-	}
-}() );
-JS;
-
-		wp_add_inline_script( 'srfm-setup-checklist-widget', $inline_script );
-	}
-
-	/**
 	 * Track AI dashboard widget usage.
 	 *
 	 * @return void
@@ -2607,6 +2961,130 @@ JS;
 		}
 
 		return null;
+	}
+
+	/**
+	 * Build the Thank You prompt payload (uncached). See get_thankyou_prompt_forms().
+	 *
+	 * @since x.x.x
+	 * @return array<int,array<string,mixed>> One entry, or none.
+	 */
+	private static function compute_thankyou_prompt_forms() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || ! post_type_exists( SRFM_FORMS_POST_TYPE ) ) {
+			return [];
+		}
+
+		// Only forms imported from a Starter Templates (Astra Sites) starter
+		// template — see self::ASTRA_SITES_IMPORT_META. Prime post + meta caches
+		// (the loop reads meta, title and creation time per candidate) so this is a
+		// single query rather than the main query plus a follow-up per form.
+		$query = new \WP_Query(
+			[
+				'post_type'              => SRFM_FORMS_POST_TYPE,
+				'post_status'            => 'publish',
+				'posts_per_page'         => 10,
+				'orderby'                => 'date',
+				'order'                  => 'DESC',
+				'no_found_rows'          => true,
+				'update_post_meta_cache' => true,
+				'update_post_term_cache' => false,
+				'meta_query'             => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded to 10 recent forms; admin-notice only.
+					[
+						'key'     => self::ASTRA_SITES_IMPORT_META,
+						'compare' => 'EXISTS',
+					],
+				],
+			]
+		);
+
+		$prompts = [];
+		$now     = time();
+
+		foreach ( $query->posts as $post ) {
+			$form_id = (int) $post->ID;
+
+			if ( ! current_user_can( 'edit_post', $form_id ) ) {
+				continue;
+			}
+
+			$steps = [
+				// A destination for replies: an enabled notification with a recipient.
+				'replies'  => ! self::form_has_reply_destination( $form_id ),
+				// The thank-you message is still the shipped default.
+				'thankyou' => self::is_default_confirmation_message( $form_id ),
+			];
+
+			// Nothing left to finish — no card for this form.
+			if ( ! $steps['replies'] && ! $steps['thankyou'] ) {
+				continue;
+			}
+
+			$edit_link = get_edit_post_link( $form_id, 'raw' );
+
+			if ( empty( $edit_link ) ) {
+				continue;
+			}
+
+			$created  = get_post_time( 'U', true, $form_id );
+			$days_ago = is_int( $created ) ? (int) floor( ( $now - $created ) / DAY_IN_SECONDS ) : 0;
+
+			$prompts[] = [
+				'id'           => $form_id,
+				'title'        => get_the_title( $form_id ),
+				'days_ago'     => max( 0, $days_ago ),
+				'steps'        => $steps,
+				'edit_url'     => $edit_link,
+				// The editor reads srfm_focus to open the matching settings tab:
+				// "notifications" lands on Email Notification (where the reply
+				// destination is set, so the CTA can actually clear that step) and
+				// "thankyou" on Form Confirmation.
+				'replies_url'  => add_query_arg( 'srfm_focus', 'notifications', $edit_link ),
+				'thankyou_url' => add_query_arg( 'srfm_focus', 'thankyou', $edit_link ),
+			];
+
+			// One card is enough — surface only the latest form needing setup.
+			break;
+		}
+
+		return $prompts;
+	}
+
+	/**
+	 * Build the Thank You notice's inner markup (title, sentence, action buttons).
+	 *
+	 * @param array<string,mixed> $form Prompt payload from get_thankyou_prompt_forms().
+	 *
+	 * @since x.x.x
+	 * @return string
+	 */
+	private static function build_thankyou_notice_markup( $form ) {
+		// The prompt only surfaces starter-template imports (see the meta gate), so
+		// the form was created for the user rather than by them. Kept generic — no
+		// per-step claim — so it is always accurate whatever the user has since
+		// changed, while the action buttons point to the specific things to finish.
+		$sentence = __( 'We’ve already created this form for you. Finish customising it so it’s ready to collect real submissions.', 'sureforms' );
+
+		ob_start();
+		?>
+		<p class="srfm-thankyou-notice__title">
+			<?php
+			echo esc_html(
+				sprintf(
+					/* translators: %s: form name. */
+					__( 'Finish setting up “%s”', 'sureforms' ),
+					$form['title']
+				)
+			);
+			?>
+		</p>
+		<p class="srfm-thankyou-notice__text"><?php echo esc_html( $sentence ); ?></p>
+		<p class="srfm-thankyou-notice__actions">
+			<a class="button button-primary srfm-ty-edit-form" href="<?php echo esc_url( $form['edit_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Edit form', 'sureforms' ); ?></a>
+			<a class="button srfm-ty-edit-thankyou" href="<?php echo esc_url( $form['thankyou_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Edit the Thank You message', 'sureforms' ); ?></a>
+			<a class="button srfm-ty-set-replies" href="<?php echo esc_url( $form['replies_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Set where replies go', 'sureforms' ); ?></a>
+		</p>
+		<?php
+		return (string) ob_get_clean();
 	}
 
 	/**
