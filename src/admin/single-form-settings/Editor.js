@@ -128,11 +128,19 @@ const SureformsFormSpecificSettings = () => {
 			// scope). Skip the dispatch when already there to avoid fighting the
 			// user each tick.
 			const iface = dataSelect( 'core/interface' );
-			const onDocument =
-				iface &&
-				typeof iface.getActiveComplementaryArea === 'function' &&
-				iface.getActiveComplementaryArea( 'core' ) ===
-					'edit-post/document';
+			// The area name is 'edit-post/document' on every supported version, but
+			// the scope it is registered under is not: current WP uses 'core',
+			// while 6.4 — our declared minimum — used 'core/edit-post'. Checking
+			// only 'core' means this never matches on 6.4, so the early-exit below
+			// never fires and the tick re-dispatches openGeneralSidebar 20 times
+			// over 6s, fighting the user's own tab choice and rewriting their
+			// panel preferences on every pass.
+			const activeArea =
+				iface && typeof iface.getActiveComplementaryArea === 'function'
+					? iface.getActiveComplementaryArea( 'core' ) ??
+					  iface.getActiveComplementaryArea( 'core/edit-post' )
+					: null;
+			const onDocument = 'edit-post/document' === activeArea;
 
 			if ( ! onDocument ) {
 				dataDispatch( 'core/edit-post' )?.openGeneralSidebar?.(

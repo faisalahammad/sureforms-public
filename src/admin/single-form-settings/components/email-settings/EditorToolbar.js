@@ -2,6 +2,7 @@ import { __, _x } from '@wordpress/i18n';
 import parse from 'html-react-parser';
 import svgIcons from '@Svg/svgs.json';
 import apiFetch from '@wordpress/api-fetch';
+import { notify } from '@Utils/notify';
 
 // Undo and redo functions for Custom Toolbar
 function undoChange() {
@@ -22,9 +23,13 @@ function imageHandler() {
 	input.click();
 
 	input.onchange = ( e ) => {
-		const file = e.target.files[ 0 ];
+		const file = e.target.files?.[ 0 ];
+		if ( ! file ) {
+			return;
+		}
+
 		if ( ! /^image\//.test( file.type ) ) {
-			console.warn( 'You could only upload images.' );
+			notify.error( __( 'Please choose an image file.', 'sureforms' ) );
 			return;
 		}
 
@@ -41,7 +46,12 @@ function imageHandler() {
 					response?.source_url ||
 					response?.media_details?.sizes?.full?.source_url;
 				if ( ! url ) {
-					console.error( 'Media upload succeeded but no URL returned.' );
+					notify.error(
+						__(
+							'The image uploaded but could not be inserted. Please try again.',
+							'sureforms'
+						)
+					);
 					return;
 				}
 				const range = quill.getSelection( true );
@@ -52,7 +62,19 @@ function imageHandler() {
 				} );
 			} )
 			.catch( ( err ) => {
-				console.error( 'Image upload failed:', err );
+				// Surface the failure — 413 (post_max_size), 403 (no upload_files)
+				// and network errors all landed here silently, so picking an
+				// oversized photo looked like nothing happened at all. WP sends a
+				// human-readable `message` for REST-level errors; a request that
+				// never reached the API (size cap, connection drop) has none, so
+				// fall back to generic copy rather than printing an object.
+				notify.error(
+					err?.message ||
+						__(
+							'The image could not be uploaded. It may be too large, or you may not have permission to upload files.',
+							'sureforms'
+						)
+				);
 			} );
 	};
 }

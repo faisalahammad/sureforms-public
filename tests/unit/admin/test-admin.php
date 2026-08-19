@@ -982,7 +982,13 @@ class Test_Getting_Started_Notice extends TestCase {
 		wp_set_current_user( is_wp_error( $admin_user ) ? 0 : (int) $admin_user );
 
 		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Card Form' ] );
-		update_post_meta( $form_id, '_astra_sites_imported_post', 1 );
+		update_post_meta( $form_id, Admin::ASTRA_SITES_IMPORT_META, 1 );
+		// Stamping the import marker simulates a Starter Templates install, so the
+		// ASTRA_SITES_VER gate in the query must hold too — without it the payload
+		// builders correctly bail before querying.
+		if ( ! defined( 'ASTRA_SITES_VER' ) ) {
+			define( 'ASTRA_SITES_VER', '4.0.0' );
+		}
 
 		try {
 			Admin::reset_form_setup_card_cache();
@@ -1087,7 +1093,13 @@ class Test_Getting_Started_Notice extends TestCase {
 		wp_set_current_user( is_wp_error( $admin_user ) ? 0 : (int) $admin_user );
 
 		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Render Form' ] );
-		update_post_meta( $form_id, '_astra_sites_imported_post', 1 );
+		update_post_meta( $form_id, Admin::ASTRA_SITES_IMPORT_META, 1 );
+		// Stamping the import marker simulates a Starter Templates install, so the
+		// ASTRA_SITES_VER gate in the query must hold too — without it the payload
+		// builders correctly bail before querying.
+		if ( ! defined( 'ASTRA_SITES_VER' ) ) {
+			define( 'ASTRA_SITES_VER', '4.0.0' );
+		}
 
 		try {
 			// Positive: a qualifying form renders the full checklist.
@@ -1310,6 +1322,12 @@ class Test_Thankyou_Prompt_Notice extends TestCase {
 		$imported = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Imported TY' ] );
 		update_post_meta( $imported, '_srfm_form_confirmation', [ [ 'confirmation_type' => 'same page', 'message' => $default_message ] ] );
 		update_post_meta( $imported, Admin::ASTRA_SITES_IMPORT_META, 1 );
+		// Stamping the import marker simulates a Starter Templates install, so the
+		// ASTRA_SITES_VER gate in the query must hold too — without it the payload
+		// builders correctly bail before querying.
+		if ( ! defined( 'ASTRA_SITES_VER' ) ) {
+			define( 'ASTRA_SITES_VER', '4.0.0' );
+		}
 
 		// Same default message but NOT an Astra Sites import → excluded by the gate.
 		$plain = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Plain TY' ] );
@@ -1377,6 +1395,12 @@ class Test_Thankyou_Prompt_Notice extends TestCase {
 			// message → exactly the srfm-thankyou-prompt notice is registered.
 			$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Positive TY' ] );
 			update_post_meta( $form_id, Admin::ASTRA_SITES_IMPORT_META, 1 );
+			// Stamping the import marker simulates a Starter Templates install, so the
+			// ASTRA_SITES_VER gate in the query must hold too — without it the payload
+			// builders correctly bail before querying.
+			if ( ! defined( 'ASTRA_SITES_VER' ) ) {
+				define( 'ASTRA_SITES_VER', '4.0.0' );
+			}
 			update_post_meta(
 				$form_id,
 				'_srfm_form_confirmation',

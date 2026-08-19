@@ -578,7 +578,7 @@ class Admin {
 			<p class="srfm-setup-checklist__title">
 				<?php echo esc_html( $heading ); ?>
 				<?php if ( ! empty( $card['view_url'] ) ) { ?>
-					<a class="srfm-setup-checklist__view" data-srfm-event="view_form" href="<?php echo esc_url( $card['view_url'] ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: form title. */ __( 'View %s (opens in a new tab)', 'sureforms' ), $card['title'] ) ); ?>">
+					<a class="srfm-setup-checklist__view" data-srfm-event="view_form" href="<?php echo esc_url( $card['view_url'] ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: form title. */ __( 'View %s (opens in a new tab)', 'sureforms' ), $card_title ) ); ?>">
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
 					</a>
 				<?php } ?>
@@ -2862,8 +2862,15 @@ JS;
 			return null;
 		}
 
+		// Starter Templates stamps the marker this query looks for, so without that
+		// plugin the meta can never exist and the query below can never match. Bail
+		// before running it rather than repeating it on every dashboard load.
+		if ( ! defined( 'ASTRA_SITES_VER' ) ) {
+			return null;
+		}
+
 		// Only forms created from an Astra Sites starter template — those carry the
-		// `_astra_sites_imported_post` marker Astra Sites stamps on imported posts.
+		// marker Starter Templates stamps on imported posts (self::ASTRA_SITES_IMPORT_META).
 		// Prime post + meta caches (the loop reads title, permalink and edit link
 		// per candidate) so this is a single query, not a follow-up per form.
 		$query = new \WP_Query(
@@ -2871,14 +2878,19 @@ JS;
 				'post_type'              => SRFM_FORMS_POST_TYPE,
 				'post_status'            => [ 'publish', 'draft', 'pending' ],
 				'posts_per_page'         => 10,
-				'orderby'                => 'date',
-				'order'                  => 'DESC',
+				// ID breaks the tie: a starter-template import creates several forms
+				// within the same second, so post_date alone leaves "the newest form"
+				// up to MySQL and it can differ between page loads.
+				'orderby'                => [
+					'date' => 'DESC',
+					'ID'   => 'DESC',
+				],
 				'no_found_rows'          => true,
 				'update_post_meta_cache' => true,
 				'update_post_term_cache' => false,
 				'meta_query'             => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded to 10 recent forms; dashboard-only.
 					[
-						'key'     => '_astra_sites_imported_post',
+						'key'     => self::ASTRA_SITES_IMPORT_META,
 						'compare' => 'EXISTS',
 					],
 				],
@@ -2930,6 +2942,14 @@ JS;
 			return [];
 		}
 
+		// Starter Templates stamps the marker below, so on an install without that
+		// plugin the meta cannot exist and this query can never match. This notice
+		// renders on every admin screen, so bailing here is what keeps the query
+		// off every admin pageview on the majority of installs.
+		if ( ! defined( 'ASTRA_SITES_VER' ) ) {
+			return [];
+		}
+
 		// Only forms imported from a Starter Templates (Astra Sites) starter
 		// template — see self::ASTRA_SITES_IMPORT_META. Prime post + meta caches
 		// (the loop reads meta, title and creation time per candidate) so this is a
@@ -2939,8 +2959,12 @@ JS;
 				'post_type'              => SRFM_FORMS_POST_TYPE,
 				'post_status'            => 'publish',
 				'posts_per_page'         => 10,
-				'orderby'                => 'date',
-				'order'                  => 'DESC',
+				// ID breaks the tie — an import creates several forms in the same
+				// second, so post_date alone makes "newest" MySQL-dependent.
+				'orderby'                => [
+					'date' => 'DESC',
+					'ID'   => 'DESC',
+				],
 				'no_found_rows'          => true,
 				'update_post_meta_cache' => true,
 				'update_post_term_cache' => false,
