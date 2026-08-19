@@ -51,6 +51,19 @@ class Admin {
 	public const ASTRA_SITES_IMPORT_META = '_astra_sites_imported_post';
 
 	/**
+	 * Negative-cache transient: no form on this site carries the import marker.
+	 *
+	 * Set only when the marker query itself returns zero posts, which is a
+	 * site-wide fact rather than a per-user one, and cleared as soon as any post is
+	 * stamped with the marker (see invalidate_starter_template_cache()). This keeps
+	 * the query off the majority of installs without tying the features to whether
+	 * Starter Templates happens to still be active — the marker outlives it.
+	 *
+	 * @since 2.12.4
+	 */
+	public const NO_IMPORTED_FORMS_TRANSIENT = 'srfm_no_starter_template_forms';
+
+	/**
 	 * Inline CSS for Quill 1.x (react-quill) list markers.
 	 *
 	 * Quill 1.x renders bullet/numbered list markers via CSS ::before pseudo-elements,
@@ -178,6 +191,12 @@ class Admin {
 		// "Finish setting up" checklist widget on the main WP dashboard (#3031).
 		add_action( 'wp_dashboard_setup', [ $this, 'register_form_setup_widget' ] );
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_form_setup_widget_assets' ] );
+
+		// Drop the "no imported forms" negative cache as soon as a post is stamped
+		// with the import marker, so a template imported after the cache was written
+		// surfaces immediately instead of waiting for the transient to expire.
+		add_action( 'added_post_meta', [ $this, 'invalidate_starter_template_cache' ], 10, 3 );
+		add_action( 'updated_post_meta', [ $this, 'invalidate_starter_template_cache' ], 10, 3 );
 
 		// Save first form creation time stamp.
 		add_action( 'admin_init', [ $this, 'save_first_form_creation_time_stamp' ] );
@@ -442,6 +461,39 @@ class Admin {
 	}
 
 	/**
+	 * Drop the "no imported forms" negative cache when the marker is written.
+	 *
+	 * Hooked to added_post_meta/updated_post_meta. Without this, a starter template
+	 * imported after the negative cache was written would show neither the Thank You
+	 * prompt nor the setup widget until the transient expired.
+	 *
+	 * Arguments are read from func_get_args() rather than declared: the hook passes
+	 * ( $meta_id, $post_id, $meta_key ) and the meta id is never needed, so declaring
+	 * it would leave an unused parameter that the coding-standards gate rejects.
+	 *
+	 * @since 2.12.4
+	 * @return void
+	 */
+	public function invalidate_starter_template_cache() {
+		$args     = func_get_args();
+		$post_id  = isset( $args[1] ) ? (int) $args[1] : 0;
+		$meta_key = isset( $args[2] ) ? (string) $args[2] : '';
+
+		if ( self::ASTRA_SITES_IMPORT_META !== $meta_key ) {
+			return;
+		}
+
+		// A full-site import stamps this marker on every post it creates, so narrow to
+		// our own post type: both features only ever query sureforms_form, and this
+		// avoids clearing the cache repeatedly for pages and products during an import.
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || SRFM_FORMS_POST_TYPE !== get_post_type( $post_id ) ) {
+			return;
+		}
+
+		delete_transient( self::NO_IMPORTED_FORMS_TRANSIENT );
+	}
+
+	/**
 	 * Clear the setup-card request memo (#3031).
 	 *
 	 * Lets tests exercise the populated path, and is a safe hook for anything that
@@ -578,7 +630,7 @@ class Admin {
 			<p class="srfm-setup-checklist__title">
 				<?php echo esc_html( $heading ); ?>
 				<?php if ( ! empty( $card['view_url'] ) ) { ?>
-					<a class="srfm-setup-checklist__view" data-srfm-event="view_form" href="<?php echo esc_url( $card['view_url'] ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: form title. */ __( 'View %s (opens in a new tab)', 'sureforms' ), $card['title'] ) ); ?>">
+					<a class="srfm-setup-checklist__view" data-srfm-event="view_form" href="<?php echo esc_url( $card['view_url'] ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: form title. */ __( 'View %s (opens in a new tab)', 'sureforms' ), $card_title ) ); ?>">
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
 					</a>
 				<?php } ?>
@@ -2862,8 +2914,18 @@ JS;
 			return null;
 		}
 
+		// Negative cache. Deliberately not a `defined( 'ASTRA_SITES_VER' )` check:
+		// Starter Templates defines that constant in its main plugin file, so it only
+		// exists while the plugin is active, yet neither its uninstall.php nor its
+		// deactivation hook removes the import marker. Gating on the constant would
+		// silently switch this feature off for the very people it targets — anyone who
+		// imported a starter template and then removed the one-shot import plugin.
+		if ( 'no' === get_transient( self::NO_IMPORTED_FORMS_TRANSIENT ) ) {
+			return null;
+		}
+
 		// Only forms created from an Astra Sites starter template — those carry the
-		// `_astra_sites_imported_post` marker Astra Sites stamps on imported posts.
+		// marker Starter Templates stamps on imported posts (self::ASTRA_SITES_IMPORT_META).
 		// Prime post + meta caches (the loop reads title, permalink and edit link
 		// per candidate) so this is a single query, not a follow-up per form.
 		$query = new \WP_Query(
@@ -2871,19 +2933,32 @@ JS;
 				'post_type'              => SRFM_FORMS_POST_TYPE,
 				'post_status'            => [ 'publish', 'draft', 'pending' ],
 				'posts_per_page'         => 10,
-				'orderby'                => 'date',
-				'order'                  => 'DESC',
+				// ID breaks the tie: a starter-template import creates several forms
+				// within the same second, so post_date alone leaves "the newest form"
+				// up to MySQL and it can differ between page loads.
+				'orderby'                => [
+					'date' => 'DESC',
+					'ID'   => 'DESC',
+				],
 				'no_found_rows'          => true,
 				'update_post_meta_cache' => true,
 				'update_post_term_cache' => false,
 				'meta_query'             => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded to 10 recent forms; dashboard-only.
 					[
-						'key'     => '_astra_sites_imported_post',
+						'key'     => self::ASTRA_SITES_IMPORT_META,
 						'compare' => 'EXISTS',
 					],
 				],
 			]
 		);
+
+		// Nothing on this site carries the marker — remember that, so the query does
+		// not repeat on every load. Keyed on the query result rather than on anything
+		// user-specific, so it is safe to share, and invalidated the moment a post is
+		// stamped (see invalidate_starter_template_cache()).
+		if ( empty( $query->posts ) ) {
+			set_transient( self::NO_IMPORTED_FORMS_TRANSIENT, 'no', WEEK_IN_SECONDS );
+		}
 
 		foreach ( $query->posts as $post ) {
 			$form_id = (int) $post->ID;
@@ -2930,6 +3005,14 @@ JS;
 			return [];
 		}
 
+		// Negative cache — this notice renders on every admin screen, so keeping the
+		// query off installs that can never match is what matters here. See
+		// self::NO_IMPORTED_FORMS_TRANSIENT for why this is not gated on whether
+		// Starter Templates is still active: the marker outlives the plugin.
+		if ( 'no' === get_transient( self::NO_IMPORTED_FORMS_TRANSIENT ) ) {
+			return [];
+		}
+
 		// Only forms imported from a Starter Templates (Astra Sites) starter
 		// template — see self::ASTRA_SITES_IMPORT_META. Prime post + meta caches
 		// (the loop reads meta, title and creation time per candidate) so this is a
@@ -2939,8 +3022,12 @@ JS;
 				'post_type'              => SRFM_FORMS_POST_TYPE,
 				'post_status'            => 'publish',
 				'posts_per_page'         => 10,
-				'orderby'                => 'date',
-				'order'                  => 'DESC',
+				// ID breaks the tie — an import creates several forms in the same
+				// second, so post_date alone makes "newest" MySQL-dependent.
+				'orderby'                => [
+					'date' => 'DESC',
+					'ID'   => 'DESC',
+				],
 				'no_found_rows'          => true,
 				'update_post_meta_cache' => true,
 				'update_post_term_cache' => false,
@@ -2952,6 +3039,14 @@ JS;
 				],
 			]
 		);
+
+		// Nothing on this site carries the marker — remember that, so the query does
+		// not repeat on every load. Keyed on the query result rather than on anything
+		// user-specific, so it is safe to share, and invalidated the moment a post is
+		// stamped (see invalidate_starter_template_cache()).
+		if ( empty( $query->posts ) ) {
+			set_transient( self::NO_IMPORTED_FORMS_TRANSIENT, 'no', WEEK_IN_SECONDS );
+		}
 
 		$prompts = [];
 		$now     = time();
