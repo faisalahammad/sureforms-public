@@ -51,15 +51,6 @@ class Admin {
 	public const ASTRA_SITES_IMPORT_META = '_astra_sites_imported_post';
 
 	/**
-	 * User meta: unix time until which the "Finish setting up" widget is snoozed
-	 * for this user across every form ("Remind me in two weeks"). Per-user rather
-	 * than per-form so the reminder hides the whole widget, not just one form.
-	 *
-	 * @since x.x.x
-	 */
-	public const SETUP_WIDGET_SNOOZE_USER_META = 'srfm_setup_widget_snooze_until';
-
-	/**
 	 * Inline CSS for Quill 1.x (react-quill) list markers.
 	 *
 	 * Quill 1.x renders bullet/numbered list markers via CSS ::before pseudo-elements,
@@ -112,7 +103,7 @@ class Admin {
 	 * A static property (not a function-local static) so tests can reset it via
 	 * reset_form_setup_card_cache() and exercise the populated path — a
 	 * function-local static pins the first result for the whole process. Keyed by
-	 * user id since the payload derives from that user's caps and snooze meta.
+	 * user id since the payload derives from that user's capabilities.
 	 * `false` means "not computed yet"; `null`/array is a computed result.
 	 *
 	 * @var array<int,array<string,mixed>|null>
@@ -183,6 +174,10 @@ class Admin {
 
 		// Enqueue the AI quick draft widget script on the dashboard screen.
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_ai_dashboard_widget_assets' ] );
+
+		// "Finish setting up" checklist widget on the main WP dashboard (#3031).
+		add_action( 'wp_dashboard_setup', [ $this, 'register_form_setup_widget' ] );
+		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_form_setup_widget_assets' ] );
 
 		// Save first form creation time stamp.
 		add_action( 'admin_init', [ $this, 'save_first_form_creation_time_stamp' ] );
@@ -424,7 +419,7 @@ class Admin {
 	 * Setup-checklist data for the newest starter-template form (#3031).
 	 *
 	 * Picks the most recent form the current user can edit that was created from an
-	 * Astra Sites starter template and which the user has not snoozed. The widget
+	 * Astra Sites starter template. The widget
 	 * lists a fixed set of optional next-steps for it — their completion is not
 	 * computed — so the payload carries only the form and the CTA targets. Memoized
 	 * for the request so the widget register/enqueue/render passes share one query.
@@ -436,7 +431,7 @@ class Admin {
 		$user_id = get_current_user_id();
 
 		// Request memo, keyed per user — the payload derives from that user's
-		// capabilities and snooze meta. Reset via reset_form_setup_card_cache().
+		// capabilities. Reset via reset_form_setup_card_cache().
 		if ( array_key_exists( $user_id, self::$setup_card_cache ) ) {
 			return self::$setup_card_cache[ $user_id ];
 		}
@@ -450,7 +445,7 @@ class Admin {
 	 * Clear the setup-card request memo (#3031).
 	 *
 	 * Lets tests exercise the populated path, and is a safe hook for anything that
-	 * changes which form qualifies (e.g. a form save or snooze).
+	 * changes which form qualifies (e.g. a form save).
 	 *
 	 * @since x.x.x
 	 * @return void
@@ -462,11 +457,10 @@ class Admin {
 	/**
 	 * REST handler: record a "Finish setting up" widget interaction (#3031).
 	 *
-	 * Tracks the clicked action as an analytics event and, for "snooze", stores a
-	 * per-user 14-day snooze so "Remind me in two weeks" hides the whole widget
-	 * rather than only the form currently shown. The request carries the displayed
-	 * form id: capability is re-checked against it here — beyond the route's generic
-	 * permission callback — so only a genuine editor of that form can act.
+	 * Records the clicked CTA/view action as an analytics event. The request
+	 * carries the displayed form id: capability is re-checked against it here —
+	 * beyond the route's generic permission callback — so only a genuine editor of
+	 * that form can act.
 	 *
 	 * @param \WP_REST_Request<array<string,mixed>> $request Request.
 	 *
@@ -490,16 +484,10 @@ class Admin {
 			'edit_thankyou' => 'form_setup_widget_edit_thankyou',
 			'set_up_email'  => 'form_setup_widget_set_up_email',
 			'view_form'     => 'form_setup_widget_view_form',
-			'snooze'        => 'form_setup_widget_snooze',
 		];
 
 		if ( isset( $events[ $action ] ) ) {
 			Analytics::events()->track( $events[ $action ], (string) $form_id );
-		}
-
-		// "Remind me in two weeks" hides the whole widget per-user for 14 days.
-		if ( 'snooze' === $action ) {
-			update_user_meta( get_current_user_id(), self::SETUP_WIDGET_SNOOZE_USER_META, time() + ( 14 * DAY_IN_SECONDS ) );
 		}
 
 		return new \WP_REST_Response( [ 'success' => true ], 200 );
@@ -541,8 +529,8 @@ class Admin {
 	 * A heading (with a link to view the form), a subtitle, and a fixed list of
 	 * optional next-steps — each always shown with its CTA; completion is not
 	 * computed. Each CTA deep-links into the editor (edit form / Thank You message /
-	 * email notification). The "Remind me in two weeks" snooze is wired in the
-	 * enqueued inline script against the REST endpoint.
+	 * email notification) and records an analytics event via the REST endpoint
+	 * wired in the enqueued inline script.
 	 *
 	 * @since x.x.x
 	 * @return void
@@ -605,8 +593,6 @@ class Admin {
 					</li>
 				<?php } ?>
 			</ul>
-
-			<button type="button" class="srfm-setup-checklist__snooze" id="srfm-setup-checklist-snooze"><?php esc_html_e( 'Remind me in two weeks', 'sureforms' ); ?></button>
 		</div>
 		<?php
 	}
@@ -615,7 +601,7 @@ class Admin {
 	 * Enqueue the setup-checklist widget's styles and behavior on the dashboard (#3031).
 	 *
 	 * Mirrors the AI widget convention: an inline-only handle carries the CSS and the
-	 * behavior (dismiss / snooze / reveal-and-copy embed code), with server values —
+	 * behavior (CTA click analytics), with server values —
 	 * the REST URL, nonce and form id — passed through wp_localize_script rather than
 	 * printed into the markup, so it stays Plugin-Check clean.
 	 *
@@ -655,8 +641,6 @@ class Admin {
 /* Drop WP's blue focus ring on the widget's links; keep an accessible, on-brand keyboard outline. */
 .srfm-setup-checklist a:focus { outline: none; box-shadow: none; }
 .srfm-setup-checklist a:focus-visible { outline: 2px solid #d54e21; outline-offset: 2px; box-shadow: none; }
-.srfm-setup-checklist__snooze { display: inline-block; margin-top: 14px; border: 0; background: transparent; padding: 0; font-size: 13px; color: #646970; text-decoration: underline; cursor: pointer; }
-.srfm-setup-checklist__snooze:hover { color: #1e1e1e; }
 CSS;
 
 		wp_register_style( 'srfm-setup-checklist-widget', false, [], SRFM_VER );
@@ -694,15 +678,6 @@ CSS;
 		} ).catch( function () {} );
 	};
 
-	const removeWidget = function () {
-		// Remove the whole postbox; removing only the inner node would leave an
-		// empty box with its title still showing.
-		const box = document.getElementById( 'srfm_form_setup_checklist' );
-		if ( box ) {
-			box.remove();
-		}
-	};
-
 	// Beacon the CTA / view-form clicks for analytics. keepalive on the fetch lets
 	// the request finish even though the CTA immediately navigates away.
 	widget.addEventListener( 'click', function ( e ) {
@@ -711,20 +686,6 @@ CSS;
 			persist( target.getAttribute( 'data-srfm-event' ) );
 		}
 	} );
-
-	const snoozeBtn = document.getElementById( 'srfm-setup-checklist-snooze' );
-	if ( snoozeBtn ) {
-		snoozeBtn.addEventListener( 'click', function () {
-			// Only hide the widget once the snooze actually persisted — the
-			// render-time wp_rest nonce can expire on a long-open dashboard, and
-			// hiding on a 403 would make the widget silently reappear next load.
-			persist( 'snooze' ).then( function ( res ) {
-				if ( res && res.ok ) {
-					removeWidget();
-				}
-			} );
-		} );
-	}
 }() );
 JS;
 
@@ -2898,11 +2859,6 @@ JS;
 	 */
 	private static function compute_form_setup_card() {
 		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || ! post_type_exists( SRFM_FORMS_POST_TYPE ) ) {
-			return null;
-		}
-
-		// "Remind me in two weeks" — a per-user snooze that hides the whole widget.
-		if ( (int) get_user_meta( get_current_user_id(), self::SETUP_WIDGET_SNOOZE_USER_META, true ) > time() ) {
 			return null;
 		}
 

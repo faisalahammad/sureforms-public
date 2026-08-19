@@ -1413,8 +1413,8 @@ class Rest_Api {
 					'callback'            => [ Field_Mapping::get_instance(), 'generate_gutenberg_fields_from_questions' ],
 					'permission_callback' => [ Helper::class, 'get_items_permissions_check' ],
 				],
-				// Dismiss/snooze the dashboard "Finish setting up" card for a form
-				// (#3031). Per-form capability is re-checked in the handler.
+				// Record a "Finish setting up" card CTA click for a form (#3031).
+				// Per-form capability is re-checked in the handler.
 				'dismiss-form-setup-card'   => [
 					'methods'             => 'POST',
 					'callback'            => [ \SRFM\Admin\Admin::get_instance(), 'dismiss_form_setup_card' ],
@@ -1427,7 +1427,7 @@ class Rest_Api {
 						'action'  => [
 							'required'          => true,
 							'type'              => 'string',
-							'enum'              => [ 'edit_form', 'edit_thankyou', 'set_up_email', 'view_form', 'snooze' ],
+							'enum'              => [ 'edit_form', 'edit_thankyou', 'set_up_email', 'view_form' ],
 							// Core only enforces `enum` via the default arg sanitizer, which
 							// is skipped once a sanitize_callback is set — so pair it with an
 							// explicit validate_callback, matching this file's other routes.
