@@ -113,7 +113,7 @@ class Post_Types {
 	 * so it only shows for users who can actually create a form.
 	 *
 	 * @param WP_Admin_Bar $wp_admin_bar WP_Admin_Bar instance.
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return void
 	 */
 	public function add_new_form_to_admin_bar_menu( $wp_admin_bar ) {
