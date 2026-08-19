@@ -15,6 +15,11 @@ import { getIdFromString, getPanelIdFromRef } from '@Utils/Helpers';
 import SRFMReset from '../reset';
 import SRFMHelpText from '@Components/help-text';
 
+const SRFM_PRESETS_DEFAULTS = {
+	presetInputType: 'dropdown',
+	label: __( 'Select Preset', 'sureforms' ),
+};
+
 const SRFMPresets = ( rawProps ) => {
 	const props = { ...SRFM_PRESETS_DEFAULTS, ...rawProps };
 	const [ panelNameForHook, setPanelNameForHook ] = useState( null );
@@ -285,11 +290,6 @@ const SRFMPresets = ( rawProps ) => {
 			{ controlAfterDomElement }
 		</div>
 	);
-};
-
-const SRFM_PRESETS_DEFAULTS = {
-	presetInputType: 'dropdown',
-	label: __( 'Select Preset', 'sureforms' ),
 };
 
 export default memo( SRFMPresets );
