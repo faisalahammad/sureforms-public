@@ -2,7 +2,7 @@
 **Contributors:** [brainstormforce](https://profiles.wordpress.org/brainstormforce/)  
 **Tags:** forms, ai forms, contact form, form builder, payment form  
 **Requires at least:** 6.4  
-**Tested up to:** 7.0.4  
+**Tested up to:** 7.1  
 **Requires PHP:** 7.4  
 **Stable tag:** 2.12.4  
 **License:** GPLv2 or later  
@@ -432,8 +432,7 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 * New: Added a dashboard prompt that helps you personalise a new form's Thank You message.
 * New: Added an admin-only "Edit Form" shortcut on embedded forms to jump straight from the page to the form editor.
 * Improvement: Email notification images are now saved to the Media Library instead of being embedded as base64, improving email deliverability and reducing message size.
-* Fix: Compatibility with the WordPress 7.1 iframed block editor.
-* Fix: Resolved React deprecation warnings on WordPress 7.1.
+* Fix: Compatibility with the WordPress 7.1.
 ### 2.12.3 - 6th August 2026 ###
 * New: Added an "Entries" shortcut in the Instant Form admin bar to open a form's entries in one click.
 * Improvement: Enhanced WPML compatibility. [https://wpml.org/plugin/sureforms/](https://wpml.org/plugin/sureforms/)
