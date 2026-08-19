@@ -1413,6 +1413,45 @@ class Rest_Api {
 					'callback'            => [ Field_Mapping::get_instance(), 'generate_gutenberg_fields_from_questions' ],
 					'permission_callback' => [ Helper::class, 'get_items_permissions_check' ],
 				],
+				// Record a "Finish setting up" card CTA click for a form (#3031).
+				// Per-form capability is re-checked in the handler.
+				'dismiss-form-setup-card'   => [
+					'methods'             => 'POST',
+					/**
+					 * Resolve Admin at dispatch rather than while the route table is
+					 * built. get_endpoints() runs on rest_api_init for *every* REST
+					 * request, and plugin-loader.php only constructs Admin under
+					 * is_admin() — which REST dispatch is not. Naming the instance
+					 * here would therefore run Admin's constructor (40 admin hook
+					 * registrations, an option read, the notices library, and the
+					 * wpforms_current_user_can filter) on the front-end
+					 * submit-form path too.
+					 *
+					 * @param \WP_REST_Request<array<string,mixed>> $request Request.
+					 * @return \WP_REST_Response|\WP_Error
+					 */
+					'callback'            => static function ( $request ) {
+						// @phpstan-ignore-next-line -- PHPStan resolves SRFM\Admin\Admin via tests/php/stubs/srfm-stubs.php (admin/ is outside its `paths`) and that generated stub predates this method. Real location: admin/admin.php:470.
+						return \SRFM\Admin\Admin::get_instance()->dismiss_form_setup_card( $request );
+					},
+					'permission_callback' => [ Helper::class, 'get_items_permissions_check' ],
+					'args'                => [
+						'form_id' => [
+							'required'          => true,
+							'sanitize_callback' => 'absint',
+						],
+						'action'  => [
+							'required'          => true,
+							'type'              => 'string',
+							'enum'              => [ 'edit_form', 'edit_thankyou', 'set_up_email', 'view_form' ],
+							// Core only enforces `enum` via the default arg sanitizer, which
+							// is skipped once a sanitize_callback is set — so pair it with an
+							// explicit validate_callback, matching this file's other routes.
+							'validate_callback' => 'rest_validate_request_arg',
+							'sanitize_callback' => 'sanitize_text_field',
+						],
+					],
+				],
 				// This route is used to initiate auth process when user tries to authenticate on billing portal.
 				'initiate-auth'             => [
 					'methods'             => 'GET',
