@@ -39,6 +39,9 @@ export default ( { attributes, setAttributes, clientId } ) => {
 
 	const iframeRef = useRef( null );
 	const iframeContainerRef = useRef( null );
+	// Last height written to the frame, so an unchanged measurement is a no-op
+	// rather than another resize → reflow → report cycle.
+	const appliedHeightRef = useRef( 0 );
 	const [ loading, setLoading ] = useState( false );
 	const [ formIframeHeight, setFormIframeHeight ] = useState( 0 );
 	const [ showUpgradeModal, setShowUpgradeModal ] = useState( false );
@@ -93,14 +96,8 @@ export default ( { attributes, setAttributes, clientId } ) => {
 				'sureforms_form',
 				id
 			);
-			// canUserEditEntityRecord() is deprecated since WP 6.7 (it warns in the
-			// console on 7.1) and took ( kind, name, recordId ) — the single
-			// 'sureforms_form' argument was landing in `kind`.
-			const canEdit = select( coreStore ).canUser( 'update', {
-				kind: 'postType',
-				name: 'sureforms_form',
-				id,
-			} );
+			const canEdit =
+				select( coreStore ).canUserEditEntityRecord( 'sureforms_form' );
 			return {
 				canEdit,
 				isMissing: hasResolvedValue && ! form,
@@ -145,8 +142,14 @@ export default ( { attributes, setAttributes, clientId } ) => {
 		if ( formOuterContainerSelector ) {
 			const getHeight = formOuterContainerSelector.offsetHeight;
 
-			if ( getHeight && 0 !== getHeight ) {
-				// set height of iframe if form is not empty.
+			// set height of iframe if form is not empty, and only when it actually
+			// changed — writing the same height back reflows the preview for nothing.
+			if (
+				getHeight &&
+				0 !== getHeight &&
+				appliedHeightRef.current !== getHeight
+			) {
+				appliedHeightRef.current = getHeight;
 				setFormIframeHeight( getHeight );
 				iframeRef.current.height = getHeight;
 			}
@@ -245,6 +248,16 @@ export default ( { attributes, setAttributes, clientId } ) => {
 			}
 
 			setLoading( false );
+
+			// Ignore a height we have already applied. Applying it resizes the
+			// frame, which reflows the preview and can prompt another report, so
+			// this is the second half of the loop guard (the first is in
+			// preview-styling.js) and keeps repeated messages from re-rendering.
+			if ( appliedHeightRef.current === height ) {
+				return;
+			}
+
+			appliedHeightRef.current = height;
 			setFormIframeHeight( height );
 
 			if ( iframeRef.current ) {
@@ -587,20 +600,6 @@ export default ( { attributes, setAttributes, clientId } ) => {
 						<iframe
 							loading={ 'eager' }
 							ref={ iframeRef }
-							/*
-							 * From WP 7.1 the editor is cross-origin isolated
-							 * (COEP). A framed document that does not opt in is
-							 * blocked outright, which is why the preview never
-							 * loaded. `credentialless` lets an isolated document
-							 * embed it; browsers without support ignore it. Safe
-							 * here because this iframe only ever renders published
-							 * forms (see the isMissing / status guard above), so
-							 * the preview needs no cookies. Declared in JSX rather
-							 * than via setAttribute because it only takes effect if
-							 * present before the frame starts loading.
-							 */
-							// eslint-disable-next-line react/no-unknown-property -- Valid HTML attribute React has no entry for; required at element creation.
-							credentialless="true"
 							title="srfm-iframe"
 							src={
 								formUrl +

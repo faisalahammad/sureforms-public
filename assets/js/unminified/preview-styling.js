@@ -69,12 +69,20 @@
 	 *
 	 * @since x.x.x
 	 */
+	let lastReportedHeight = 0;
+
 	function reportHeight() {
 		const height = container.offsetHeight;
 
-		if ( ! height ) {
+		// Skip unchanged heights. The embedder applies what we send to the frame,
+		// which reflows this document — so re-reporting the same measurement is how
+		// a height feedback loop starts. The tolerance also absorbs sub-pixel
+		// rounding that would otherwise oscillate between two neighbouring values.
+		if ( ! height || Math.abs( height - lastReportedHeight ) < 4 ) {
 			return;
 		}
+
+		lastReportedHeight = height;
 
 		const message = { type: 'srfm-preview-height', height };
 
@@ -88,13 +96,15 @@
 	}
 
 	// Only meaningful when framed; a directly-loaded preview has no embedder.
+	//
+	// Deliberately not a ResizeObserver on the container: the embedder resizes the
+	// frame in response, which resizes this container, which fires the observer
+	// again — an unbounded loop that froze the editor tab. Reporting on load and on
+	// viewport resize matches what the previous same-origin measurement did.
 	if ( window.parent !== window ) {
 		reportHeight();
 		window.addEventListener( 'load', reportHeight );
-
-		if ( 'undefined' !== typeof ResizeObserver ) {
-			new ResizeObserver( reportHeight ).observe( container );
-		}
+		window.addEventListener( 'resize', reportHeight );
 	}
 
 	window.addEventListener( 'message', function ( event ) {
