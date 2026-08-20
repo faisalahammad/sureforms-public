@@ -181,9 +181,12 @@ const FormsTable = ( {
 		// Views and Conversion Rate are hidden when view tracking is switched off in
 		// General settings: with the beacon disabled no new views are recorded, so the
 		// columns would sit frozen at whatever was counted before and read as broken.
-		// Defaults to shown when the flag is absent, matching the server-side default
-		// for installs that predate the setting.
-		...( false === window.srfm_admin?.form_views_tracking
+		//
+		// Compared as a string because wp_localize_script casts every scalar through
+		// (string) — a PHP boolean arrives here as '1' or '', never true/false. PHP
+		// sends '1'/'0' explicitly; a missing flag falls back to '1' so the columns
+		// stay visible on an install whose PHP predates this setting.
+		...( '0' === String( window.srfm_admin?.form_views_tracking ?? '1' )
 			? []
 			: [
 				{

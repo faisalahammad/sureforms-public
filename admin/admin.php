@@ -1705,7 +1705,11 @@ JS;
 			// columns are meaningless when tracking is off — no new views are being
 			// recorded — so they are hidden rather than shown frozen at their last
 			// value. Same setting the beacon and the REST endpoint check.
-			'form_views_tracking'          => Form_Views::get_instance()->is_tracking_enabled(),
+			//
+			// Sent as '1'/'0' rather than a boolean on purpose: WP_Scripts::localize()
+			// casts every scalar with (string), so `false` would reach JS as an empty
+			// string and an identity check against `false` there could never match.
+			'form_views_tracking'          => Form_Views::get_instance()->is_tracking_enabled() ? '1' : '0',
 			'site_url'                     => get_site_url(),
 			'current_user_login'           => $current_user->user_login ?? '',
 			'website_lead_details'         => [
