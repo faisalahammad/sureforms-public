@@ -10,6 +10,7 @@ namespace SRFM\Admin;
 use Astra_Notices;
 use SRFM\Inc\AI_Form_Builder\AI_Helper;
 use SRFM\Inc\Database\Tables\Entries;
+use SRFM\Inc\Form_Views;
 use SRFM\Inc\Global_Settings\Global_Settings;
 use SRFM\Inc\Helper;
 use SRFM\Inc\Onboarding;
@@ -1700,6 +1701,11 @@ JS;
 		$current_user                 = wp_get_current_user();
 
 		$localization_data = [
+			// Gates the Views / Conversion Rate columns on the Forms table. The
+			// columns are meaningless when tracking is off — no new views are being
+			// recorded — so they are hidden rather than shown frozen at their last
+			// value. Same setting the beacon and the REST endpoint check.
+			'form_views_tracking'          => Form_Views::get_instance()->is_tracking_enabled(),
 			'site_url'                     => get_site_url(),
 			'current_user_login'           => $current_user->user_login ?? '',
 			'website_lead_details'         => [

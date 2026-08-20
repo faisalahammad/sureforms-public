@@ -178,47 +178,56 @@ const FormsTable = ( {
 				</Button>
 			),
 		},
-		{
-			label: __( 'Views', 'sureforms' ),
-			key: 'views',
-			sortable: true,
-			headerClassName: 'w-[8%]',
-			render: ( form ) => (
-				<span className="text-sm font-normal text-text-secondary">
-					{ Number( form.views ?? 0 ).toLocaleString() }
-				</span>
-			),
-		},
-		{
-			label: __( 'Conversion Rate', 'sureforms' ),
-			key: 'conversion_rate',
-			sortable: true,
-			headerClassName: 'w-[10%]',
-			render: ( form ) => {
-				const views = Number( form.views ?? 0 );
-				if ( ! views ) {
-					// No views yet — nothing to convert against.
-					return (
-						<span
-							className="text-sm font-normal text-text-tertiary"
-							aria-label={ __(
-								'No conversion data yet',
-								'sureforms'
-							) }
-						>
-							—
+		// Views and Conversion Rate are hidden when view tracking is switched off in
+		// General settings: with the beacon disabled no new views are recorded, so the
+		// columns would sit frozen at whatever was counted before and read as broken.
+		// Defaults to shown when the flag is absent, matching the server-side default
+		// for installs that predate the setting.
+		...( false === window.srfm_admin?.form_views_tracking
+			? []
+			: [
+				{
+					label: __( 'Views', 'sureforms' ),
+					key: 'views',
+					sortable: true,
+					headerClassName: 'w-[8%]',
+					render: ( form ) => (
+						<span className="text-sm font-normal text-text-secondary">
+							{ Number( form.views ?? 0 ).toLocaleString() }
 						</span>
-					);
-				}
-				return (
-					<span className="text-sm font-normal text-text-secondary">
-						{ `${ Number(
-							form.conversion_rate ?? 0
-						).toLocaleString() }%` }
-					</span>
-				);
-			},
-		},
+					),
+				},
+				{
+					label: __( 'Conversion Rate', 'sureforms' ),
+					key: 'conversion_rate',
+					sortable: true,
+					headerClassName: 'w-[10%]',
+					render: ( form ) => {
+						const views = Number( form.views ?? 0 );
+						if ( ! views ) {
+						// No views yet — nothing to convert against.
+							return (
+								<span
+									className="text-sm font-normal text-text-tertiary"
+									aria-label={ __(
+										'No conversion data yet',
+										'sureforms'
+									) }
+								>
+								—
+								</span>
+							);
+						}
+						return (
+							<span className="text-sm font-normal text-text-secondary">
+								{ `${ Number(
+									form.conversion_rate ?? 0
+								).toLocaleString() }%` }
+							</span>
+						);
+					},
+				},
+			  ] ),
 		{
 			label: __( 'Date & Time', 'sureforms' ),
 			key: 'date',

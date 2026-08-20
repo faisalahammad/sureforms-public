@@ -202,7 +202,11 @@ class Forms_Data {
 
 		// Execute query — use try/finally to guarantee filter cleanup.
 		try {
-			if ( in_array( $orderby, [ 'views', 'conversion_rate' ], true ) ) {
+			// Only take the derived-metric path while tracking is on. With the feature
+			// off the columns are hidden, so a stored or hand-crafted request to sort by
+			// them would run the expensive compute-sort-paginate pass to order rows
+			// nobody can see; fall through to the default ordering instead.
+			if ( in_array( $orderby, [ 'views', 'conversion_rate' ], true ) && Form_Views::get_instance()->is_tracking_enabled() ) {
 				// Derived metrics can't be sorted by WP_Query; compute across all
 				// matching forms, sort, then paginate.
 				$response_data = $this->get_forms_sorted_by_metric( $args, $orderby, $order, $page, Helper::get_integer_value( $per_page ) );
@@ -338,8 +342,17 @@ class Forms_Data {
 		// Views (impressions) and derived conversion rate. Clamp to 100%: entries are
 		// all-time while views only accrue from when this feature shipped, so early on a
 		// form can have more entries than counted views (which would read >100%).
-		$views           = Form_Views::get_instance()->get_views( $form_id );
-		$conversion_rate = $views > 0 ? round( min( 100, $entries_count / $views * 100 ), 1 ) : 0.0;
+		//
+		// Skipped entirely when tracking is off — the columns are hidden then, so this
+		// would be a meta read per form on every listing request for values nothing
+		// renders.
+		$views           = 0;
+		$conversion_rate = 0.0;
+
+		if ( Form_Views::get_instance()->is_tracking_enabled() ) {
+			$views           = Form_Views::get_instance()->get_views( $form_id );
+			$conversion_rate = $views > 0 ? round( min( 100, $entries_count / $views * 100 ), 1 ) : 0.0;
+		}
 
 		return [
 			'id'              => $form_id,
