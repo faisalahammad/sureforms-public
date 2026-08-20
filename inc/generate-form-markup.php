@@ -1351,7 +1351,7 @@ class Generate_Form_Markup {
 	 * @param int $form_id Form post ID.
 	 *
 	 * @return void
-	 * @since x.x.x
+	 * @since 2.12.4
 	 */
 	public static function render_edit_form_button( $form_id ) {
 		$form_id = absint( $form_id );
@@ -1403,7 +1403,7 @@ class Generate_Form_Markup {
 		 * @param bool $show    Whether to render the shortcut. Default true.
 		 * @param int  $form_id Form post ID.
 		 *
-		 * @since x.x.x
+		 * @since 2.12.4
 		 */
 		if ( ! apply_filters( 'srfm_show_edit_form_button', true, $form_id ) ) {
 			return;
@@ -1421,7 +1421,7 @@ class Generate_Form_Markup {
 		 * @param string $edit_link Editor URL for the form.
 		 * @param int    $form_id   Form post ID.
 		 *
-		 * @since x.x.x
+		 * @since 2.12.4
 		 */
 		$edit_link = Helper::get_string_value( apply_filters( 'srfm_edit_form_button_link', $edit_link, $form_id ) );
 
@@ -1457,7 +1457,7 @@ class Generate_Form_Markup {
 	 * inside the box — no mobile horizontal overflow — and is RTL-correct.
 	 *
 	 * @return string
-	 * @since x.x.x
+	 * @since 2.12.4
 	 */
 	private static function get_edit_form_button_css() {
 		return '
