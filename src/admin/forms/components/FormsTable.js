@@ -179,6 +179,47 @@ const FormsTable = ( {
 			),
 		},
 		{
+			label: __( 'Views', 'sureforms' ),
+			key: 'views',
+			sortable: true,
+			headerClassName: 'w-[8%]',
+			render: ( form ) => (
+				<span className="text-sm font-normal text-text-secondary">
+					{ Number( form.views ?? 0 ).toLocaleString() }
+				</span>
+			),
+		},
+		{
+			label: __( 'Conversion Rate', 'sureforms' ),
+			key: 'conversion_rate',
+			sortable: true,
+			headerClassName: 'w-[10%]',
+			render: ( form ) => {
+				const views = Number( form.views ?? 0 );
+				if ( ! views ) {
+					// No views yet — nothing to convert against.
+					return (
+						<span
+							className="text-sm font-normal text-text-tertiary"
+							aria-label={ __(
+								'No conversion data yet',
+								'sureforms'
+							) }
+						>
+							—
+						</span>
+					);
+				}
+				return (
+					<span className="text-sm font-normal text-text-secondary">
+						{ `${ Number(
+							form.conversion_rate ?? 0
+						).toLocaleString() }%` }
+					</span>
+				);
+			},
+		},
+		{
 			label: __( 'Date & Time', 'sureforms' ),
 			key: 'date',
 			sortable: true,

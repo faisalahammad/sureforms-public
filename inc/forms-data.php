@@ -202,32 +202,124 @@ class Forms_Data {
 
 		// Execute query — use try/finally to guarantee filter cleanup.
 		try {
-			$query = new \WP_Query( $args );
+			if ( in_array( $orderby, [ 'views', 'conversion_rate' ], true ) ) {
+				// Derived metrics can't be sorted by WP_Query; compute across all
+				// matching forms, sort, then paginate.
+				$response_data = $this->get_forms_sorted_by_metric( $args, $orderby, $order, $page, Helper::get_integer_value( $per_page ) );
+			} else {
+				$query = new \WP_Query( $args );
+
+				$forms = [];
+				/**
+				 * Post object from the query.
+				 *
+				 * @var \WP_Post $post */
+				foreach ( $query->posts as $post ) {
+					$forms[] = $this->prepare_form_for_listing( $post );
+				}
+
+				$response_data = [
+					'forms'        => $forms,
+					'total'        => Helper::get_integer_value( $query->found_posts ),
+					'total_pages'  => Helper::get_integer_value( $query->max_num_pages ),
+					'current_page' => $page,
+					'per_page'     => $per_page,
+				];
+			}
 		} finally {
 			if ( ! empty( $search ) && is_numeric( $search ) && isset( $where_filter ) ) {
 				remove_filter( 'posts_where', $where_filter, 10 );
 			}
 		}
 
-		$forms = [];
-		/**
-		 * Post object from the query.
-		 *
-		 * @var \WP_Post $post */
-		foreach ( $query->posts as $post ) {
-			$forms[] = $this->prepare_form_for_listing( $post );
+		return new WP_REST_Response( $response_data, 200 );
+	}
+
+	/**
+	 * Sort the forms list by a derived metric (views or conversion rate) and paginate.
+	 *
+	 * WP_Query can't order by views (missing-meta forms would drop out) or by the
+	 * derived conversion rate at all, so we fetch every matching form id, compute the
+	 * metric, sort in PHP, then slice the requested page. Form counts are small in
+	 * practice; revisit with a grouped query if a site accumulates thousands of forms.
+	 *
+	 * @param array<string,mixed> $args     Base WP_Query args (filters/search), pagination ignored.
+	 * @param string              $orderby  Either 'views' or 'conversion_rate'.
+	 * @param string              $order    'asc' or 'desc'.
+	 * @param int                 $page     Current page (1-based).
+	 * @param int                 $per_page Items per page.
+	 * @since x.x.x
+	 * @return array<string,mixed> Response payload matching get_forms_list().
+	 */
+	private function get_forms_sorted_by_metric( $args, $orderby, $order, $page, $per_page ) {
+		$id_args                   = $args;
+		$id_args['posts_per_page'] = -1;
+		$id_args['paged']          = 1;
+		$id_args['fields']         = 'ids';
+		$id_args['orderby']        = 'ID';
+		$id_args['order']          = 'DESC';
+
+		$id_query = new \WP_Query( $id_args );
+
+		// `fields => ids` skips the post-meta cache priming that a normal WP_Query does,
+		// so prime it once for all matched forms — otherwise each get_views() below is a
+		// separate get_post_meta() query (N+1). Entry counts are still one COUNT per form;
+		// acceptable for typical form volumes, revisit with a grouped query if needed.
+		if ( ! empty( $id_query->posts ) ) {
+			$prime_ids = array_map(
+				static function ( $post ) {
+					return (int) ( $post instanceof \WP_Post ? $post->ID : $post );
+				},
+				$id_query->posts
+			);
+			update_meta_cache( 'post', $prime_ids );
 		}
 
-		// Prepare response.
-		$response_data = [
+		$rows = [];
+		foreach ( $id_query->posts as $post_id ) {
+			$form_id = Helper::get_integer_value( $post_id );
+			$views   = Form_Views::get_instance()->get_views( $form_id );
+			$entries = Helper::get_integer_value( Entries::get_total_entries_by_status( 'all', $form_id ) );
+			$metric  = 'views' === $orderby ? (float) $views : ( $views > 0 ? $entries / $views * 100 : 0.0 );
+
+			$rows[] = [
+				'id'     => $form_id,
+				'metric' => $metric,
+			];
+		}
+
+		// Sort by metric, tie-break on id (desc) for a stable order.
+		$direction = 'asc' === strtolower( $order ) ? 1 : -1;
+		usort(
+			$rows,
+			static function ( $a, $b ) use ( $direction ) {
+				if ( $a['metric'] === $b['metric'] ) {
+					return $b['id'] <=> $a['id'];
+				}
+				return ( $a['metric'] <=> $b['metric'] ) * $direction;
+			}
+		);
+
+		$total       = count( $rows );
+		$total_pages = $per_page > 0 ? (int) ceil( $total / $per_page ) : 1;
+		$offset      = ( $page - 1 ) * $per_page;
+		$page_rows   = array_slice( $rows, max( 0, $offset ), $per_page );
+
+		$forms = [];
+		foreach ( $page_rows as $row ) {
+			$post = get_post( $row['id'] );
+			if ( $post instanceof \WP_Post ) {
+				$forms[] = $this->prepare_form_for_listing( $post );
+			}
+		}
+
+		return [
 			'forms'        => $forms,
-			'total'        => Helper::get_integer_value( $query->found_posts ),
-			'total_pages'  => Helper::get_integer_value( $query->max_num_pages ),
+			'total'        => $total,
+			'total_pages'  => $total_pages,
 			'current_page' => $page,
 			'per_page'     => $per_page,
 		];
-
-		return new WP_REST_Response( $response_data, 200 );
 	}
 
 	/**
@@ -243,16 +335,24 @@ class Forms_Data {
 		// Get entries count.
 		$entries_count = Helper::get_integer_value( Entries::get_total_entries_by_status( 'all', $form_id ) );
 
+		// Views (impressions) and derived conversion rate. Clamp to 100%: entries are
+		// all-time while views only accrue from when this feature shipped, so early on a
+		// form can have more entries than counted views (which would read >100%).
+		$views           = Form_Views::get_instance()->get_views( $form_id );
+		$conversion_rate = $views > 0 ? round( min( 100, $entries_count / $views * 100 ), 1 ) : 0.0;
+
 		return [
-			'id'            => $form_id,
-			'title'         => $post->post_title,
-			'status'        => $post->post_status,
-			'date_created'  => mysql_to_rfc3339( $post->post_date ),
-			'date_modified' => mysql_to_rfc3339( $post->post_modified ),
-			'entries_count' => $entries_count,
-			'shortcode'     => "[sureforms id='{$form_id}']",
-			'edit_url'      => admin_url( "post.php?post={$form_id}&action=edit" ),
-			'frontend_url'  => get_permalink( $form_id ),
+			'id'              => $form_id,
+			'title'           => $post->post_title,
+			'status'          => $post->post_status,
+			'date_created'    => mysql_to_rfc3339( $post->post_date ),
+			'date_modified'   => mysql_to_rfc3339( $post->post_modified ),
+			'entries_count'   => $entries_count,
+			'views'           => $views,
+			'conversion_rate' => $conversion_rate,
+			'shortcode'       => "[sureforms id='{$form_id}']",
+			'edit_url'        => admin_url( "post.php?post={$form_id}&action=edit" ),
+			'frontend_url'    => get_permalink( $form_id ),
 		];
 	}
 }

@@ -214,6 +214,83 @@ function initializeFormHandlers() {
 			} )
 		);
 	}
+
+	// Record a cache-safe view (impression) for each form once it becomes visible.
+	trackFormViews( forms );
+}
+
+/**
+ * Cache-safe form view (impression) tracking.
+ *
+ * Fires a single beacon per form the first time it scrolls into view, so views are
+ * counted even on fully page-cached pages (the beacon runs client-side). Non-JS
+ * crawlers never execute this, so they are excluded naturally. Privileged users and
+ * builder/Instant Form previews are excluded via the server-set
+ * `window.srfm_view_beacon.enabled` flag.
+ *
+ * @param {Array} forms - The `.srfm-form` elements collected during initialization.
+ */
+function trackFormViews( forms ) {
+	// Respect the server-side exclusion flag (admins/editors, previews).
+	if ( ! window.srfm_view_beacon || ! window.srfm_view_beacon.enabled ) {
+		return;
+	}
+
+	if ( typeof window.IntersectionObserver === 'undefined' ) {
+		return;
+	}
+
+	for ( const form of forms ) {
+		// Count each form once per page load.
+		if ( form.hasAttribute( 'data-srfm-view-tracked' ) ) {
+			continue;
+		}
+
+		const formId = form.getAttribute( 'form-id' );
+		const submitToken = form.getAttribute( 'data-submit-token' );
+
+		if ( ! formId || ! submitToken ) {
+			continue;
+		}
+
+		const observer = new window.IntersectionObserver(
+			( entries, obs ) => {
+				for ( const entry of entries ) {
+					if ( ! entry.isIntersecting ) {
+						continue;
+					}
+
+					// Guard again inside the callback: if initializeFormHandlers()
+					// re-ran and attached a second observer to a still-unviewed form,
+					// this prevents both observers from counting the same impression.
+					if ( form.hasAttribute( 'data-srfm-view-tracked' ) ) {
+						obs.disconnect();
+						continue;
+					}
+
+					// Mark + stop observing before the request so it fires only once.
+					form.setAttribute( 'data-srfm-view-tracked', '1' );
+					obs.disconnect();
+
+					wp.apiFetch( {
+						path: 'sureforms/v1/forms/track-view',
+						method: 'POST',
+						data: { form_id: parseInt( formId, 10 ) },
+						headers: {
+							'X-WP-Submit-Token': submitToken,
+						},
+					} ).catch( () => {
+						// Beacon is best-effort; never disrupt the page on failure.
+					} );
+				}
+			},
+			// threshold 0 → count as soon as any part of the form is visible,
+			// so tall forms on short viewports are not missed.
+			{ threshold: 0 }
+		);
+
+		observer.observe( form );
+	}
 }
 
 document.addEventListener( 'DOMContentLoaded', function () {

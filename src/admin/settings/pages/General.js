@@ -216,6 +216,41 @@ const AdminNotificationContent = ( {
 };
 
 /**
+ * Form Views & Conversion tracking settings section.
+ *
+ * @param {Object}   props
+ * @param {Object}   props.generalTabOptions    - General settings.
+ * @param {Function} props.updateGlobalSettings - Settings update handler.
+ */
+const FormViewsTrackingContent = ( {
+	generalTabOptions,
+	updateGlobalSettings,
+} ) => {
+	return (
+		<Switch
+			label={ {
+				heading: __(
+					'Track form views and conversion rate',
+					'sureforms'
+				),
+				description: __(
+					'When enabled, SureForms records how many times each form is viewed and calculates its conversion rate. Views are counted starting from x.x.x version onward.',
+					'sureforms'
+				),
+			} }
+			value={ generalTabOptions.srfm_form_views_tracking }
+			onChange={ ( value ) =>
+				updateGlobalSettings(
+					'srfm_form_views_tracking',
+					value,
+					'general-settings'
+				)
+			}
+		/>
+	);
+};
+
+/**
  * Usage Tracking / Analytics settings section.
  *
  * @param {Object}   props
@@ -325,6 +360,16 @@ const GeneralPage = ( {
 						generalTabOptions={ generalTabOptions }
 						updateGlobalSettings={ updateGlobalSettings }
 						showLearnTip={ showLearnTip }
+					/>
+				}
+			/>
+			<ContentSection
+				loading={ loading }
+				title={ __( 'Form Views & Conversion', 'sureforms' ) }
+				content={
+					<FormViewsTrackingContent
+						generalTabOptions={ generalTabOptions }
+						updateGlobalSettings={ updateGlobalSettings }
 					/>
 				}
 			/>

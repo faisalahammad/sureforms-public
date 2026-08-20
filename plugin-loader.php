@@ -37,6 +37,7 @@ use SRFM\Inc\Events_Scheduler;
 use SRFM\Inc\Export;
 use SRFM\Inc\Form_Restriction;
 use SRFM\Inc\Form_Submit;
+use SRFM\Inc\Form_Views;
 use SRFM\Inc\Forms_Data;
 use SRFM\Inc\Frontend_Assets;
 use SRFM\Inc\Generate_Form_Markup;
@@ -305,6 +306,7 @@ class Plugin_Loader {
 		Activator::get_instance();
 		Admin_Ajax::get_instance();
 		Forms_Data::get_instance();
+		Form_Views::get_instance();
 		Export::get_instance();
 		Smart_Tags::get_instance();
 		Generate_Form_Markup::get_instance();
