@@ -46,9 +46,22 @@ class Admin {
 	 * forms only. Owned by a plugin that is NOT a SureForms dependency: on installs
 	 * without Starter Templates nothing carries this meta and the prompt never shows.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 */
 	public const ASTRA_SITES_IMPORT_META = '_astra_sites_imported_post';
+
+	/**
+	 * Negative-cache transient: no form on this site carries the import marker.
+	 *
+	 * Set only when the marker query itself returns zero posts, which is a
+	 * site-wide fact rather than a per-user one, and cleared as soon as any post is
+	 * stamped with the marker (see invalidate_starter_template_cache()). This keeps
+	 * the query off the majority of installs without tying the features to whether
+	 * Starter Templates happens to still be active — the marker outlives it.
+	 *
+	 * @since 2.12.4
+	 */
+	public const NO_IMPORTED_FORMS_TRANSIENT = 'srfm_no_starter_template_forms';
 
 	/**
 	 * Inline CSS for Quill 1.x (react-quill) list markers.
@@ -93,7 +106,7 @@ class Admin {
 	 * the value for the whole process and the feature is untestable.
 	 *
 	 * @var array<int,array<string,mixed>>|null
-	 * @since x.x.x
+	 * @since 2.12.4
 	 */
 	private static $thankyou_prompt_cache = null;
 
@@ -107,7 +120,7 @@ class Admin {
 	 * `false` means "not computed yet"; `null`/array is a computed result.
 	 *
 	 * @var array<int,array<string,mixed>|null>
-	 * @since x.x.x
+	 * @since 2.12.4
 	 */
 	private static $setup_card_cache = [];
 
@@ -178,6 +191,12 @@ class Admin {
 		// "Finish setting up" checklist widget on the main WP dashboard (#3031).
 		add_action( 'wp_dashboard_setup', [ $this, 'register_form_setup_widget' ] );
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_form_setup_widget_assets' ] );
+
+		// Drop the "no imported forms" negative cache as soon as a post is stamped
+		// with the import marker, so a template imported after the cache was written
+		// surfaces immediately instead of waiting for the transient to expire.
+		add_action( 'added_post_meta', [ $this, 'invalidate_starter_template_cache' ], 10, 3 );
+		add_action( 'updated_post_meta', [ $this, 'invalidate_starter_template_cache' ], 10, 3 );
 
 		// Save first form creation time stamp.
 		add_action( 'admin_init', [ $this, 'save_first_form_creation_time_stamp' ] );
@@ -308,7 +327,7 @@ class Admin {
 	 *
 	 * @param int $form_id Form post ID.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return bool
 	 */
 	public static function is_default_confirmation_message( $form_id ) {
@@ -349,7 +368,7 @@ class Admin {
 	 *
 	 * @param int $form_id Form post ID.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return bool
 	 */
 	public static function form_has_reply_destination( $form_id ) {
@@ -378,7 +397,7 @@ class Admin {
 	 * message, or no reply destination). Dismissal is enforced by the caller,
 	 * before this query runs.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return array<int,array<string,mixed>> One entry, or none.
 	 */
 	public static function get_thankyou_prompt_forms() {
@@ -394,7 +413,7 @@ class Admin {
 		 *
 		 * @param array<int,array<string,mixed>> $prompts Candidate prompt payloads.
 		 *
-		 * @since x.x.x
+		 * @since 2.12.4
 		 */
 		$filtered                    = apply_filters( 'srfm_thankyou_prompt_forms', self::compute_thankyou_prompt_forms() );
 		self::$thankyou_prompt_cache = is_array( $filtered ) ? $filtered : [];
@@ -408,7 +427,7 @@ class Admin {
 	 * Lets tests exercise the memoized public path, and is a safe hook for anything
 	 * that changes which form qualifies (e.g. a form save).
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return void
 	 */
 	public static function reset_thankyou_prompt_cache() {
@@ -424,7 +443,7 @@ class Admin {
 	 * computed — so the payload carries only the form and the CTA targets. Memoized
 	 * for the request so the widget register/enqueue/render passes share one query.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return array<string,mixed>|null Card payload, or null when there is no candidate form.
 	 */
 	public static function get_form_setup_card() {
@@ -442,12 +461,45 @@ class Admin {
 	}
 
 	/**
+	 * Drop the "no imported forms" negative cache when the marker is written.
+	 *
+	 * Hooked to added_post_meta/updated_post_meta. Without this, a starter template
+	 * imported after the negative cache was written would show neither the Thank You
+	 * prompt nor the setup widget until the transient expired.
+	 *
+	 * Arguments are read from func_get_args() rather than declared: the hook passes
+	 * ( $meta_id, $post_id, $meta_key ) and the meta id is never needed, so declaring
+	 * it would leave an unused parameter that the coding-standards gate rejects.
+	 *
+	 * @since 2.12.4
+	 * @return void
+	 */
+	public function invalidate_starter_template_cache() {
+		$args     = func_get_args();
+		$post_id  = isset( $args[1] ) ? (int) $args[1] : 0;
+		$meta_key = isset( $args[2] ) ? (string) $args[2] : '';
+
+		if ( self::ASTRA_SITES_IMPORT_META !== $meta_key ) {
+			return;
+		}
+
+		// A full-site import stamps this marker on every post it creates, so narrow to
+		// our own post type: both features only ever query sureforms_form, and this
+		// avoids clearing the cache repeatedly for pages and products during an import.
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || SRFM_FORMS_POST_TYPE !== get_post_type( $post_id ) ) {
+			return;
+		}
+
+		delete_transient( self::NO_IMPORTED_FORMS_TRANSIENT );
+	}
+
+	/**
 	 * Clear the setup-card request memo (#3031).
 	 *
 	 * Lets tests exercise the populated path, and is a safe hook for anything that
 	 * changes which form qualifies (e.g. a form save).
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return void
 	 */
 	public static function reset_form_setup_card_cache() {
@@ -464,7 +516,7 @@ class Admin {
 	 *
 	 * @param \WP_REST_Request<array<string,mixed>> $request Request.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return \WP_REST_Response|\WP_Error
 	 */
 	public function dismiss_form_setup_card( $request ) {
@@ -500,7 +552,7 @@ class Admin {
 	 * so the widget never appears empty. The data is memoized in get_form_setup_card()
 	 * and reused by the enqueue and render passes.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return void
 	 */
 	public function register_form_setup_widget() {
@@ -532,7 +584,7 @@ class Admin {
 	 * email notification) and records an analytics event via the REST endpoint
 	 * wired in the enqueued inline script.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return void
 	 */
 	public function render_form_setup_widget() {
@@ -578,7 +630,7 @@ class Admin {
 			<p class="srfm-setup-checklist__title">
 				<?php echo esc_html( $heading ); ?>
 				<?php if ( ! empty( $card['view_url'] ) ) { ?>
-					<a class="srfm-setup-checklist__view" data-srfm-event="view_form" href="<?php echo esc_url( $card['view_url'] ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: form title. */ __( 'View %s (opens in a new tab)', 'sureforms' ), $card['title'] ) ); ?>">
+					<a class="srfm-setup-checklist__view" data-srfm-event="view_form" href="<?php echo esc_url( $card['view_url'] ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: form title. */ __( 'View %s (opens in a new tab)', 'sureforms' ), $card_title ) ); ?>">
 						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
 					</a>
 				<?php } ?>
@@ -607,7 +659,7 @@ class Admin {
 	 *
 	 * @param string $hook_suffix Current admin page hook suffix.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return void
 	 */
 	public function enqueue_form_setup_widget_assets( $hook_suffix ) {
@@ -702,7 +754,7 @@ JS;
 	 * stable notice id so the library's built-in ✕ dismissal is one persistent
 	 * choice ("stop nudging me"), not a per-form row.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return void
 	 */
 	public function render_thankyou_prompt_notice() {
@@ -715,7 +767,7 @@ JS;
 		 *
 		 * @param bool $show Whether to show the notice. Default true.
 		 *
-		 * @since x.x.x
+		 * @since 2.12.4
 		 */
 		if ( ! apply_filters( 'srfm_show_thankyou_prompt', true ) ) {
 			return;
@@ -790,7 +842,7 @@ JS;
 	 * when a CTA or the dismiss ✕ is clicked. Uses `keepalive` so the beacon
 	 * survives the navigation the CTA links trigger.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return void
 	 */
 	public function enqueue_thankyou_notice_tracking() {
@@ -865,7 +917,7 @@ JS;
 	 * Fired via astra_notice_before_markup_{id} so it lands right before the notice
 	 * and only when the notice actually renders.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return void
 	 */
 	public function print_thankyou_notice_styles() {
@@ -2854,7 +2906,7 @@ JS;
 	/**
 	 * Build the setup-card payload (uncached). See get_form_setup_card().
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return array<string,mixed>|null Card payload, or null when there is no candidate.
 	 */
 	private static function compute_form_setup_card() {
@@ -2862,8 +2914,18 @@ JS;
 			return null;
 		}
 
+		// Negative cache. Deliberately not a `defined( 'ASTRA_SITES_VER' )` check:
+		// Starter Templates defines that constant in its main plugin file, so it only
+		// exists while the plugin is active, yet neither its uninstall.php nor its
+		// deactivation hook removes the import marker. Gating on the constant would
+		// silently switch this feature off for the very people it targets — anyone who
+		// imported a starter template and then removed the one-shot import plugin.
+		if ( 'no' === get_transient( self::NO_IMPORTED_FORMS_TRANSIENT ) ) {
+			return null;
+		}
+
 		// Only forms created from an Astra Sites starter template — those carry the
-		// `_astra_sites_imported_post` marker Astra Sites stamps on imported posts.
+		// marker Starter Templates stamps on imported posts (self::ASTRA_SITES_IMPORT_META).
 		// Prime post + meta caches (the loop reads title, permalink and edit link
 		// per candidate) so this is a single query, not a follow-up per form.
 		$query = new \WP_Query(
@@ -2871,19 +2933,32 @@ JS;
 				'post_type'              => SRFM_FORMS_POST_TYPE,
 				'post_status'            => [ 'publish', 'draft', 'pending' ],
 				'posts_per_page'         => 10,
-				'orderby'                => 'date',
-				'order'                  => 'DESC',
+				// ID breaks the tie: a starter-template import creates several forms
+				// within the same second, so post_date alone leaves "the newest form"
+				// up to MySQL and it can differ between page loads.
+				'orderby'                => [
+					'date' => 'DESC',
+					'ID'   => 'DESC',
+				],
 				'no_found_rows'          => true,
 				'update_post_meta_cache' => true,
 				'update_post_term_cache' => false,
 				'meta_query'             => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded to 10 recent forms; dashboard-only.
 					[
-						'key'     => '_astra_sites_imported_post',
+						'key'     => self::ASTRA_SITES_IMPORT_META,
 						'compare' => 'EXISTS',
 					],
 				],
 			]
 		);
+
+		// Nothing on this site carries the marker — remember that, so the query does
+		// not repeat on every load. Keyed on the query result rather than on anything
+		// user-specific, so it is safe to share, and invalidated the moment a post is
+		// stamped (see invalidate_starter_template_cache()).
+		if ( empty( $query->posts ) ) {
+			set_transient( self::NO_IMPORTED_FORMS_TRANSIENT, 'no', WEEK_IN_SECONDS );
+		}
 
 		foreach ( $query->posts as $post ) {
 			$form_id = (int) $post->ID;
@@ -2922,11 +2997,19 @@ JS;
 	/**
 	 * Build the Thank You prompt payload (uncached). See get_thankyou_prompt_forms().
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return array<int,array<string,mixed>> One entry, or none.
 	 */
 	private static function compute_thankyou_prompt_forms() {
 		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || ! post_type_exists( SRFM_FORMS_POST_TYPE ) ) {
+			return [];
+		}
+
+		// Negative cache — this notice renders on every admin screen, so keeping the
+		// query off installs that can never match is what matters here. See
+		// self::NO_IMPORTED_FORMS_TRANSIENT for why this is not gated on whether
+		// Starter Templates is still active: the marker outlives the plugin.
+		if ( 'no' === get_transient( self::NO_IMPORTED_FORMS_TRANSIENT ) ) {
 			return [];
 		}
 
@@ -2939,8 +3022,12 @@ JS;
 				'post_type'              => SRFM_FORMS_POST_TYPE,
 				'post_status'            => 'publish',
 				'posts_per_page'         => 10,
-				'orderby'                => 'date',
-				'order'                  => 'DESC',
+				// ID breaks the tie — an import creates several forms in the same
+				// second, so post_date alone makes "newest" MySQL-dependent.
+				'orderby'                => [
+					'date' => 'DESC',
+					'ID'   => 'DESC',
+				],
 				'no_found_rows'          => true,
 				'update_post_meta_cache' => true,
 				'update_post_term_cache' => false,
@@ -2952,6 +3039,14 @@ JS;
 				],
 			]
 		);
+
+		// Nothing on this site carries the marker — remember that, so the query does
+		// not repeat on every load. Keyed on the query result rather than on anything
+		// user-specific, so it is safe to share, and invalidated the moment a post is
+		// stamped (see invalidate_starter_template_cache()).
+		if ( empty( $query->posts ) ) {
+			set_transient( self::NO_IMPORTED_FORMS_TRANSIENT, 'no', WEEK_IN_SECONDS );
+		}
 
 		$prompts = [];
 		$now     = time();
@@ -3010,7 +3105,7 @@ JS;
 	 *
 	 * @param array<string,mixed> $form Prompt payload from get_thankyou_prompt_forms().
 	 *
-	 * @since x.x.x
+	 * @since 2.12.4
 	 * @return string
 	 */
 	private static function build_thankyou_notice_markup( $form ) {

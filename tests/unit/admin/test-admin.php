@@ -982,7 +982,10 @@ class Test_Getting_Started_Notice extends TestCase {
 		wp_set_current_user( is_wp_error( $admin_user ) ? 0 : (int) $admin_user );
 
 		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Card Form' ] );
-		update_post_meta( $form_id, '_astra_sites_imported_post', 1 );
+		update_post_meta( $form_id, Admin::ASTRA_SITES_IMPORT_META, 1 );
+		// The negative cache is site-wide, so clear it after stamping the marker —
+		// a previous test may have recorded that no imported forms exist.
+		delete_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT );
 
 		try {
 			Admin::reset_form_setup_card_cache();
@@ -1016,6 +1019,117 @@ class Test_Getting_Started_Notice extends TestCase {
 		$this->assertTrue( null === Admin::get_form_setup_card() || is_array( Admin::get_form_setup_card() ) );
 		Admin::reset_form_setup_card_cache();
 		$this->assertTrue( null === Admin::get_form_setup_card() || is_array( Admin::get_form_setup_card() ) );
+	}
+
+	/**
+	 * The negative cache short-circuits both payload builders (#3031, #3030).
+	 *
+	 * This is the branch that keeps the marker query off installs that can never
+	 * match it. It is deliberately a transient rather than a
+	 * `defined( 'ASTRA_SITES_VER' )` check — Starter Templates defines that constant
+	 * in its main plugin file, so it disappears when the plugin is deactivated, while
+	 * the import marker it stamps stays on the forms. Gating on the constant would
+	 * silently disable both features for exactly the people who imported a template
+	 * and then removed the importer.
+	 */
+	public function test_negative_cache_short_circuits_the_marker_query() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$admin_user = wp_insert_user(
+			[
+				'user_login' => 'srfm_negcache_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_negcache_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $admin_user ) ? 0 : (int) $admin_user );
+
+		// A form that would otherwise qualify.
+		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Cached Away' ] );
+		update_post_meta( $form_id, Admin::ASTRA_SITES_IMPORT_META, 1 );
+
+		try {
+			// Cache says "nothing imported here" → both builders bail without querying.
+			set_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT, 'no', HOUR_IN_SECONDS );
+			Admin::reset_form_setup_card_cache();
+			Admin::reset_thankyou_prompt_cache();
+			$this->assertNull( Admin::get_form_setup_card(), 'The negative cache must short-circuit the setup card.' );
+			$this->assertSame( [], Admin::get_thankyou_prompt_forms(), 'The negative cache must short-circuit the Thank You prompt.' );
+
+			// Clearing it restores the populated path, so the bail really was the cache
+			// and not a missing prerequisite.
+			delete_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT );
+			Admin::reset_form_setup_card_cache();
+			Admin::reset_thankyou_prompt_cache();
+			$card = Admin::get_form_setup_card();
+			$this->assertIsArray( $card, 'With the cache cleared the qualifying form is found.' );
+			$this->assertSame( $form_id, $card['id'] );
+		} finally {
+			delete_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT );
+			Admin::reset_form_setup_card_cache();
+			Admin::reset_thankyou_prompt_cache();
+			wp_delete_post( $form_id, true );
+			wp_set_current_user( 0 );
+			if ( ! is_wp_error( $admin_user ) ) {
+				wp_delete_user( (int) $admin_user );
+			}
+		}
+	}
+
+	/**
+	 * Stamping the import marker drops the negative cache (#3031, #3030).
+	 *
+	 * Without this, a starter template imported after the cache was written would
+	 * show neither feature until the transient expired a week later. Narrowed to our
+	 * post type on purpose: a full-site import stamps this marker on every post it
+	 * creates, and both features only ever query sureforms_form.
+	 */
+	public function test_invalidate_starter_template_cache() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$admin  = Admin::get_instance();
+		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Marker Form' ] );
+		$page_id = wp_insert_post( [ 'post_type' => 'page', 'post_status' => 'publish', 'post_title' => 'Imported Page' ] );
+
+		try {
+			// The marker on one of our forms drops the cache.
+			set_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT, 'no', HOUR_IN_SECONDS );
+			$admin->invalidate_starter_template_cache( 0, $form_id, Admin::ASTRA_SITES_IMPORT_META );
+			$this->assertFalse(
+				get_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT ),
+				'Stamping the marker on a form must drop the negative cache.'
+			);
+
+			// An unrelated meta key leaves it alone.
+			set_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT, 'no', HOUR_IN_SECONDS );
+			$admin->invalidate_starter_template_cache( 0, $form_id, '_srfm_unrelated_key' );
+			$this->assertSame(
+				'no',
+				get_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT ),
+				'An unrelated meta key must not drop the cache.'
+			);
+
+			// The same marker on a non-form post leaves it alone — a full-site import
+			// stamps pages and products too, and neither feature queries those.
+			set_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT, 'no', HOUR_IN_SECONDS );
+			$admin->invalidate_starter_template_cache( 0, $page_id, Admin::ASTRA_SITES_IMPORT_META );
+			$this->assertSame(
+				'no',
+				get_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT ),
+				'The marker on a non-form post must not drop the cache.'
+			);
+		} finally {
+			delete_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT );
+			wp_delete_post( $form_id, true );
+			wp_delete_post( $page_id, true );
+		}
 	}
 
 	/**
@@ -1087,7 +1201,10 @@ class Test_Getting_Started_Notice extends TestCase {
 		wp_set_current_user( is_wp_error( $admin_user ) ? 0 : (int) $admin_user );
 
 		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Render Form' ] );
-		update_post_meta( $form_id, '_astra_sites_imported_post', 1 );
+		update_post_meta( $form_id, Admin::ASTRA_SITES_IMPORT_META, 1 );
+		// The negative cache is site-wide, so clear it after stamping the marker —
+		// a previous test may have recorded that no imported forms exist.
+		delete_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT );
 
 		try {
 			// Positive: a qualifying form renders the full checklist.
@@ -1310,6 +1427,9 @@ class Test_Thankyou_Prompt_Notice extends TestCase {
 		$imported = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Imported TY' ] );
 		update_post_meta( $imported, '_srfm_form_confirmation', [ [ 'confirmation_type' => 'same page', 'message' => $default_message ] ] );
 		update_post_meta( $imported, Admin::ASTRA_SITES_IMPORT_META, 1 );
+		// The negative cache is site-wide, so clear it after stamping the marker —
+		// a previous test may have recorded that no imported forms exist.
+		delete_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT );
 
 		// Same default message but NOT an Astra Sites import → excluded by the gate.
 		$plain = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Plain TY' ] );
@@ -1377,6 +1497,9 @@ class Test_Thankyou_Prompt_Notice extends TestCase {
 			// message → exactly the srfm-thankyou-prompt notice is registered.
 			$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Positive TY' ] );
 			update_post_meta( $form_id, Admin::ASTRA_SITES_IMPORT_META, 1 );
+			// The negative cache is site-wide, so clear it after stamping the marker —
+			// a previous test may have recorded that no imported forms exist.
+			delete_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT );
 			update_post_meta(
 				$form_id,
 				'_srfm_form_confirmation',
