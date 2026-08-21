@@ -346,12 +346,48 @@ class Forms_Data {
 		// Skipped entirely when tracking is off — the columns are hidden then, so this
 		// would be a meta read per form on every listing request for values nothing
 		// renders.
-		$views           = 0;
-		$conversion_rate = 0.0;
+		$views = 0;
+		// null means "not computable yet", which the table renders as a dash. 0.0 would
+		// claim a real measurement of zero.
+		$conversion_rate = null;
 
 		if ( Form_Views::get_instance()->is_tracking_enabled() ) {
-			$views           = Form_Views::get_instance()->get_views( $form_id );
-			$conversion_rate = $views > 0 ? round( min( 100, $entries_count / $views * 100 ), 1 ) : 0.0;
+			$views = Form_Views::get_instance()->get_views( $form_id );
+
+			// Compare like with like. The Entries column is all-time, but views only
+			// start accruing when tracking opens, so the rate counts entries from that
+			// same moment — otherwise a form that existed beforehand divides years of
+			// entries by days of views and reports a rate that is pure noise.
+			//
+			// A form created after the window opened measures from its own creation
+			// instead, so its first days are not diluted by a window it did not exist for.
+			$window_start  = Form_Views::get_instance()->get_tracking_started_at();
+			$form_created  = strtotime( (string) $post->post_date_gmt );
+			$window_start  = $form_created && $form_created > $window_start ? $form_created : $window_start;
+			$entries_since = Helper::get_integer_value(
+				Entries::get_total_entries_by_status(
+					'all',
+					$form_id,
+					[
+						[
+							[
+								'key'     => 'created_at',
+								'compare' => '>=',
+								'value'   => gmdate( 'Y-m-d H:i:s', $window_start ),
+							],
+						],
+					]
+				)
+			);
+
+			// More entries than views is impossible — every entry needs a view first —
+			// so the count is incomplete and any percentage would be invented. null tells
+			// the table to show its "no data yet" dash rather than a clamped 100%.
+			if ( $views > 0 && $entries_since <= $views ) {
+				$conversion_rate = round( $entries_since / $views * 100, 1 );
+			} elseif ( $views > 0 ) {
+				$conversion_rate = null;
+			}
 		}
 
 		return [

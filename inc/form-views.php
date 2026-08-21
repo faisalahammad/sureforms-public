@@ -48,6 +48,21 @@ class Form_Views {
 	public const SETTING_KEY = 'srfm_form_views_tracking';
 
 	/**
+	 * Option holding the unix time from which view counting has been running.
+	 *
+	 * Conversion rate divides entries by views, and views only start accruing when
+	 * tracking is switched on — so counting entries from the beginning of time would
+	 * compare two different periods and report a wildly inflated rate on any form
+	 * that existed beforehand. Entries are therefore counted from this moment too.
+	 *
+	 * Deliberately its own option rather than a key inside
+	 * `srfm_general_settings_options`: that array is rebuilt from an allowlist when
+	 * settings are saved, so an unrecognised key added to it would be silently
+	 * dropped on the next save.
+	 */
+	public const TRACKING_STARTED_OPTION = 'srfm_form_views_tracking_started_at';
+
+	/**
 	 * Max beacon hits accepted per visitor IP + form within the rate-limit window.
 	 */
 	private const RATE_LIMIT_MAX = 20;
@@ -64,6 +79,44 @@ class Form_Views {
 		// do_blocks() pass enqueue srfm-form-submit AFTER wp_enqueue_scripts has run, and
 		// those would otherwise never receive the beacon flag.
 		add_action( 'wp_footer', [ $this, 'localize_beacon' ], 5 );
+	}
+
+	/**
+	 * Unix time from which views have been counted.
+	 *
+	 * Written once, on first use, and never rewritten. Tracking is on by default, so
+	 * there is no toggle event to hang this on for the majority of installs — the
+	 * window simply opens the first time anything asks for it, which on an upgrade is
+	 * the moment the feature becomes live.
+	 *
+	 * Not re-stamped when tracking is switched off and on again: the stored view
+	 * counts from before the gap are kept, so moving the start forward would measure
+	 * those views against a shorter entry window. Entries that arrive while tracking
+	 * is off do skew the rate slightly, and the entries-exceed-views guard in
+	 * Forms_Data covers the case where that skew makes the number meaningless.
+	 *
+	 * add_option() rather than update_option() so a concurrent request cannot move a
+	 * window that is already open.
+	 *
+	 * @since x.x.x
+	 * @return int Unix timestamp.
+	 */
+	public function get_tracking_started_at() {
+		$started = Helper::get_integer_value( get_option( self::TRACKING_STARTED_OPTION, 0 ) );
+
+		if ( $started > 0 ) {
+			return $started;
+		}
+
+		$started = time();
+
+		// Only creates the option when it does not already exist, so the first writer
+		// wins and later calls read that value back.
+		if ( ! add_option( self::TRACKING_STARTED_OPTION, $started, '', false ) ) {
+			$started = Helper::get_integer_value( get_option( self::TRACKING_STARTED_OPTION, $started ) );
+		}
+
+		return $started;
 	}
 
 	/**

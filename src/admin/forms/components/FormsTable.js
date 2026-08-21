@@ -207,7 +207,9 @@ const FormsTable = ( {
 					headerClassName: 'w-[10%]',
 					render: ( form ) => {
 						const views = Number( form.views ?? 0 );
-						if ( ! views ) {
+						// No views, or a rate the server could not compute (entries
+						// predate the tracking window, so the ratio would be invented).
+						if ( ! views || null === form.conversion_rate ) {
 						// No views yet — nothing to convert against.
 							return (
 								<span
