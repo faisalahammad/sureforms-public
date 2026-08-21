@@ -234,7 +234,7 @@ const FormViewsTrackingContent = ( {
 					'sureforms'
 				),
 				description: __(
-					'Adds the Views and Conversion Rate columns to the Forms list. A view is counted once per page visit when the form appears on screen, and the conversion rate is the share of those views that ended in a submission. Counting starts from version x.x.x, so submissions received before then are not counted towards the rate. Turning this off hides the columns but keeps counting, so the figures are up to date if you switch it back on.',
+					'Adds the Views and Conversion Rate columns to the Forms list. A view is counted once per page visit when the form appears on screen, and the conversion rate is the share of those views that ended in a submission. Counting begins when this feature first runs on your site, so submissions received before then are not counted towards the rate. Turning this off hides the columns but keeps counting, so the figures are up to date if you switch it back on.',
 					'sureforms'
 				),
 			} }
