@@ -89,11 +89,9 @@ class Form_Views {
 	 * window simply opens the first time anything asks for it, which on an upgrade is
 	 * the moment the feature becomes live.
 	 *
-	 * Not re-stamped when tracking is switched off and on again: the stored view
-	 * counts from before the gap are kept, so moving the start forward would measure
-	 * those views against a shorter entry window. Entries that arrive while tracking
-	 * is off do skew the rate slightly, and the entries-exceed-views guard in
-	 * Forms_Data covers the case where that skew makes the number meaningless.
+	 * Never re-stamped. Counting runs regardless of the display toggle, so the stamp
+	 * always matches the period the stored view counts cover; moving it forward would
+	 * measure those views against a shorter entry window.
 	 *
 	 * add_option() rather than update_option() so a concurrent request cannot move a
 	 * window that is already open.

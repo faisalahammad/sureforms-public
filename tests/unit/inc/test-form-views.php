@@ -124,6 +124,44 @@ class Test_Form_Views extends TestCase {
 	}
 
 	// ──────────────────────────────────────────────
+	// get_tracking_started_at (conversion-rate window)
+	// ──────────────────────────────────────────────
+
+	public function test_get_tracking_started_at() {
+		delete_option( Form_Views::TRACKING_STARTED_OPTION );
+
+		$before  = time();
+		$started = $this->views->get_tracking_started_at();
+		$after   = time();
+
+		$this->assertGreaterThanOrEqual( $before, $started, 'First call should stamp the current time.' );
+		$this->assertLessThanOrEqual( $after, $started, 'First call should stamp the current time.' );
+
+		// Write-once: the stamp must not drift on later calls, or the conversion-rate
+		// window would keep sliding forward and hide entries it already counted.
+		$this->assertSame( $started, $this->views->get_tracking_started_at(), 'Second call must return the stored stamp.' );
+		$this->assertSame( $started, (int) get_option( Form_Views::TRACKING_STARTED_OPTION ), 'Stamp must be persisted.' );
+
+		// Not autoloaded — this is read only on the Forms list screen.
+		global $wpdb;
+		$autoload = $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT autoload FROM {$wpdb->options} WHERE option_name = %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Core table name from $wpdb.
+				Form_Views::TRACKING_STARTED_OPTION
+			)
+		);
+		// WP 6.6+ stores 'off' for an explicit false; older cores store 'no'.
+		$this->assertContains( $autoload, [ 'no', 'off' ], 'Stamp must not be autoloaded on every request.' );
+
+		// An existing stamp is returned verbatim, never re-stamped.
+		delete_option( Form_Views::TRACKING_STARTED_OPTION );
+		add_option( Form_Views::TRACKING_STARTED_OPTION, 1000000000, '', false );
+		$this->assertSame( 1000000000, $this->views->get_tracking_started_at(), 'Existing stamp must be preserved.' );
+
+		delete_option( Form_Views::TRACKING_STARTED_OPTION );
+	}
+
+	// ──────────────────────────────────────────────
 	// permissions_check (HMAC token)
 	// ──────────────────────────────────────────────
 
