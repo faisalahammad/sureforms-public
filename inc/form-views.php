@@ -230,9 +230,14 @@ class Form_Views {
 	}
 
 	/**
-	 * Whether view + conversion-rate tracking is enabled in the global General
-	 * settings. Defaults to true when the setting has never been saved so existing
-	 * installs keep tracking without an explicit opt-in.
+	 * Whether the Views and Conversion Rate columns are shown on the Forms list.
+	 *
+	 * Despite the setting key's name this governs display only — counting runs
+	 * regardless, so switching the columns back on reveals the period they were
+	 * hidden for rather than a gap. See should_track().
+	 *
+	 * Defaults to true when the setting has never been saved, so existing installs
+	 * get the columns without an explicit opt-in.
 	 *
 	 * @since x.x.x
 	 * @return bool
@@ -250,17 +255,18 @@ class Form_Views {
 	/**
 	 * Whether the current request should be counted as a view.
 	 *
-	 * Excludes requests when tracking is disabled globally, logged-in users who can
-	 * edit content (author/editor/admin), and form-builder / Instant Form live previews.
+	 * Excludes logged-in users who can edit content (author/editor/admin) and
+	 * form-builder / Instant Form live previews.
+	 *
+	 * Deliberately does not consult the General-settings toggle: that setting governs
+	 * whether the Views and Conversion Rate columns are shown, not whether counting
+	 * happens. Counting continues in the background so switching the columns back on
+	 * reveals the period they were hidden for, rather than a gap.
 	 *
 	 * @since x.x.x
 	 * @return bool
 	 */
 	private function should_track() {
-		if ( ! $this->is_tracking_enabled() ) {
-			return false;
-		}
-
 		if ( is_user_logged_in() && current_user_can( 'edit_posts' ) ) {
 			return false;
 		}

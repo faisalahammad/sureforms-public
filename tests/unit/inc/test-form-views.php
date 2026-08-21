@@ -110,10 +110,11 @@ class Test_Form_Views extends TestCase {
 
 		// Key present but false → disabled.
 		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => false ] );
-		$this->assertFalse( $this->views->is_tracking_enabled(), 'Explicit false should disable tracking.' );
-		// Disabling tracking also short-circuits should_track for anonymous visitors.
+		$this->assertFalse( $this->views->is_tracking_enabled(), 'Explicit false should hide the columns.' );
+		// The toggle governs display only — counting must continue while the columns are hidden,
+		// so switching them back on reveals the period rather than a gap.
 		wp_set_current_user( 0 );
-		$this->assertFalse( $this->call_private_method( $this->views, 'should_track' ), 'should_track must respect the global toggle.' );
+		$this->assertTrue( $this->call_private_method( $this->views, 'should_track' ), 'should_track must ignore the display toggle and keep counting.' );
 
 		// Key present and true → enabled.
 		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => true ] );

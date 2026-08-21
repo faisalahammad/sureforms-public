@@ -230,11 +230,11 @@ const FormViewsTrackingContent = ( {
 		<Switch
 			label={ {
 				heading: __(
-					'Track form views and conversion rate',
+					'Show views and conversion rate',
 					'sureforms'
 				),
 				description: __(
-					'When enabled, SureForms records how many times each form is viewed and calculates its conversion rate. Views are counted starting from x.x.x version onward.',
+					'Adds the Views and Conversion Rate columns to the Forms list. A view is counted once per page visit when the form appears on screen, and the conversion rate is the share of those views that ended in a submission. Counting starts from version x.x.x, so submissions received before then are not counted towards the rate. Turning this off hides the columns but keeps counting, so the figures are up to date if you switch it back on.',
 					'sureforms'
 				),
 			} }
