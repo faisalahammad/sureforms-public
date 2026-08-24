@@ -256,6 +256,91 @@ class Test_Form_Views extends TestCase {
 	}
 
 	// ──────────────────────────────────────────────
+	// rate limiting
+	// ──────────────────────────────────────────────
+
+	/**
+	 * IPs collapse to the network an attacker would have to rotate out of.
+	 *
+	 * A per-address bucket is no limit at all: a single actor routinely controls
+	 * every address in an IPv6 /64, so each request could mint a fresh allowance —
+	 * and, without a persistent object cache, a fresh pair of wp_options rows.
+	 */
+	public function test_network_bucket() {
+		$bucket = function ( $ip ) {
+			$m = new ReflectionMethod( Form_Views::class, 'network_bucket' );
+			$m->setAccessible( true );
+			return $m->invoke( null, $ip );
+		};
+
+		// Same IPv4 /24 → same bucket; different /24 → different.
+		$this->assertSame( $bucket( '203.0.113.5' ), $bucket( '203.0.113.200' ), 'A /24 must share one bucket.' );
+		$this->assertNotSame( $bucket( '203.0.113.5' ), $bucket( '203.0.114.5' ), 'Different /24s must not share.' );
+
+		// Same IPv6 /64 → same bucket. This is the rotation an attacker gets for free.
+		$this->assertSame(
+			$bucket( '2001:db8:1:2::1' ),
+			$bucket( '2001:db8:1:2:ffff:ffff:ffff:ffff' ),
+			'A /64 must share one bucket.'
+		);
+		$this->assertNotSame(
+			$bucket( '2001:db8:1:2::1' ),
+			$bucket( '2001:db8:1:3::1' ),
+			'Different /64s must not share.'
+		);
+	}
+
+	/**
+	 * The counter increments per hit and reports its running total.
+	 *
+	 * The previous implementation read a transient, compared, then wrote it back, so
+	 * concurrent requests all read the same value and the limit only ever bound
+	 * sequential traffic — on the one control standing between an anonymous caller
+	 * and an unbounded write loop.
+	 */
+	public function test_hit_counter() {
+		$hit = function ( $key ) {
+			$m = new ReflectionMethod( Form_Views::class, 'hit_counter' );
+			$m->setAccessible( true );
+			return $m->invoke( null, $key );
+		};
+
+		$key = 'srfm_test_' . wp_rand();
+		$this->assertSame( 1, $hit( $key ), 'First hit opens the window at 1.' );
+		$this->assertSame( 2, $hit( $key ), 'Second hit increments.' );
+		$this->assertSame( 3, $hit( $key ) );
+
+		// Buckets are independent, or one busy form would throttle every other.
+		$this->assertSame( 1, $hit( $key . '_other' ), 'A different key starts its own count.' );
+	}
+
+	/**
+	 * An open window is never extended by later hits.
+	 *
+	 * Refreshing the TTL on every request makes the window sliding rather than
+	 * fixed, so a steady stream just under the limit holds its bucket open forever.
+	 */
+	public function test_remaining_window() {
+		$remaining = function ( $key ) {
+			$m = new ReflectionMethod( Form_Views::class, 'remaining_window' );
+			$m->setAccessible( true );
+			return $m->invoke( null, $key );
+		};
+
+		$key = 'srfm_window_' . wp_rand();
+
+		// No transient yet → floored at one second rather than a negative TTL.
+		$this->assertSame( 1, $remaining( $key ), 'An unknown window must floor at 1, never go negative.' );
+
+		set_transient( $key, 1, MINUTE_IN_SECONDS );
+		$left = $remaining( $key );
+		$this->assertGreaterThan( 0, $left );
+		$this->assertLessThanOrEqual( MINUTE_IN_SECONDS, $left, 'Must never exceed the original window.' );
+
+		delete_transient( $key );
+	}
+
+	// ──────────────────────────────────────────────
 	// permissions_check (HMAC token)
 	// ──────────────────────────────────────────────
 
@@ -272,13 +357,20 @@ class Test_Form_Views extends TestCase {
 
 	public function test_permissions_check_accepts_valid_token() {
 		$form_id = $this->make_form();
-		$token   = Submit_Token::generate( (int) $form_id );
 
 		$request = new WP_REST_Request( 'POST', '/sureforms/v1/forms/track-view' );
 		$request->set_param( 'form_id', $form_id );
-		$request->set_header( 'X-WP-Submit-Token', $token );
 
+		// A view-namespaced token is what the beacon sends, and it is accepted.
+		$request->set_header( 'X-WP-Submit-Token', Submit_Token::generate( (int) $form_id, Submit_Token::NAMESPACE_VIEW ) );
 		$this->assertTrue( $this->views->permissions_check( $request ) );
+
+		// A submission token must NOT authorise counting. The two are separately
+		// namespaced so a token scraped from the page cannot be repurposed, and so
+		// this endpoint cannot be used as an oracle for whether a submit token is
+		// still inside an accepted window.
+		$request->set_header( 'X-WP-Submit-Token', Submit_Token::generate( (int) $form_id ) );
+		$this->assertInstanceOf( 'WP_Error', $this->views->permissions_check( $request ), 'A submit token must not authorise the view beacon.' );
 
 		wp_delete_post( $form_id, true );
 	}

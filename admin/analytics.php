@@ -491,9 +491,10 @@ class Analytics {
 		// Payment analytics - check if any payment method is enabled.
 		$global_data['boolean_values']['stripe_enabled'] = $this->is_stripe_enabled();
 
-		// Delegated rather than read from $general_settings directly: the setting
-		// defaults to ON when the key has never been saved, so `! empty()` on the
-		// raw array would report every pre-upgrade install as opted out.
+		// Delegated rather than read from $general_settings directly, so the telemetry
+		// can never disagree with what the Forms list actually shows. That matters
+		// because the default has already changed once: reimplementing the check here
+		// means a future change has two places to be made and one to be forgotten.
 		$global_data['boolean_values']['form_views_columns_enabled'] = Form_Views::get_instance()->is_tracking_enabled();
 
 		return $global_data;
@@ -515,15 +516,12 @@ class Analytics {
 	public function total_form_views() {
 		global $wpdb;
 
-		$cache_key     = 'srfm_total_form_views';
-		$cached_result = wp_cache_get( $cache_key, 'sureforms' );
-
-		if ( false !== $cached_result ) {
-			return Helper::get_integer_value( $cached_result );
-		}
-
+		// Deliberately uncached: the only caller is the analytics payload builder,
+		// which runs once per cron pass. A cache would never see a second read inside
+		// a request, and any TTL would always have expired between passes — while
+		// still going stale if a second caller ever appeared.
 		// PHPCS: Ignore direct database query warning, as there is no built-in alternative.
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 		$total = $wpdb->get_var(
 			$wpdb->prepare(
 				"
@@ -539,11 +537,7 @@ class Analytics {
 			)
 		);
 
-		$total = Helper::get_integer_value( $total );
-
-		wp_cache_set( $cache_key, $total, 'sureforms', HOUR_IN_SECONDS );
-
-		return $total;
+		return Helper::get_integer_value( $total );
 	}
 
 	/**

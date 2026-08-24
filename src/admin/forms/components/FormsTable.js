@@ -46,6 +46,11 @@ const FormsTable = ( {
 	onDuplicate,
 	onDraft,
 	paginationProps,
+	// Comes from the list payload, not from the page-load localized flag: the
+	// setting can be changed in another tab, and gating on a stale snapshot would
+	// keep rendering columns while every row came back empty — which reads as data
+	// loss rather than as a disabled feature. Defaults to hidden when absent.
+	showViewColumns = false,
 } ) => {
 	// State to track which shortcode was recently copied
 	const [ copiedFormId, setCopiedFormId ] = useState( null );
@@ -178,17 +183,10 @@ const FormsTable = ( {
 				</Button>
 			),
 		},
-		// Views and Conversion Rate are hidden when view tracking is switched off in
-		// General settings: with the beacon disabled no new views are recorded, so the
-		// columns would sit frozen at whatever was counted before and read as broken.
-		//
-		// Compared as a string because wp_localize_script casts every scalar through
-		// (string) — a PHP boolean arrives here as '1' or '', never true/false. PHP
-		// sends '1'/'0' explicitly; a missing flag falls back to '1' so the columns
-		// stay visible on an install whose PHP predates this setting.
-		// Default '0': the feature is opt-in, so a missing flag hides the columns
-		// rather than showing empty ones.
-		...( '1' !== String( window.srfm_admin?.form_views_tracking ?? '0' )
+		// Views and Conversion Rate only appear once the feature has been switched
+		// on. The flag travels with the rows so the columns and the data they show
+		// are always decided by the same evaluation.
+		...( ! showViewColumns
 			? []
 			: [
 				{
@@ -208,28 +206,29 @@ const FormsTable = ( {
 					sortable: true,
 					headerClassName: 'w-[10%]',
 					render: ( form ) => {
-						const views = Number( form.views ?? 0 );
-						// No views, or a rate the server could not compute (entries
-						// predate the tracking window, so the ratio would be invented).
-						if ( ! views || null === form.conversion_rate ) {
-						// No views yet — nothing to convert against.
+						// Catches undefined as well as null, so a payload missing the
+						// key renders the dash rather than a fabricated 0% via
+						// Number( undefined ?? 0 ). A real 0 is a measurement and
+						// still renders as 0%.
+						if ( null === ( form.conversion_rate ?? null ) ) {
 							return (
-								<span
-									className="text-sm font-normal text-text-tertiary"
-									aria-label={ __(
-										'No conversion data yet',
-										'sureforms'
-									) }
-								>
-								—
+								<span className="text-sm font-normal text-text-tertiary">
+									<span aria-hidden="true">—</span>
+									<span className="sr-only">
+										{ __(
+											'No conversion data yet',
+											'sureforms'
+										) }
+									</span>
 								</span>
 							);
 						}
 						return (
 							<span className="text-sm font-normal text-text-secondary">
-								{ `${ Number(
-									form.conversion_rate ?? 0
-								).toLocaleString() }%` }
+								{ new Intl.NumberFormat( undefined, {
+									style: 'percent',
+									maximumFractionDigits: 1,
+								} ).format( form.conversion_rate / 100 ) }
 							</span>
 						);
 					},

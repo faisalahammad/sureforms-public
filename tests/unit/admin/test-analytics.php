@@ -899,25 +899,18 @@ class Test_Analytics extends TestCase {
 	public function test_total_form_views() {
 		$analytics = Analytics::get_instance();
 
-		wp_cache_delete( 'srfm_total_form_views', 'sureforms' );
 		$this->assertSame( 0, $analytics->total_form_views(), 'No view meta should sum to zero, not null.' );
 
 		$form_a = $this->create_form_with_views( 7 );
 		$form_b = $this->create_form_with_views( 5 );
 		$draft  = $this->create_form_with_views( 100, 'draft' );
 
-		wp_cache_delete( 'srfm_total_form_views', 'sureforms' );
 		$this->assertSame( 12, $analytics->total_form_views(), 'Published forms should be summed; the draft must not count.' );
 
-		// The result is cached for an hour, so a later change must not be observed
-		// until the cache is cleared — pinning that this is a cached read.
+		// Read straight through — no cache to go stale between analytics passes.
 		update_post_meta( $form_a, \SRFM\Inc\Form_Views::META_KEY, 1000 );
-		$this->assertSame( 12, $analytics->total_form_views(), 'The hourly cache should serve the previous total.' );
+		$this->assertSame( 1005, $analytics->total_form_views(), 'A later change should be visible immediately.' );
 
-		wp_cache_delete( 'srfm_total_form_views', 'sureforms' );
-		$this->assertSame( 1005, $analytics->total_form_views(), 'After the cache clears the new total should be read.' );
-
-		wp_cache_delete( 'srfm_total_form_views', 'sureforms' );
 		wp_delete_post( $form_a, true );
 		wp_delete_post( $form_b, true );
 		wp_delete_post( $draft, true );
@@ -977,6 +970,11 @@ class Test_Analytics extends TestCase {
 		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => true ] );
 		$data = $analytics->global_settings_data();
 		$this->assertTrue( $data['boolean_values']['form_views_columns_enabled'] );
+
+		// Enabling above fires maybe_start_tracking(), which opens the tracking
+		// window. Left behind, that leaks into any sibling test that depends on the
+		// never-enabled state and makes the failure order-dependent.
+		delete_option( \SRFM\Inc\Form_Views::TRACKING_STARTED_OPTION );
 
 		if ( false === $original ) {
 			delete_option( 'srfm_general_settings_options' );

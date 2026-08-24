@@ -232,7 +232,7 @@ function initializeFormHandlers() {
  */
 function trackFormViews( forms ) {
 	// Respect the server-side exclusion flag (admins/editors, previews).
-	if ( ! window.srfm_view_beacon || ! window.srfm_view_beacon.enabled ) {
+	if ( '1' !== String( window.srfm_view_beacon?.enabled ?? '0' ) ) {
 		return;
 	}
 
@@ -247,9 +247,13 @@ function trackFormViews( forms ) {
 		}
 
 		const formId = form.getAttribute( 'form-id' );
-		const submitToken = form.getAttribute( 'data-submit-token' );
+		const viewToken = form.getAttribute( 'data-view-token' );
 
-		if ( ! formId || ! submitToken ) {
+		// Reject a malformed form-id up front. Marking the element tracked and
+		// disconnecting the observer before discovering the id is unusable would
+		// silently lose the view to a guaranteed 400.
+		const numericFormId = parseInt( formId, 10 );
+		if ( ! Number.isInteger( numericFormId ) || numericFormId < 1 || ! viewToken ) {
 			continue;
 		}
 
@@ -272,12 +276,12 @@ function trackFormViews( forms ) {
 					form.setAttribute( 'data-srfm-view-tracked', '1' );
 					obs.disconnect();
 
-					wp.apiFetch( {
+					window.wp.apiFetch( {
 						path: 'sureforms/v1/forms/track-view',
 						method: 'POST',
-						data: { form_id: parseInt( formId, 10 ) },
+						data: { form_id: numericFormId },
 						headers: {
-							'X-WP-Submit-Token': submitToken,
+							'X-WP-Submit-Token': viewToken,
 						},
 					} ).catch( () => {
 						// Beacon is best-effort; never disrupt the page on failure.

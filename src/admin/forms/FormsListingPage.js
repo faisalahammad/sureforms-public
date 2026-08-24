@@ -36,7 +36,8 @@ const FormsListingPage = () => {
 		resetFilters: resetUrlFilters,
 	} = useFormsFilters();
 
-	const { sortBy, sortOrder, handleSort, getSortDirection } = useFormsSort();
+	const { sortBy, sortOrder, handleSort, getSortDirection, resetSort } =
+		useFormsSort();
 
 	const { currentPage, perPage, setCurrentPage, setPerPage } =
 		useFormsPagination();
@@ -92,6 +93,23 @@ const FormsListingPage = () => {
 
 	// Extract data from API response
 	const forms = formsData?.forms || [];
+	// Server-evaluated per request, so the columns and the rows always agree.
+	const viewColumnsEnabled = Boolean( formsData?.views_enabled );
+
+	// A bookmarked ?orderby=views outlives the feature being switched off. The
+	// server falls back to date order in that case, but the UI would still claim to
+	// be sorted by a column that is no longer rendered — and no header would show a
+	// direction, so there is nothing to click to get back. Reset it once we know.
+	useEffect( () => {
+		if (
+			! isLoading &&
+			formsData &&
+			! viewColumnsEnabled &&
+			[ 'views', 'conversion_rate' ].includes( sortBy )
+		) {
+			resetSort();
+		}
+	}, [ isLoading, formsData, viewColumnsEnabled, sortBy, resetSort ] );
 	const paginationData = {
 		total: formsData?.total || 0,
 		totalPages: Math.max( 1, formsData?.total_pages || 0 ),
@@ -610,6 +628,9 @@ const FormsListingPage = () => {
 								) : (
 									<FormsTable
 										data={ forms }
+										showViewColumns={
+											viewColumnsEnabled
+										}
 										selectedItems={ selectedForms }
 										onToggleAll={ handleToggleAll }
 										onChangeRowSelection={
