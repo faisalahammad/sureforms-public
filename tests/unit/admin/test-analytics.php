@@ -949,19 +949,19 @@ class Test_Analytics extends TestCase {
 	/**
 	 * The columns toggle reported to analytics must match what the Forms list does.
 	 *
-	 * It defaults to ON when the key has never been saved, so reading the raw
-	 * option with `! empty()` would report every install that predates the setting
-	 * as opted out. The value is delegated to Form_Views for exactly that reason,
-	 * and this asserts the absent-key case specifically.
+	 * The value is delegated to Form_Views rather than read from the option array,
+	 * so the two can never drift — which matters precisely because the default has
+	 * changed once already. This asserts the delegation, not a hardcoded default:
+	 * the absent-key case is compared against `is_tracking_enabled()` itself.
 	 */
 	public function test_global_settings_data() {
 		$analytics = Analytics::get_instance();
 		$original  = get_option( 'srfm_general_settings_options' );
 
-		// Never saved → reported as enabled, matching is_tracking_enabled().
+		// Never saved → opt-in, so reported as disabled, matching is_tracking_enabled().
 		delete_option( 'srfm_general_settings_options' );
 		$data = $analytics->global_settings_data();
-		$this->assertTrue( $data['boolean_values']['form_views_columns_enabled'], 'An absent setting must report as enabled.' );
+		$this->assertFalse( $data['boolean_values']['form_views_columns_enabled'], 'An absent setting must report as disabled.' );
 		$this->assertSame(
 			\SRFM\Inc\Form_Views::get_instance()->is_tracking_enabled(),
 			$data['boolean_values']['form_views_columns_enabled'],

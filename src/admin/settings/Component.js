@@ -40,7 +40,7 @@ const Component = ( { path, subpage } ) => {
 		srfm_form_analytics: false,
 		srfm_bsf_analytics: false,
 		srfm_admin_notification: true,
-		srfm_form_views_tracking: true,
+		srfm_form_views_tracking: false,
 	} );
 	const [ emailTabOptions, setEmailTabOptions ] = useState( {
 		srfm_email_summary: false,
@@ -270,7 +270,7 @@ const Component = ( { path, subpage } ) => {
 						srfm_bsf_analytics,
 						srfm_admin_notification,
 						// Default ON for installs saved before this toggle existed.
-						srfm_form_views_tracking = true,
+						srfm_form_views_tracking = false,
 					} = data.srfm_general_settings_options;
 					const snap = {
 						srfm_ip_log,

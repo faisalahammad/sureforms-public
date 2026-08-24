@@ -186,7 +186,9 @@ const FormsTable = ( {
 		// (string) — a PHP boolean arrives here as '1' or '', never true/false. PHP
 		// sends '1'/'0' explicitly; a missing flag falls back to '1' so the columns
 		// stay visible on an install whose PHP predates this setting.
-		...( '0' === String( window.srfm_admin?.form_views_tracking ?? '1' )
+		// Default '0': the feature is opt-in, so a missing flag hides the columns
+		// rather than showing empty ones.
+		...( '1' !== String( window.srfm_admin?.form_views_tracking ?? '0' )
 			? []
 			: [
 				{

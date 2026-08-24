@@ -148,7 +148,7 @@ class Get_Global_Settings extends Abstract_Ability {
 				'srfm_ip_log'              => false,
 				'srfm_form_analytics'      => false,
 				'srfm_admin_notification'  => true,
-				'srfm_form_views_tracking' => true,
+				'srfm_form_views_tracking' => false,
 			];
 		}
 
@@ -157,7 +157,7 @@ class Get_Global_Settings extends Abstract_Ability {
 		}
 
 		if ( ! isset( $settings['srfm_form_views_tracking'] ) ) {
-			$settings['srfm_form_views_tracking'] = true;
+			$settings['srfm_form_views_tracking'] = false;
 		}
 
 		$settings['srfm_bsf_analytics'] = 'yes' === get_option( 'sureforms_usage_optin', false );

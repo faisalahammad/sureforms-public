@@ -152,7 +152,7 @@ class Global_Settings {
 		$srfm_form_analytics      = $setting_options['srfm_form_analytics'] ?? false;
 		$srfm_bsf_analytics       = $setting_options['srfm_bsf_analytics'] ?? false;
 		$srfm_admin_notification  = isset( $setting_options['srfm_admin_notification'] ) ? (bool) $setting_options['srfm_admin_notification'] : true;
-		$srfm_form_views_tracking = isset( $setting_options['srfm_form_views_tracking'] ) ? (bool) $setting_options['srfm_form_views_tracking'] : true;
+		$srfm_form_views_tracking = isset( $setting_options['srfm_form_views_tracking'] ) ? (bool) $setting_options['srfm_form_views_tracking'] : false;
 
 		$settings = [
 			'srfm_ip_log'              => $srfm_ip_log,
@@ -665,7 +665,7 @@ class Global_Settings {
 					'srfm_ip_log'              => false,
 					'srfm_form_analytics'      => false,
 					'srfm_admin_notification'  => true,
-					'srfm_form_views_tracking' => true,
+					'srfm_form_views_tracking' => false,
 				];
 		}
 
@@ -674,7 +674,7 @@ class Global_Settings {
 		}
 
 		if ( ! isset( $global_setting_options['srfm_general_settings_options']['srfm_form_views_tracking'] ) ) {
-				$global_setting_options['srfm_general_settings_options']['srfm_form_views_tracking'] = true;
+				$global_setting_options['srfm_general_settings_options']['srfm_form_views_tracking'] = false;
 		}
 
 		/**

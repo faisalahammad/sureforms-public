@@ -20,14 +20,21 @@ class Test_Form_Views extends TestCase {
 			$this->markTestSkipped( 'Form_Views class not available.' );
 		}
 
-		$this->views                = Form_Views::get_instance();
-		$_SERVER['REMOTE_ADDR']     = '127.0.0.1';
+		$this->views            = Form_Views::get_instance();
+		$_SERVER['REMOTE_ADDR'] = '127.0.0.1';
 		unset( $_GET['live_mode'] );
 		wp_set_current_user( 0 );
+
+		// Counting is opt-in and gated on this stamp, so an open window is the
+		// precondition for every test about counting. The tests that assert the
+		// never-enabled state delete it themselves first.
+		update_option( Form_Views::TRACKING_STARTED_OPTION, time() - HOUR_IN_SECONDS );
 	}
 
 	protected function tearDown(): void {
 		wp_set_current_user( 0 );
+		delete_option( Form_Views::TRACKING_STARTED_OPTION );
+		delete_option( 'srfm_general_settings_options' );
 		parent::tearDown();
 	}
 
@@ -104,23 +111,53 @@ class Test_Form_Views extends TestCase {
 	// ──────────────────────────────────────────────
 
 	public function test_is_tracking_enabled() {
-		// Default ON when the option/key has never been saved.
+		// Opt-in: absent option, absent key and a corrupted non-array value all deny.
 		delete_option( 'srfm_general_settings_options' );
-		$this->assertTrue( $this->views->is_tracking_enabled(), 'Absent option should default to enabled.' );
+		$this->assertFalse( $this->views->is_tracking_enabled(), 'Absent option must default to disabled.' );
 
-		// Key present but false → disabled.
+		update_option( 'srfm_general_settings_options', [ 'srfm_ip_log' => true ] );
+		$this->assertFalse( $this->views->is_tracking_enabled(), 'Absent key must default to disabled.' );
+
+		update_option( 'srfm_general_settings_options', 'not-an-array' );
+		$this->assertFalse( $this->views->is_tracking_enabled(), 'A corrupted value must deny, not fatal.' );
+
 		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => false ] );
 		$this->assertFalse( $this->views->is_tracking_enabled(), 'Explicit false should hide the columns.' );
-		// The toggle governs display only — counting must continue while the columns are hidden,
-		// so switching them back on reveals the period rather than a gap.
-		wp_set_current_user( 0 );
-		$this->assertTrue( $this->call_private_method( $this->views, 'should_track' ), 'should_track must ignore the display toggle and keep counting.' );
 
-		// Key present and true → enabled.
 		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => true ] );
-		$this->assertTrue( $this->views->is_tracking_enabled(), 'Explicit true should enable tracking.' );
+		$this->assertTrue( $this->views->is_tracking_enabled(), 'Explicit true should show the columns.' );
 
 		delete_option( 'srfm_general_settings_options' );
+	}
+
+	/**
+	 * Counting is gated on the tracking-started stamp, not on the display toggle.
+	 *
+	 * Before the feature has ever been switched on, nothing is counted — a hidden
+	 * column that was quietly accumulating data was never really "off by default".
+	 * Once the window is open, hiding the columns again only hides them, so
+	 * switching back on reveals the period rather than a gap.
+	 */
+	public function test_should_track_follows_the_tracking_window() {
+		wp_set_current_user( 0 );
+		delete_option( 'srfm_general_settings_options' );
+
+		// Never enabled → no stamp → nothing counted.
+		delete_option( Form_Views::TRACKING_STARTED_OPTION );
+		$this->assertFalse( $this->call_private_method( $this->views, 'should_track' ), 'No stamp means counting has not started.' );
+
+		// Enabling writes the stamp, and counting begins.
+		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => true ] );
+		$this->assertGreaterThan( 0, $this->views->get_tracking_started_at(), 'Enabling should open the window.' );
+		$this->assertTrue( $this->call_private_method( $this->views, 'should_track' ), 'Counting should run once the window is open.' );
+
+		// Disabling hides the columns but must NOT stop counting.
+		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => false ] );
+		$this->assertFalse( $this->views->is_tracking_enabled(), 'The columns should be hidden.' );
+		$this->assertTrue( $this->call_private_method( $this->views, 'should_track' ), 'Counting must continue while the columns are hidden.' );
+
+		delete_option( 'srfm_general_settings_options' );
+		delete_option( Form_Views::TRACKING_STARTED_OPTION );
 	}
 
 	// ──────────────────────────────────────────────
@@ -128,21 +165,34 @@ class Test_Form_Views extends TestCase {
 	// ──────────────────────────────────────────────
 
 	public function test_get_tracking_started_at() {
+		delete_option( 'srfm_general_settings_options' );
 		delete_option( Form_Views::TRACKING_STARTED_OPTION );
 
-		$before  = time();
-		$started = $this->views->get_tracking_started_at();
+		// A pure read: asking must never open the window, or a site that never
+		// enabled the feature would start a window just by rendering the list.
+		$this->assertSame( 0, $this->views->get_tracking_started_at(), 'Never enabled must read as 0.' );
+		$this->assertFalse( get_option( Form_Views::TRACKING_STARTED_OPTION ), 'Reading must not write the stamp.' );
+
+		$before = time();
+		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => true ] );
 		$after   = time();
+		$started = $this->views->get_tracking_started_at();
 
-		$this->assertGreaterThanOrEqual( $before, $started, 'First call should stamp the current time.' );
-		$this->assertLessThanOrEqual( $after, $started, 'First call should stamp the current time.' );
+		$this->assertGreaterThanOrEqual( $before, $started, 'Enabling should stamp the current time.' );
+		$this->assertLessThanOrEqual( $after, $started, 'Enabling should stamp the current time.' );
 
-		// Write-once: the stamp must not drift on later calls, or the conversion-rate
-		// window would keep sliding forward and hide entries it already counted.
-		$this->assertSame( $started, $this->views->get_tracking_started_at(), 'Second call must return the stored stamp.' );
-		$this->assertSame( $started, (int) get_option( Form_Views::TRACKING_STARTED_OPTION ), 'Stamp must be persisted.' );
+		// Write-once. An off/on cycle must not move the window, or the stored view
+		// counts would be measured against an entry window shorter than they cover.
+		//
+		// Backdated deliberately: comparing against the stamp written a moment ago
+		// would pass even with update_option(), because both writes land in the same
+		// second. A known-old value is what actually distinguishes the two.
+		update_option( Form_Views::TRACKING_STARTED_OPTION, 1000000000 );
+		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => false ] );
+		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => true ] );
+		$this->assertSame( 1000000000, $this->views->get_tracking_started_at(), 'Re-enabling must not re-stamp an open window.' );
 
-		// Not autoloaded — this is read only on the Forms list screen.
+		// Not autoloaded — this is read on the Forms list screen and by the beacon.
 		global $wpdb;
 		$autoload = $wpdb->get_var(
 			$wpdb->prepare(
@@ -153,11 +203,12 @@ class Test_Form_Views extends TestCase {
 		// WP 6.6+ stores 'off' for an explicit false; older cores store 'no'.
 		$this->assertContains( $autoload, [ 'no', 'off' ], 'Stamp must not be autoloaded on every request.' );
 
-		// An existing stamp is returned verbatim, never re-stamped.
+		// Saving with the toggle off must never open a window.
 		delete_option( Form_Views::TRACKING_STARTED_OPTION );
-		add_option( Form_Views::TRACKING_STARTED_OPTION, 1000000000, '', false );
-		$this->assertSame( 1000000000, $this->views->get_tracking_started_at(), 'Existing stamp must be preserved.' );
+		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => false ] );
+		$this->assertSame( 0, $this->views->get_tracking_started_at(), 'Saving while off must not open the window.' );
 
+		delete_option( 'srfm_general_settings_options' );
 		delete_option( Form_Views::TRACKING_STARTED_OPTION );
 	}
 

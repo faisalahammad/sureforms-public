@@ -351,7 +351,15 @@ class Forms_Data {
 		// claim a real measurement of zero.
 		$conversion_rate = null;
 
-		if ( Form_Views::get_instance()->is_tracking_enabled() ) {
+		$window_start = Form_Views::get_instance()->get_tracking_started_at();
+
+		// A zero stamp means counting never started, so there is nothing to divide by
+		// and no window to measure against. Guarded as well as the display toggle
+		// because the two are written by different paths: the toggle could be forced
+		// on by a direct option write that never ran maybe_start_tracking(), and
+		// gmdate() on a zero timestamp would silently widen the window to 1970 and
+		// count every entry the form has ever had.
+		if ( Form_Views::get_instance()->is_tracking_enabled() && $window_start > 0 ) {
 			$views = Form_Views::get_instance()->get_views( $form_id );
 
 			// Compare like with like. The Entries column is all-time, but views only
@@ -359,11 +367,8 @@ class Forms_Data {
 			// same moment — otherwise a form that existed beforehand divides years of
 			// entries by days of views and reports a rate that is pure noise.
 			//
-			// A form created after the window opened measures from its own creation
-			// instead, so its first days are not diluted by a window it did not exist for.
-			$window_start  = Form_Views::get_instance()->get_tracking_started_at();
-			$form_created  = strtotime( (string) $post->post_date_gmt );
-			$window_start  = $form_created && $form_created > $window_start ? $form_created : $window_start;
+			// No clamp to the form's own creation date: a form cannot have entries
+			// from before it existed, so `created_at >= window` already excludes them.
 			$entries_since = Helper::get_integer_value(
 				Entries::get_total_entries_by_status(
 					'all',

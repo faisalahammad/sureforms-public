@@ -79,42 +79,66 @@ class Form_Views {
 		// do_blocks() pass enqueue srfm-form-submit AFTER wp_enqueue_scripts has run, and
 		// those would otherwise never receive the beacon flag.
 		add_action( 'wp_footer', [ $this, 'localize_beacon' ], 5 );
+
+		// Both hooks: update_option_* does not fire when the option row does not exist
+		// yet, which is exactly the state of a fresh install saving settings for the
+		// first time — the case this stamp exists for.
+		add_action( 'update_option_srfm_general_settings_options', [ $this, 'maybe_start_tracking' ], 10, 2 );
+		add_action( 'add_option_srfm_general_settings_options', [ $this, 'maybe_start_tracking' ], 10, 2 );
 	}
 
 	/**
-	 * Unix time from which views have been counted.
+	 * Unix time from which views have been counted, or 0 if counting never started.
 	 *
-	 * Written once, on first use, and never rewritten. Tracking is on by default, so
-	 * there is no toggle event to hang this on for the majority of installs — the
-	 * window simply opens the first time anything asks for it, which on an upgrade is
-	 * the moment the feature becomes live.
+	 * This is a pure read. The stamp is written by maybe_start_tracking() the first
+	 * time an administrator switches the feature on, and never rewritten — so it is
+	 * also the answer to "has counting ever started", which is what should_track()
+	 * uses. A lazy write here would open the window on any read, including one from
+	 * a site that never enabled the feature.
 	 *
-	 * Never re-stamped. Counting runs regardless of the display toggle, so the stamp
-	 * always matches the period the stored view counts cover; moving it forward would
-	 * measure those views against a shorter entry window.
-	 *
-	 * add_option() rather than update_option() so a concurrent request cannot move a
-	 * window that is already open.
+	 * Never re-stamped on a later toggle. Counting does not stop when the columns are
+	 * hidden, so the stamp always matches the period the stored view counts cover;
+	 * moving it forward would measure those views against a shorter entry window.
 	 *
 	 * @since x.x.x
-	 * @return int Unix timestamp.
+	 * @return int Unix timestamp, or 0 when tracking has never been enabled.
 	 */
 	public function get_tracking_started_at() {
-		$started = Helper::get_integer_value( get_option( self::TRACKING_STARTED_OPTION, 0 ) );
+		return Helper::get_integer_value( get_option( self::TRACKING_STARTED_OPTION, 0 ) );
+	}
 
-		if ( $started > 0 ) {
-			return $started;
+	/**
+	 * Open the counting window the first time the feature is switched on.
+	 *
+	 * Hooked to the General-settings option write rather than to the REST handler, so
+	 * it fires for every route that flips the setting — the settings screen, the
+	 * abilities/MCP update endpoint, or a direct update_option() from WP-CLI.
+	 *
+	 * add_option() rather than update_option(): it only creates the row when absent,
+	 * so two concurrent saves cannot move a window that is already open, and a later
+	 * off/on cycle leaves the original stamp intact. Not autoloaded — it is read on
+	 * the Forms list screen and by the beacon, not on every request.
+	 *
+	 * The new value is read from the SECOND parameter because that is where both
+	 * hooks put it, despite their first parameters differing:
+	 * `do_action( "update_option_{$option}", $old_value, $value, $option )` and
+	 * `do_action( "add_option_{$option}", $option, $value )`. Taking the first
+	 * argument would read the pre-save value on one hook and the option name on
+	 * the other.
+	 *
+	 * @param mixed $unused Previous value on update, option name on add. Unused.
+	 * @param mixed $value  The general settings array being saved.
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function maybe_start_tracking( $unused, $value ) {
+		unset( $unused );
+
+		if ( ! is_array( $value ) || empty( $value[ self::SETTING_KEY ] ) ) {
+			return;
 		}
 
-		$started = time();
-
-		// Only creates the option when it does not already exist, so the first writer
-		// wins and later calls read that value back.
-		if ( ! add_option( self::TRACKING_STARTED_OPTION, $started, '', false ) ) {
-			$started = Helper::get_integer_value( get_option( self::TRACKING_STARTED_OPTION, $started ) );
-		}
-
-		return $started;
+		add_option( self::TRACKING_STARTED_OPTION, time(), '', false );
 	}
 
 	/**
@@ -234,8 +258,9 @@ class Form_Views {
 	 * regardless, so switching the columns back on reveals the period they were
 	 * hidden for rather than a gap. See should_track().
 	 *
-	 * Defaults to true when the setting has never been saved, so existing installs
-	 * get the columns without an explicit opt-in.
+	 * Off until switched on. Deny is the fallthrough: a missing option, a corrupted
+	 * non-array value, and an absent key all return false, so the columns only ever
+	 * appear after a deliberate opt-in.
 	 *
 	 * @since x.x.x
 	 * @return bool
@@ -244,7 +269,7 @@ class Form_Views {
 		$general = get_option( 'srfm_general_settings_options', [] );
 
 		if ( ! is_array( $general ) || ! isset( $general[ self::SETTING_KEY ] ) ) {
-			return true;
+			return false;
 		}
 
 		return (bool) $general[ self::SETTING_KEY ];
@@ -256,15 +281,24 @@ class Form_Views {
 	 * Excludes logged-in users who can edit content (author/editor/admin) and
 	 * form-builder / Instant Form live previews.
 	 *
-	 * Deliberately does not consult the General-settings toggle: that setting governs
-	 * whether the Views and Conversion Rate columns are shown, not whether counting
-	 * happens. Counting continues in the background so switching the columns back on
-	 * reveals the period they were hidden for, rather than a gap.
+	 * Gated on the tracking-started stamp, not on the display toggle. The stamp is
+	 * written once, when the feature is first switched on, so:
+	 *
+	 * - a site that has never enabled it counts nothing, which is what "off by
+	 *   default" has to mean for a counter — a hidden column that was silently
+	 *   accumulating data was never really off;
+	 * - once opened, the window stays open. Hiding the columns again only hides
+	 *   them, so switching back on reveals the period rather than a gap, and the
+	 *   stored counts always cover exactly the period the stamp claims.
 	 *
 	 * @since x.x.x
 	 * @return bool
 	 */
 	private function should_track() {
+		if ( $this->get_tracking_started_at() <= 0 ) {
+			return false;
+		}
+
 		if ( is_user_logged_in() && current_user_can( 'edit_posts' ) ) {
 			return false;
 		}
