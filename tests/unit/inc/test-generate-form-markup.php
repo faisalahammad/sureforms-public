@@ -102,10 +102,6 @@ class Test_Generate_Form_Markup extends TestCase {
 		$this->assertNotFalse( $form_pos, 'The form element should be present.' );
 		$this->assertLessThan( $form_pos, $pill_pos, 'The pill must render before the <form>, not overlaid on it.' );
 
-		// ...and the stylesheet must not put it back into an overlay.
-		$css = $this->call_private_static( Generate_Form_Markup::class, 'get_edit_form_button_css' );
-		$this->assertStringNotContainsString( 'position: absolute', $css, 'The pill must not be absolutely positioned over the form.' );
-
 		// The link carries the attribution marker that Admin reads back on load-post.php.
 		$this->assertStringContainsString( Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG . '=embed', html_entity_decode( $markup ), 'The edit link should carry the analytics source marker.' );
 
@@ -123,6 +119,30 @@ class Test_Generate_Form_Markup extends TestCase {
 		wp_delete_user( $admin );
 		wp_delete_post( $form_id, true );
 		wp_delete_post( $form_id2, true );
+	}
+
+	/**
+	 * The pill's stylesheet must keep it in normal flow.
+	 *
+	 * This is the half of the overlap fix (#3062) that DOM order alone cannot
+	 * guarantee: rendering above the form is pointless if the CSS lifts the pill
+	 * back out of flow and drops it onto the first row of fields. The container's
+	 * `position: relative` rule goes with it — it existed only to anchor the old
+	 * overlay, so leaving it behind would be dead CSS shipped to every page with
+	 * an embedded form.
+	 */
+	public function test_get_edit_form_button_css() {
+		$css = $this->call_private_static( Generate_Form_Markup::class, 'get_edit_form_button_css' );
+
+		$this->assertStringNotContainsString( 'position: absolute', $css, 'The pill must not be absolutely positioned over the form.' );
+		$this->assertStringNotContainsString( 'position: relative', $css, 'The container no longer needs a positioning context.' );
+		$this->assertStringContainsString( '.srfm-edit-form-btn-wrap', $css, 'The flow-level wrapper must be styled.' );
+		$this->assertStringContainsString( 'justify-content: flex-end', $css, 'The pill should sit at the inline end of its own row.' );
+
+		// Logical, not physical — the row has to read correctly in RTL without a
+		// second rule, which is why the old build used inset-inline-end.
+		$this->assertStringNotContainsString( 'margin-bottom', $css, 'Spacing should use the logical margin-block-end.' );
+		$this->assertStringContainsString( 'margin-block-end', $css );
 	}
 
 	public function test_add_entries_admin_bar_node() {
