@@ -212,6 +212,49 @@ class Test_Form_Views extends TestCase {
 		delete_option( Form_Views::TRACKING_STARTED_OPTION );
 	}
 
+	/**
+	 * The stamp writer, called directly with each hook's argument shape.
+	 *
+	 * The other tests drive this through update_option(), which only ever exercises
+	 * the `update_option_*` shape. This pins the contract that makes both hooks
+	 * work: the new value is the SECOND parameter in both, even though their first
+	 * parameters differ —
+	 * `do_action( "update_option_{$option}", $old_value, $value, $option )` versus
+	 * `do_action( "add_option_{$option}", $option, $value )`. An implementation that
+	 * read the first argument would stamp off the previous value on one hook and off
+	 * the option name on the other, and the add_option case is the fresh install
+	 * this whole mechanism exists for.
+	 */
+	public function test_maybe_start_tracking() {
+		$enabled  = [ 'srfm_form_views_tracking' => true ];
+		$disabled = [ 'srfm_form_views_tracking' => false ];
+
+		// update_option_* shape: ( $old_value, $value ).
+		delete_option( Form_Views::TRACKING_STARTED_OPTION );
+		$this->views->maybe_start_tracking( $disabled, $enabled );
+		$this->assertGreaterThan( 0, $this->views->get_tracking_started_at(), 'The update_option_* shape should stamp.' );
+
+		// add_option_* shape: ( $option_name, $value ) — a string first argument.
+		delete_option( Form_Views::TRACKING_STARTED_OPTION );
+		$this->views->maybe_start_tracking( 'srfm_general_settings_options', $enabled );
+		$this->assertGreaterThan( 0, $this->views->get_tracking_started_at(), 'The add_option_* shape should stamp.' );
+
+		// Write-once: an already-open window is never moved.
+		update_option( Form_Views::TRACKING_STARTED_OPTION, 1000000000 );
+		$this->views->maybe_start_tracking( $disabled, $enabled );
+		$this->assertSame( 1000000000, $this->views->get_tracking_started_at(), 'An open window must not be moved.' );
+
+		// Everything else denies without an explicit branch: toggle off, key absent,
+		// empty array, and a corrupted non-array value.
+		foreach ( [ $disabled, [ 'srfm_ip_log' => true ], [], 'not-an-array', null ] as $value ) {
+			delete_option( Form_Views::TRACKING_STARTED_OPTION );
+			$this->views->maybe_start_tracking( null, $value );
+			$this->assertSame( 0, $this->views->get_tracking_started_at(), 'Only an enabled toggle may open the window.' );
+		}
+
+		delete_option( Form_Views::TRACKING_STARTED_OPTION );
+	}
+
 	// ──────────────────────────────────────────────
 	// permissions_check (HMAC token)
 	// ──────────────────────────────────────────────
