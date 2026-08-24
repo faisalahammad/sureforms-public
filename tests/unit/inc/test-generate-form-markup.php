@@ -90,14 +90,30 @@ class Test_Generate_Form_Markup extends TestCase {
 		$admin  = $this->set_current_user_with_role( 'administrator' );
 		$markup = Generate_Form_Markup::get_form_markup( $form_id );
 		$this->assertStringContainsString( 'class="srfm-edit-form-btn"', $markup );
-		$this->assertStringContainsString( 'href="' . esc_url( get_edit_post_link( $form_id ) ) . '"', $markup );
+		$this->assertStringContainsString( 'post=' . $form_id, $markup );
 		$this->assertTrue( wp_style_is( 'srfm-edit-form-btn', 'enqueued' ), 'The Edit Form stylesheet should be enqueued.' );
+
+		// The pill sits in normal flow ABOVE the form, which is what stops it
+		// overlapping a field (#3062). DOM order is the guarantee — an overlay only
+		// clears the fields when the container happens to have enough top padding.
+		$pill_pos = strpos( $markup, 'srfm-edit-form-btn-wrap' );
+		$form_pos = strpos( $markup, '<form ' );
+		$this->assertNotFalse( $pill_pos, 'The pill should be wrapped in its flow-level row.' );
+		$this->assertNotFalse( $form_pos, 'The form element should be present.' );
+		$this->assertLessThan( $form_pos, $pill_pos, 'The pill must render before the <form>, not overlaid on it.' );
+
+		// ...and the stylesheet must not put it back into an overlay.
+		$css = $this->call_private_static( Generate_Form_Markup::class, 'get_edit_form_button_css' );
+		$this->assertStringNotContainsString( 'position: absolute', $css, 'The pill must not be absolutely positioned over the form.' );
+
+		// The link carries the attribution marker that Admin reads back on load-post.php.
+		$this->assertStringContainsString( Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG . '=embed', html_entity_decode( $markup ), 'The edit link should carry the analytics source marker.' );
 
 		// A second form links to its OWN editor, not the first — the multiple-forms
 		// acceptance criterion, and a guard against passing the wrong post ID.
 		$markup2 = Generate_Form_Markup::get_form_markup( $form_id2 );
-		$this->assertStringContainsString( 'href="' . esc_url( get_edit_post_link( $form_id2 ) ) . '"', $markup2 );
-		$this->assertStringNotContainsString( 'href="' . esc_url( get_edit_post_link( $form_id ) ) . '"', $markup2 );
+		$this->assertStringContainsString( 'post=' . $form_id2, $markup2 );
+		$this->assertStringNotContainsString( 'post=' . $form_id . '&', html_entity_decode( $markup2 ) );
 
 		// A suppression filter removes it even for an administrator.
 		add_filter( 'srfm_show_edit_form_button', '__return_false' );
@@ -274,6 +290,19 @@ class Test_Generate_Form_Markup extends TestCase {
 			}
 		}
 		$this->assertTrue( $found, 'The generate-form-markup endpoint should be registered' );
+	}
+
+	/**
+	 * Invoke a private static method.
+	 *
+	 * @param string $class_name  Fully-qualified class name.
+	 * @param string $method_name Method to invoke.
+	 * @return mixed
+	 */
+	private function call_private_static( $class_name, $method_name ) {
+		$method = new ReflectionMethod( $class_name, $method_name );
+		$method->setAccessible( true );
+		return $method->invoke( null );
 	}
 
 	/**

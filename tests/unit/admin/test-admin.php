@@ -513,6 +513,111 @@ class Test_Admin extends TestCase {
 		$after = (int) Helper::get_srfm_option( 'ai_dashboard_widget_uses', 0 );
 		$this->assertSame( $before + 1, $after, 'Usage tracking must increment the ai_dashboard_widget_uses counter.' );
 	}
+
+	/**
+	 * The front-end "Edit Form" pill is attributed by a marker query arg rather
+	 * than a click handler, so the counter must only move when the editor is
+	 * genuinely opened from that pill, by someone allowed to edit that form.
+	 *
+	 * Every rejection path is asserted, because each one is a way the counter
+	 * could be inflated by a crafted URL: no marker, a marker with the wrong
+	 * value, a marker pointed at a post that is not a SureForms form, and a user
+	 * without the capability. The counter is read back from the stored option, so
+	 * a guard that silently stops incrementing also fails here.
+	 */
+	public function test_maybe_track_edit_form_button_click() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+
+		$admin = Admin::get_instance();
+		$arg   = \SRFM\Inc\Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG;
+
+		$form_id = wp_insert_post(
+			[
+				'post_title'  => 'Pill Analytics Form',
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_status' => 'publish',
+			]
+		);
+		$page_id = wp_insert_post(
+			[
+				'post_title'  => 'Not A Form',
+				'post_type'   => 'post',
+				'post_status' => 'publish',
+			]
+		);
+
+		$administrator = wp_insert_user(
+			[
+				'user_login' => 'srfm_pill_admin_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_pill_admin_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		$subscriber    = wp_insert_user(
+			[
+				'user_login' => 'srfm_pill_sub_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_pill_sub_' . wp_rand() . '@example.com',
+				'role'       => 'subscriber',
+			]
+		);
+
+		$count = static function () {
+			return Helper::get_integer_value( Helper::get_srfm_option( 'edit_form_button_clicks', 0 ) );
+		};
+
+		Helper::update_srfm_option( 'edit_form_button_clicks', 0 );
+		wp_set_current_user( is_wp_error( $administrator ) ? 0 : (int) $administrator );
+
+		// No marker at all — an ordinary editor visit must not be counted.
+		$_GET = [ 'post' => $form_id ];
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 0, $count(), 'An editor visit without the marker must not be counted.' );
+
+		// Marker present but not the value we emit.
+		$_GET = [ 'post' => $form_id, $arg => 'somewhere-else' ];
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 0, $count(), 'An unrecognised marker value must not be counted.' );
+
+		// Marker reused against a post that is not a SureForms form.
+		$_GET = [ 'post' => $page_id, $arg => 'embed' ];
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 0, $count(), 'A non-form post must not be counted.' );
+
+		// Marker with no post at all.
+		$_GET = [ $arg => 'embed' ];
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 0, $count(), 'A missing post ID must not be counted.' );
+
+		// The real path: administrator opening this form from the pill.
+		$_GET = [ 'post' => $form_id, $arg => 'embed' ];
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 1, $count(), 'A genuine pill click should be counted.' );
+
+		// Cumulative, not one-time — a second visit counts again.
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 2, $count(), 'The counter should be cumulative.' );
+
+		// A user who cannot edit the form gets nothing, marker or not.
+		wp_set_current_user( is_wp_error( $subscriber ) ? 0 : (int) $subscriber );
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 2, $count(), 'A user without edit_post must not be counted.' );
+
+		$_GET = [];
+		wp_set_current_user( 0 );
+		Helper::update_srfm_option( 'edit_form_button_clicks', 0 );
+		wp_delete_post( $form_id, true );
+		wp_delete_post( $page_id, true );
+		if ( ! is_wp_error( $administrator ) ) {
+			wp_delete_user( (int) $administrator );
+		}
+		if ( ! is_wp_error( $subscriber ) ) {
+			wp_delete_user( (int) $subscriber );
+		}
+	}
 }
 
 /**
@@ -1580,4 +1685,5 @@ class Test_Thankyou_Prompt_Notice extends TestCase {
 		wp_dequeue_script( 'srfm-thankyou-notice-track' );
 		wp_deregister_script( 'srfm-thankyou-notice-track' );
 	}
+
 }

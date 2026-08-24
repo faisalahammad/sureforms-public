@@ -10,6 +10,7 @@ namespace SRFM\Admin;
 use Astra_Notices;
 use SRFM\Inc\AI_Form_Builder\AI_Helper;
 use SRFM\Inc\Database\Tables\Entries;
+use SRFM\Inc\Generate_Form_Markup;
 use SRFM\Inc\Global_Settings\Global_Settings;
 use SRFM\Inc\Helper;
 use SRFM\Inc\Onboarding;
@@ -181,6 +182,7 @@ class Admin {
 		add_action( 'wp_ajax_sureforms_accept_cta', [ $this, 'pointer_accepted_cta' ] );
 		add_action( 'wp_ajax_srfm_notice_response', [ $this, 'handle_notice_response' ] );
 		add_action( 'wp_ajax_srfm_ai_widget_usage', [ $this, 'track_ai_widget_usage' ] );
+		add_action( 'load-post.php', [ $this, 'maybe_track_edit_form_button_click' ] );
 
 		// Register dashboard widget only if there are recent entries.
 		add_action( 'admin_init', [ $this, 'maybe_register_dashboard_widget' ] );
@@ -2825,6 +2827,59 @@ JS;
 JS;
 
 		wp_add_inline_script( 'srfm-ai-dashboard-widget', $inline_script );
+	}
+
+	/**
+	 * Count an editor visit that came from the front-end "Edit Form" pill.
+	 *
+	 * The pill is a plain link, so the click is attributed by the marker query arg
+	 * it carries rather than by a front-end click handler. That keeps the front end
+	 * script-free and adds no AJAX endpoint: the only thing on the page is still an
+	 * anchor. It also measures the outcome that matters — the editor actually
+	 * opening — instead of a click that may never land.
+	 *
+	 * Every decision here comes from server state. The query arg selects the code
+	 * path; what gets counted is derived from the resolved post and the current
+	 * user's capability on it. An absent, empty, misspelled or reused arg, a post
+	 * that is not a SureForms form, and a user without `edit_post` on that form all
+	 * fall through to no-op without an explicit branch.
+	 *
+	 * No nonce, deliberately: the pill is rendered into front-end HTML that may be
+	 * page-cached, so a nonce would either be baked into the cache or be stale on
+	 * arrival. Nothing here is worth protecting with one — the effect is a private
+	 * usage counter for a user who can already edit the form, so the worst a forged
+	 * link achieves is inflating our own telemetry by one.
+	 *
+	 * @return void
+	 * @since x.x.x
+	 */
+	public function maybe_track_edit_form_button_click() {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only attribution marker; see docblock for why a nonce is neither possible nor needed.
+		$source = isset( $_GET[ Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG ] ) ? sanitize_key( wp_unslash( $_GET[ Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG ] ) ) : '';
+
+		if ( 'embed' !== $source ) {
+			return;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Same read-only path as above.
+		$post_id = isset( $_GET['post'] ) ? absint( wp_unslash( $_GET['post'] ) ) : 0;
+
+		// Resolve the post type from the stored post, never from the request, and
+		// confirm the visitor may edit that specific form before counting anything.
+		if ( 0 === $post_id || SRFM_FORMS_POST_TYPE !== get_post_type( $post_id ) ) {
+			return;
+		}
+
+		if ( ! current_user_can( 'edit_post', $post_id ) ) {
+			return;
+		}
+
+		$count = Helper::get_integer_value( Helper::get_srfm_option( 'edit_form_button_clicks', 0 ) ) + 1;
+		Helper::update_srfm_option( 'edit_form_button_clicks', $count );
+
+		// $force = true because this is a cumulative counter, not a one-time event —
+		// it must re-send the latest count each cycle (bypasses one-time dedup).
+		Analytics::events()->track( 'edit_form_button_clicked', (string) $count, [], true );
 	}
 
 	/**
