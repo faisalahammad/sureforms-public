@@ -4,7 +4,7 @@
 **Requires at least:** 6.4  
 **Tested up to:** 7.1  
 **Requires PHP:** 7.4  
-**Stable tag:** 2.12.4  
+**Stable tag:** 2.12.5  
 **License:** GPLv2 or later  
 **License URI:** http://www.gnu.org/licenses/gpl-2.0.html  
 
@@ -426,6 +426,8 @@ Visit the [SureForms features page](https://sureforms.com/features/?utm_source=w
 You can report security issues through our [Bug Bounty Program](https://brainstormforce.com/bug-bounty-program/). We collaborate with Patchstack to validate, triage, and handle security reports.
 
 ## Changelog ##
+### 2.12.5 - 25th August 2026 ###
+* Fix: Form submissions no longer fail on sites where a performance plugin combines or defers JavaScript.
 ### 2.12.4 - 19th August 2026 ###
 * Improvement: Email notification images are now saved to the Media Library instead of being embedded as base64, improving email deliverability and reducing message size.
 * Fix: Compatibility with WordPress 7.1.
@@ -440,9 +442,6 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 * Fix: Payment History styles load only on required pages.
 * Fix: Removed the entries "Language" column. Sorting or filtering entries by language is no longer available, including via the entries API.
 * Fix: The number field no longer looks misaligned when "Use label as placeholder" is on.
-### 2.12.2 - 20th July 2026 ###
-* New: Added a Payment History widget for Elementor and Bricks.
-* Fix: Custom CSS now applies correctly on the single form view.
 The full changelog is available [here](https://sureforms.com/whats-new/?utm_source=wordpress.org&utm_medium=whats_new).
 
 ## Upgrade Notice ##
