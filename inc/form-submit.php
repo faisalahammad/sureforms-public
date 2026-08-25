@@ -672,6 +672,8 @@ class Form_Submit {
 				$provider->restore_language();
 			}
 
+			$after_submit_nonce = wp_create_nonce( 'srfm_after_submission_' . Helper::get_string_value( $entry_id ) );
+
 			$response = [
 				'success'      => true,
 				'message'      => $confirmation_message,
@@ -679,7 +681,18 @@ class Form_Submit {
 					'name'               => $name,
 					'submission_id'      => $entry_id,
 					'after_submit'       => true,
-					'after_submit_nonce' => wp_create_nonce( 'srfm_after_submission_' . Helper::get_string_value( $entry_id ) ),
+					'after_submit_nonce' => $after_submit_nonce,
+					// Built here rather than assembled in JS. rest_url() already knows
+					// whether the route is a path or a `?rest_route=` query arg, and
+					// add_query_arg() knows whether the nonce needs `?` or `&` — the
+					// client has no way to get either right without reimplementing
+					// both, and concatenating produced a URL that did not route at all
+					// on plain-permalink sites.
+					'after_submit_url'   => add_query_arg(
+						'after_submit_nonce',
+						$after_submit_nonce,
+						rest_url( 'sureforms/v1/after-submission/' . Helper::get_integer_value( $entry_id ) )
+					),
 				],
 				'redirect_url' => $redirect_url,
 			];

@@ -463,70 +463,20 @@ async function submitFormData( form ) {
 	}
 }
 
-/**
- * Build the after-submission REST URL for one submission.
- *
- * Two URL shapes have to be handled, because `rest_url()` emits a different one
- * depending on the site's permalink settings:
- *
- * - pretty permalinks → `https://site/wp-json/sureforms/v1/after-submission`
- *   the submission id belongs on the path.
- * - plain permalinks  → `https://site/index.php?rest_route=/sureforms/v1/after-submission`
- *   the route is a *query parameter*, so the submission id belongs inside that
- *   parameter's value, and a second `?` would not start a new parameter at all —
- *   only the first `?` in a URL delimits the query string. Appending
- *   `/123?after_submit_nonce=…` produced
- *   `rest_route=/sureforms/v1/after-submission/123?after_submit_nonce=…`,
- *   so the nonce never arrived as its own parameter. handle_after_submission()
- *   hard-verifies that nonce, so it bailed and `srfm_after_submission_process`
- *   never fired — silently disabling every native integration on those sites.
- *
- * Using URL/URLSearchParams also means the nonce is encoded once, by the API,
- * rather than by hand.
- *
- * @param {string}        baseUrl      Localized REST base for the route.
- * @param {number|string} submissionId Entry ID the process is for.
- * @param {string}        nonce        after_submit_nonce for this submission.
- * @return {string} An absolute URL safe for both permalink styles.
- */
-function buildAfterSubmitUrl( baseUrl, submissionId, nonce ) {
-	const url = new URL( baseUrl, window.location.origin );
-	const restRoute = url.searchParams.get( 'rest_route' );
-
-	if ( restRoute ) {
-		// Plain permalinks: the route lives in the query, so extend its value.
-		url.searchParams.set(
-			'rest_route',
-			`${ restRoute.replace( /\/$/, '' ) }/${ submissionId }`
-		);
-	} else {
-		// Pretty permalinks: the route is the path.
-		url.pathname = `${ url.pathname.replace( /\/$/, '' ) }/${ submissionId }`;
-	}
-
-	url.searchParams.set( 'after_submit_nonce', nonce );
-
-	return url.toString();
-}
-
 async function afterSubmit( formStatus ) {
-	const submissionId = formStatus.data.submission_id;
-	const afterSubmitNonce = formStatus.data.after_submit_nonce;
-	const afterSubmitBaseUrl = window.srfm_submit?.after_submit_url;
+	// Supplied by the server, already carrying the submission id and nonce.
+	// Assembling it here meant reimplementing two things WordPress already does:
+	// rest_url() knows whether the route is a path or a `?rest_route=` query arg,
+	// and add_query_arg() knows whether the nonce needs `?` or `&`. Concatenation
+	// got both wrong on plain-permalink sites and the request never routed.
+	const afterSubmitUrl = formStatus?.data?.after_submit_url;
 
-	if ( ! afterSubmitBaseUrl ) {
+	if ( ! afterSubmitUrl ) {
 		return;
 	}
 
 	try {
-		const response = await fetch(
-			buildAfterSubmitUrl(
-				afterSubmitBaseUrl,
-				submissionId,
-				afterSubmitNonce
-			),
-			{ method: 'GET' }
-		);
+		const response = await fetch( afterSubmitUrl, { method: 'GET' } );
 		await parseRestResponse( response );
 	} catch ( error ) {
 		console.error( error );
