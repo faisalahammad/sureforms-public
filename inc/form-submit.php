@@ -629,9 +629,13 @@ class Form_Submit {
 			'submission_info' => $submission_info,
 			'created_at'      => current_time( 'mysql' ),
 		];
-		if ( is_user_logged_in() ) {
-			// If user is logged in then save their user id.
-			$entries_data['user_id'] = get_current_user_id();
+		// Resolved via Helper rather than get_current_user_id() directly: this runs on
+		// a REST request that carries no nonce, which core de-authenticates before
+		// dispatch, so the plain call returns 0 even for a signed-in submitter and the
+		// entry would lose its attribution. Returns 0 when genuinely anonymous.
+		$submitting_user_id = Helper::get_submitting_user_id();
+		if ( $submitting_user_id ) {
+			$entries_data['user_id'] = $submitting_user_id;
 		}
 
 		$entries_data = apply_filters(

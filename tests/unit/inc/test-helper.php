@@ -3063,4 +3063,63 @@ class Test_Helper extends TestCase {
 		$this->assertStringContainsString( 'class="srfm-icon"', $unknown );
 		$this->assertStringNotContainsString( '<svg', $unknown );
 	}
+
+	/**
+	 * The submitting user must survive REST's nonce-less de-authentication.
+	 *
+	 * Public form endpoints authenticate with the HMAC Submit_Token rather than a
+	 * nonce, so `rest_cookie_check_errors()` calls `wp_set_current_user( 0 )` before
+	 * dispatch. `get_current_user_id()` therefore returns 0 mid-submission even for a
+	 * signed-in visitor, which silently dropped entry attribution and blanked every
+	 * `{user_*}` smart tag. This asserts the cookie fallback recovers the identity,
+	 * and — just as importantly — that it cannot be spoofed.
+	 */
+	public function test_get_submitting_user_id() {
+		$user_id = wp_insert_user(
+			[
+				'user_login' => 'srfm_attr_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_attr_' . wp_rand() . '@example.com',
+				'role'       => 'subscriber',
+			]
+		);
+		$user_id = is_wp_error( $user_id ) ? 0 : (int) $user_id;
+		$this->assertGreaterThan( 0, $user_id, 'Test user could not be created.' );
+
+		$original_cookie = $_COOKIE[ LOGGED_IN_COOKIE ] ?? null;
+
+		// Normal (non-REST) context: the current user is authoritative.
+		wp_set_current_user( $user_id );
+		unset( $_COOKIE[ LOGGED_IN_COOKIE ] );
+		$this->assertSame( $user_id, Helper::get_submitting_user_id(), 'A set current user should be returned as-is.' );
+
+		// Genuinely anonymous: no current user, no cookie.
+		wp_set_current_user( 0 );
+		$this->assertSame( 0, Helper::get_submitting_user_id(), 'An anonymous submitter must resolve to 0.' );
+
+		// The real case: core reset the current user to 0, but the browser still sent
+		// a valid logged_in cookie.
+		$expiration = time() + DAY_IN_SECONDS;
+		$manager    = \WP_Session_Tokens::get_instance( $user_id );
+		$cookie     = wp_generate_auth_cookie( $user_id, $expiration, 'logged_in', $manager->create( $expiration ) );
+
+		$_COOKIE[ LOGGED_IN_COOKIE ] = $cookie;
+		wp_set_current_user( 0 );
+		$this->assertSame( $user_id, Helper::get_submitting_user_id(), 'A valid logged_in cookie must recover the user.' );
+
+		// Not spoofable: the cookie's HMAC is verified, so a tampered value is nobody.
+		$_COOKIE[ LOGGED_IN_COOKIE ] = $cookie . 'tampered';
+		$this->assertSame( 0, Helper::get_submitting_user_id(), 'A tampered cookie must not authenticate anyone.' );
+
+		$_COOKIE[ LOGGED_IN_COOKIE ] = 'not-a-cookie-at-all';
+		$this->assertSame( 0, Helper::get_submitting_user_id(), 'A malformed cookie must resolve to 0, not error.' );
+
+		if ( null === $original_cookie ) {
+			unset( $_COOKIE[ LOGGED_IN_COOKIE ] );
+		} else {
+			$_COOKIE[ LOGGED_IN_COOKIE ] = $original_cookie;
+		}
+		wp_set_current_user( 0 );
+		wp_delete_user( $user_id );
+	}
 }
