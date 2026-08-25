@@ -629,9 +629,13 @@ class Form_Submit {
 			'submission_info' => $submission_info,
 			'created_at'      => current_time( 'mysql' ),
 		];
-		if ( is_user_logged_in() ) {
-			// If user is logged in then save their user id.
-			$entries_data['user_id'] = get_current_user_id();
+		// Resolved via Helper rather than get_current_user_id() directly: this runs on
+		// a REST request that carries no nonce, which core de-authenticates before
+		// dispatch, so the plain call returns 0 even for a signed-in submitter and the
+		// entry would lose its attribution. Returns 0 when genuinely anonymous.
+		$submitting_user_id = Helper::get_submitting_user_id();
+		if ( $submitting_user_id ) {
+			$entries_data['user_id'] = $submitting_user_id;
 		}
 
 		$entries_data = apply_filters(
@@ -672,6 +676,8 @@ class Form_Submit {
 				$provider->restore_language();
 			}
 
+			$after_submit_nonce = wp_create_nonce( 'srfm_after_submission_' . Helper::get_string_value( $entry_id ) );
+
 			$response = [
 				'success'      => true,
 				'message'      => $confirmation_message,
@@ -679,7 +685,18 @@ class Form_Submit {
 					'name'               => $name,
 					'submission_id'      => $entry_id,
 					'after_submit'       => true,
-					'after_submit_nonce' => wp_create_nonce( 'srfm_after_submission_' . Helper::get_string_value( $entry_id ) ),
+					'after_submit_nonce' => $after_submit_nonce,
+					// Built here rather than assembled in JS. rest_url() already knows
+					// whether the route is a path or a `?rest_route=` query arg, and
+					// add_query_arg() knows whether the nonce needs `?` or `&` — the
+					// client has no way to get either right without reimplementing
+					// both, and concatenating produced a URL that did not route at all
+					// on plain-permalink sites.
+					'after_submit_url'   => add_query_arg(
+						'after_submit_nonce',
+						$after_submit_nonce,
+						rest_url( 'sureforms/v1/after-submission/' . Helper::get_integer_value( $entry_id ) )
+					),
 				],
 				'redirect_url' => $redirect_url,
 			];

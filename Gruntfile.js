@@ -287,12 +287,19 @@ module.exports = function ( grunt ) {
 				// `assets/js/unminified`, so `assets/js/*.js` goes to wordpress.org.
 				// Both are therefore in scope deliberately; narrowing to `src` would
 				// leave placeholders in the shipped ZIP.
+				//
+				// SCSS is swept too — `sass/` is the source of truth for styles, and
+				// an unswept placeholder there is recompiled into the shipped CSS on
+				// the next build. Compiled CSS is deliberately NOT globbed: those files
+				// are minified single-liners carrying a UTF-8 BOM, and this task
+				// rewrites without it, so globbing them churns shipped bytes for no gain.
 				src: [
 					'*.php',
 					'**/*.php',
 					'src/**/*.js',
 					'inc/**/*.js',
 					'assets/js/**/*.js',
+					'sass/**/*.scss',
 					'!node_modules/**',
 					'!php-tests/**',
 					'!bin/**',
