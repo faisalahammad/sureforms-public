@@ -269,7 +269,69 @@ function prepareAddressesData( form ) {
 	return Object.keys( addresses ).length > 0 ? addresses : null;
 }
 
+/**
+ * Parse a fetch() Response into the shape the rest of this file expects.
+ *
+ * SureForms used to call `wp.apiFetch()` for the two REST requests this file
+ * makes. That global only exists once a second script, `wp-api-fetch`, has
+ * loaded and executed — and JS-combining/deferring "optimizer" plugins can
+ * drop or reorder that dependency while still shipping this file, silently
+ * breaking every submission with an opaque TypeError. Neither request this
+ * file makes actually needs anything `wp.apiFetch` provides beyond URL
+ * resolution (see the `submit_form_url` / `after_submit_url` comment in
+ * frontend-assets.php): submit-form is authenticated by the `X-WP-Submit-Token`
+ * header, not a nonce, and after-submission takes its nonce as an explicit
+ * query argument. So a plain fetch() against the PHP-resolved REST URL is a
+ * strict simplification, not a re-implementation — and native fetch() has no
+ * script dependency of its own for an optimizer to drop.
+ *
+ * Mirrors wp.apiFetch's own contract: application-level failures (e.g. "form
+ * full", a failed CAPTCHA) come back as an HTTP 200 with `success: false` in
+ * the body and must be returned as-is for the caller's existing branch to
+ * handle; only a non-2xx status (e.g. the 403 an invalid submit token gets)
+ * is treated as a rejection, thrown as the parsed WP_Error body itself
+ * (`{ code, message, data }`) so callers can read `e.message` / `e.code`
+ * exactly as they could from a rejected wp.apiFetch() call.
+ *
+ * @param {Response} response A fetch() Response.
+ * @return {Promise<Object|null>} The parsed JSON body.
+ * @throws {Object|Error} The parsed error body on a non-2xx response, or the
+ *                         original Error if the body wasn't valid JSON.
+ */
+async function parseRestResponse( response ) {
+	let body = null;
+	try {
+		body = await response.json();
+	} catch ( parseError ) {
+		if ( response.ok ) {
+			return null;
+		}
+		throw parseError;
+	}
+
+	if ( ! response.ok ) {
+		throw body;
+	}
+
+	return body;
+}
+
 async function submitFormData( form ) {
+	const submitFormUrl = window.srfm_submit?.submit_form_url;
+	if ( ! submitFormUrl ) {
+		return {
+			success: false,
+			data: {
+				message: __(
+					'This form could not be submitted. Please refresh the page and try again.',
+					'sureforms'
+				),
+				log_message:
+					'SureForms: srfm_submit.submit_form_url is unavailable, so the submission was never sent.',
+			},
+		};
+	}
+
 	const formData = new FormData( form );
 	const filteredFormData = new FormData();
 	const submitToken = form.getAttribute( 'data-submit-token' );
@@ -370,31 +432,54 @@ async function submitFormData( form ) {
 	} );
 
 	try {
-		return await wp.apiFetch( {
-			path: 'sureforms/v1/submit-form',
+		const response = await fetch( submitFormUrl, {
 			method: 'POST',
 			body: filteredFormData,
 			headers: {
 				'X-WP-Submit-Token': submitToken,
 			},
 		} );
+		return await parseRestResponse( response );
 	} catch ( e ) {
 		// Intentional: Log form submission errors to aid debugging in production.
 		console.error( e );
+
+		/**
+		 * Surface the server's own message (e.g. an expired submission token, a
+		 * failed CAPTCHA, a REST route blocked by a firewall) instead of returning
+		 * undefined and letting the caller fall through to the generic error.
+		 * `message` is left empty when the failure carries no readable reason, in
+		 * which case the generic string is still used as the final fallback.
+		 */
+		return {
+			success: false,
+			data: {
+				message: typeof e?.message === 'string' ? e.message : '',
+				log_message: e?.code
+					? `SureForms submission failed (${ e.code }).`
+					: null,
+			},
+		};
 	}
 }
 
 async function afterSubmit( formStatus ) {
 	const submissionId = formStatus.data.submission_id;
 	const afterSubmitNonce = formStatus.data.after_submit_nonce;
+	const afterSubmitBaseUrl = window.srfm_submit?.after_submit_url;
+
+	if ( ! afterSubmitBaseUrl ) {
+		return;
+	}
 
 	try {
-		await wp.apiFetch( {
-			path: `/sureforms/v1/after-submission/${ submissionId }?after_submit_nonce=${ encodeURIComponent(
+		const response = await fetch(
+			`${ afterSubmitBaseUrl }/${ submissionId }?after_submit_nonce=${ encodeURIComponent(
 				afterSubmitNonce
 			) }`,
-			method: 'GET',
-		} );
+			{ method: 'GET' }
+		);
+		await parseRestResponse( response );
 	} catch ( error ) {
 		console.error( error );
 	}
