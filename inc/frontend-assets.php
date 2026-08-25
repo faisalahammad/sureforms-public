@@ -106,10 +106,25 @@ class Frontend_Assets {
 		// Scripts.
 		foreach ( self::$js_assets as $handle => $name ) {
 			if ( 'form-submit' === $handle ) {
+				// No 'wp-api-fetch' dependency: the script talks to the REST API via a
+				// plain fetch() against the URLs localized below, not wp.apiFetch(),
+				// so submissions no longer depend on that second script having loaded
+				// and executed correctly. See the wp_localize_script() call below for
+				// why wp.apiFetch's middleware (root-URL resolution, nonce injection)
+				// isn't needed for either endpoint this script calls.
+				//
+				// 'wp-i18n' and 'wp-hooks' ARE required and must stay. The bundle imports
+				// __() and applyFilters(), which @wordpress/scripts externalises to the
+				// wp.i18n / window.wp.hooks globals instead of inlining — the generated
+				// assets/build/formSubmit.asset.php is the authority on this list. They
+				// used to arrive for free because 'wp-api-fetch' pulled them in through
+				// its own dependency graph; dropping that above removed them, and an
+				// undeclared wp.hooks is undefined under a JS-combining optimizer, which
+				// kills every submission with the same TypeError this change prevents.
 				wp_register_script(
 					SRFM_SLUG . '-' . $handle,
 					SRFM_URL . 'assets/build/' . $name . '.js',
-					[ 'wp-api-fetch' ],
+					[ 'wp-i18n', 'wp-hooks' ],
 					SRFM_VER,
 					true
 				);
@@ -144,6 +159,19 @@ class Frontend_Assets {
 			[
 				'site_url'          => site_url(),
 				'nonce'             => wp_create_nonce( 'wp_rest' ),
+				// Fully resolved REST endpoint URLs, so the frontend can call them with
+				// a plain fetch() instead of wp.apiFetch(). rest_url() already accounts
+				// for pretty vs. plain permalinks (the latter needs a `?rest_route=`
+				// query var rather than a path segment), subdirectory installs, and
+				// multisite domain mapping — the same resolution wp.apiFetch's root-URL
+				// middleware would otherwise do from a second, independently-loaded
+				// script. Neither endpoint's auth depends on wp.apiFetch's nonce
+				// middleware: submit-form is guarded by the X-WP-Submit-Token header
+				// (Submit_Token::verify()) and after-submission by an explicit
+				// after_submit_nonce query arg, so no other piece of that script is
+				// actually needed for these two calls.
+				'submit_form_url'   => esc_url_raw( rest_url( 'sureforms/v1/submit-form' ) ),
+				'after_submit_url'  => esc_url_raw( rest_url( 'sureforms/v1/after-submission' ) ),
 				'messages'          => $validation_messages,
 				'is_rtl'            => $is_rtl,
 				// Resolved RFC 5321 email limits so the client honors the
