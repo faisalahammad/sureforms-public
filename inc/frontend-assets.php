@@ -159,19 +159,22 @@ class Frontend_Assets {
 			[
 				'site_url'          => site_url(),
 				'nonce'             => wp_create_nonce( 'wp_rest' ),
-				// Fully resolved REST endpoint URLs, so the frontend can call them with
-				// a plain fetch() instead of wp.apiFetch(). rest_url() already accounts
+				// Fully resolved REST endpoint URL, so the frontend can call it with a
+				// plain fetch() instead of wp.apiFetch(). rest_url() already accounts
 				// for pretty vs. plain permalinks (the latter needs a `?rest_route=`
 				// query var rather than a path segment), subdirectory installs, and
 				// multisite domain mapping — the same resolution wp.apiFetch's root-URL
 				// middleware would otherwise do from a second, independently-loaded
-				// script. Neither endpoint's auth depends on wp.apiFetch's nonce
-				// middleware: submit-form is guarded by the X-WP-Submit-Token header
-				// (Submit_Token::verify()) and after-submission by an explicit
-				// after_submit_nonce query arg, so no other piece of that script is
-				// actually needed for these two calls.
+				// script. submit-form's auth does not depend on that script either: it
+				// is guarded by the X-WP-Submit-Token header (Submit_Token::verify()).
+				//
+				// The after-submission URL is deliberately NOT localized. It needs the
+				// submission id and a per-submission nonce, so it is built server-side
+				// and returned in the submit response instead (see Form_Submit). A base
+				// URL here invited the client to concatenate those on, which silently
+				// produced an unroutable URL wherever rest_url() returns a
+				// `?rest_route=` form.
 				'submit_form_url'   => esc_url_raw( rest_url( 'sureforms/v1/submit-form' ) ),
-				'after_submit_url'  => esc_url_raw( rest_url( 'sureforms/v1/after-submission' ) ),
 				'messages'          => $validation_messages,
 				'is_rtl'            => $is_rtl,
 				// Resolved RFC 5321 email limits so the client honors the

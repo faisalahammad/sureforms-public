@@ -464,21 +464,19 @@ async function submitFormData( form ) {
 }
 
 async function afterSubmit( formStatus ) {
-	const submissionId = formStatus.data.submission_id;
-	const afterSubmitNonce = formStatus.data.after_submit_nonce;
-	const afterSubmitBaseUrl = window.srfm_submit?.after_submit_url;
+	// Supplied by the server, already carrying the submission id and nonce.
+	// Assembling it here meant reimplementing two things WordPress already does:
+	// rest_url() knows whether the route is a path or a `?rest_route=` query arg,
+	// and add_query_arg() knows whether the nonce needs `?` or `&`. Concatenation
+	// got both wrong on plain-permalink sites and the request never routed.
+	const afterSubmitUrl = formStatus?.data?.after_submit_url;
 
-	if ( ! afterSubmitBaseUrl ) {
+	if ( ! afterSubmitUrl ) {
 		return;
 	}
 
 	try {
-		const response = await fetch(
-			`${ afterSubmitBaseUrl }/${ submissionId }?after_submit_nonce=${ encodeURIComponent(
-				afterSubmitNonce
-			) }`,
-			{ method: 'GET' }
-		);
+		const response = await fetch( afterSubmitUrl, { method: 'GET' } );
 		await parseRestResponse( response );
 	} catch ( error ) {
 		console.error( error );
