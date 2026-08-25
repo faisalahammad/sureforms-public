@@ -427,8 +427,7 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 
 ## Changelog ##
 ### 2.12.5 - 25th August 2026 ###
-* Fix: Form submissions no longer fail on sites using JavaScript optimization plugins that defer or combine scripts.
-* Fix: The form block preview and settings modal now load correctly in the WordPress 7.1 editor.
+* Fix: Form submissions no longer fail on sites where a performance plugin combines or defers JavaScript.
 ### 2.12.4 - 19th August 2026 ###
 * Improvement: Email notification images are now saved to the Media Library instead of being embedded as base64, improving email deliverability and reducing message size.
 * Fix: Compatibility with WordPress 7.1.
