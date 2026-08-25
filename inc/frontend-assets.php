@@ -112,10 +112,19 @@ class Frontend_Assets {
 				// and executed correctly. See the wp_localize_script() call below for
 				// why wp.apiFetch's middleware (root-URL resolution, nonce injection)
 				// isn't needed for either endpoint this script calls.
+				//
+				// 'wp-i18n' and 'wp-hooks' ARE required and must stay. The bundle imports
+				// __() and applyFilters(), which @wordpress/scripts externalises to the
+				// wp.i18n / window.wp.hooks globals instead of inlining — the generated
+				// assets/build/formSubmit.asset.php is the authority on this list. They
+				// used to arrive for free because 'wp-api-fetch' pulled them in through
+				// its own dependency graph; dropping that above removed them, and an
+				// undeclared wp.hooks is undefined under a JS-combining optimizer, which
+				// kills every submission with the same TypeError this change prevents.
 				wp_register_script(
 					SRFM_SLUG . '-' . $handle,
 					SRFM_URL . 'assets/build/' . $name . '.js',
-					[],
+					[ 'wp-i18n', 'wp-hooks' ],
 					SRFM_VER,
 					true
 				);
