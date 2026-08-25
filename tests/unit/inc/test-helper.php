@@ -3122,4 +3122,63 @@ class Test_Helper extends TestCase {
 		wp_set_current_user( 0 );
 		wp_delete_user( $user_id );
 	}
+
+	/**
+	 * The shared REST permission gate must deny by default.
+	 *
+	 * This guards a number of admin REST routes, and it had no test — it surfaced
+	 * only because check-test-coverage attributes changed lines to the preceding
+	 * function, so adding a method after it flagged the gap. Worth covering on its
+	 * own merits: it delegates to current_user_can(), whose default capability is
+	 * manage_options, so the failure mode to protect against is it returning true
+	 * for someone who should not pass.
+	 */
+	public function test_get_items_permissions_check() {
+		$original = get_current_user_id();
+
+		// Anonymous must be refused, as a WP_Error carrying a 401/403 status.
+		wp_set_current_user( 0 );
+		$result = Helper::get_items_permissions_check();
+		$this->assertInstanceOf( 'WP_Error', $result, 'An anonymous request must be refused.' );
+		$this->assertSame( 'rest_cannot_view', $result->get_error_code() );
+		$this->assertContains(
+			$result->get_error_data()['status'] ?? 0,
+			[ 401, 403 ],
+			'The error must carry an authorization status code.'
+		);
+
+		// A subscriber lacks manage_options, so must also be refused.
+		$subscriber = wp_insert_user(
+			[
+				'user_login' => 'srfm_perm_sub_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_perm_sub_' . wp_rand() . '@example.com',
+				'role'       => 'subscriber',
+			]
+		);
+		if ( ! is_wp_error( $subscriber ) ) {
+			wp_set_current_user( (int) $subscriber );
+			$this->assertInstanceOf( 'WP_Error', Helper::get_items_permissions_check(), 'A subscriber must be refused.' );
+		}
+
+		// An administrator passes.
+		$admin = wp_insert_user(
+			[
+				'user_login' => 'srfm_perm_admin_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_perm_admin_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		if ( ! is_wp_error( $admin ) ) {
+			wp_set_current_user( (int) $admin );
+			$this->assertTrue( Helper::get_items_permissions_check(), 'An administrator must be allowed.' );
+			wp_delete_user( (int) $admin );
+		}
+
+		if ( ! is_wp_error( $subscriber ) ) {
+			wp_delete_user( (int) $subscriber );
+		}
+		wp_set_current_user( $original );
+	}
 }
