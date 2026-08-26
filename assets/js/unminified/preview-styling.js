@@ -67,7 +67,7 @@
 	 * single layout number with nothing sensitive in it. The editor side verifies
 	 * the sender by comparing against its own iframe's contentWindow.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.5
 	 */
 	let lastReportedHeight = 0;
 

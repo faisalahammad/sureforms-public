@@ -14,9 +14,9 @@ msgstr ""
 #. Plugin Name of the plugin
 #. Author of the plugin
 #: sureforms.php
-#: admin/admin.php:1052
-#: admin/admin.php:1053
-#: admin/admin.php:2623
+#: admin/admin.php:1104
+#: admin/admin.php:1105
+#: admin/admin.php:2675
 #: inc/abilities/abilities-registrar.php:139
 #: inc/gutenberg-hooks.php:109
 #: inc/page-builders/bricks/elements/form-widget.php:67
@@ -43,8 +43,8 @@ msgstr "Prosty, ale potężny sposób na tworzenie nowoczesnych formularzy na Tw
 msgid "https://sureforms.com/"
 msgstr "https://sureforms.com/"
 
-#: admin/admin.php:1065
-#: admin/admin.php:1066
+#: admin/admin.php:1117
+#: admin/admin.php:1118
 #: assets/build/dashboard.js:172
 #: assets/build/entries.js:172
 #: assets/build/forms.js:172
@@ -59,9 +59,9 @@ msgstr "https://sureforms.com/"
 msgid "Dashboard"
 msgstr "Panel sterowania"
 
-#: admin/admin.php:1083
-#: admin/admin.php:1084
-#: admin/admin.php:1516
+#: admin/admin.php:1135
+#: admin/admin.php:1136
+#: admin/admin.php:1568
 #: inc/compatibility/multilingual/string-collector.php:236
 #: inc/compatibility/multilingual/string-collector.php:245
 #: inc/compatibility/multilingual/string-collector.php:313
@@ -79,15 +79,15 @@ msgstr "Panel sterowania"
 msgid "Settings"
 msgstr "Ustawienia"
 
-#: admin/admin.php:1352
-#: admin/admin.php:1353
+#: admin/admin.php:1404
+#: admin/admin.php:1405
 #: inc/post-types.php:270
 msgid "New Form"
 msgstr "Nowy formularz"
 
-#: admin/admin.php:1361
-#: admin/admin.php:1362
-#: admin/admin.php:2832
+#: admin/admin.php:1413
+#: admin/admin.php:1414
+#: admin/admin.php:2884
 #: inc/generate-form-markup.php:203
 #: inc/generate-form-markup.php:216
 #: inc/global-settings/email-summary.php:225
@@ -105,7 +105,7 @@ msgid "Entries"
 msgstr "Wpisy"
 
 #. Translators: Post Title.
-#: admin/admin.php:1604
+#: admin/admin.php:1656
 #, php-format
 msgid "Edit %1$s"
 msgstr "Edytuj %1$s"
@@ -126,18 +126,18 @@ msgid "Nonce verification failed."
 msgstr "Weryfikacja nonce nie powiodła się."
 
 #. translators: %1$s: Opening anchor tag with URL, %2$s: Closing anchor tag, %3$s: SureForms Pro Plugin Name.
-#: admin/admin.php:2242
+#: admin/admin.php:2294
 #, php-format
 msgid "Please %1$sactivate%2$s your copy of %3$s to get new features, access support, receive update notifications, and more."
 msgstr "Proszę %1$saktywować%2$s swoją kopię %3$s, aby uzyskać nowe funkcje, dostęp do wsparcia, otrzymywać powiadomienia o aktualizacjach i więcej."
 
 #. translators: %1$s: SureForms version, %2$s: SureForms Pro Plugin Name, %3$s: SureForms Pro Version, %4$s: Anchor tag open, %5$s: Closing anchor tag.
-#: admin/admin.php:2260
+#: admin/admin.php:2312
 #, php-format
 msgid "SureForms %1$s requires minimum %2$s %3$s to work properly. Please update to the latest version from %4$shere%5$s."
 msgstr "SureForms %1$s wymaga co najmniej %2$s %3$s, aby działać poprawnie. Proszę zaktualizować do najnowszej wersji z %4$stąd%5$s."
 
-#: admin/admin.php:2831
+#: admin/admin.php:2883
 #: inc/global-settings/email-summary.php:224
 #: assets/build/entries.js:172
 #: assets/build/payments.js:172
@@ -207,7 +207,7 @@ msgstr "Śmieci"
 msgid "Published"
 msgstr "Opublikowano"
 
-#: admin/admin.php:2823
+#: admin/admin.php:2875
 msgid "View"
 msgstr "Widok"
 
@@ -299,11 +299,11 @@ msgstr "Nie określono wtyczki"
 msgid "Plugin Successfully Activated"
 msgstr "Wtyczka została pomyślnie aktywowana"
 
-#: admin/admin.php:1676
+#: admin/admin.php:1728
 msgid "Activating..."
 msgstr "Aktywowanie..."
 
-#: admin/admin.php:1677
+#: admin/admin.php:1729
 #: assets/build/dashboard.js:172
 #: assets/build/entries.js:172
 #: assets/build/formEditor.js:172
@@ -318,17 +318,17 @@ msgstr "Aktywowanie..."
 msgid "Activated"
 msgstr "Aktywowany"
 
-#: admin/admin.php:1678
+#: admin/admin.php:1730
 #: assets/build/formEditor.js:172
 #: assets/build/settings.js:172
 msgid "Activate"
 msgstr "Aktywuj"
 
-#: admin/admin.php:1679
+#: admin/admin.php:1731
 msgid "Installing..."
 msgstr "Instalowanie..."
 
-#: admin/admin.php:1680
+#: admin/admin.php:1732
 msgid "Installed"
 msgstr "Zainstalowano"
 
@@ -336,11 +336,11 @@ msgstr "Zainstalowano"
 msgid "You do not have permission to access this page."
 msgstr "Nie masz uprawnień do dostępu do tej strony."
 
-#: admin/admin.php:2408
-#: admin/admin.php:2514
-#: admin/admin.php:2552
-#: admin/admin.php:2573
-#: admin/admin.php:2786
+#: admin/admin.php:2460
+#: admin/admin.php:2566
+#: admin/admin.php:2604
+#: admin/admin.php:2625
+#: admin/admin.php:2838
 #: inc/admin-ajax.php:162
 #: inc/payments/admin/admin-handler.php:638
 #: inc/payments/stripe/admin-stripe-handler.php:80
@@ -666,7 +666,7 @@ msgstr "Wartość musi być unikalna."
 msgid "Sorry, you are not allowed to perform this action."
 msgstr "Przepraszam, nie masz uprawnień do wykonania tej czynności."
 
-#: admin/admin.php:2306
+#: admin/admin.php:2358
 msgid "Rate SureForms"
 msgstr "Oceń SureForms"
 
@@ -727,7 +727,7 @@ msgstr "Edytuj formularz"
 msgid "Edit"
 msgstr "Edytuj"
 
-#: admin/admin.php:2674
+#: admin/admin.php:2726
 #: inc/page-builders/elementor/form-widget.php:346
 #: assets/build/dashboard.js:2
 msgid "Create New Form"
@@ -764,8 +764,8 @@ msgstr "Wyświetl formularz"
 msgid "View Forms"
 msgstr "Wyświetl formularze"
 
-#: admin/admin.php:1343
-#: admin/admin.php:1344
+#: admin/admin.php:1395
+#: admin/admin.php:1396
 #: inc/post-types.php:274
 #: assets/build/dashboard.js:172
 #: assets/build/entries.js:172
@@ -8887,9 +8887,9 @@ msgstr "Dodaj bloki do paska szybkich akcji"
 msgid "Re-arrange block inside Quick Action Bar"
 msgstr "Przestaw blok wewnątrz paska szybkich akcji"
 
-#: admin/admin.php:1136
-#: admin/admin.php:1137
-#: admin/admin.php:3248
+#: admin/admin.php:1188
+#: admin/admin.php:1189
+#: admin/admin.php:3343
 #: assets/build/blocks.js:172
 #: assets/build/dashboard.js:172
 #: assets/build/entries.js:172
@@ -10617,7 +10617,7 @@ msgstr "Odblokuj formularze konwersacyjne"
 msgid "With the SureForms Pro Plan, you can transform your forms into engaging conversational layouts for a seamless user experience."
 msgstr "Dzięki planowi SureForms Pro możesz przekształcić swoje formularze w angażujące, konwersacyjne układy, zapewniając płynne doświadczenie użytkownika."
 
-#: admin/admin.php:975
+#: admin/admin.php:1027
 msgid "Get SureForms Pro"
 msgstr "Pobierz SureForms Pro"
 
@@ -10851,15 +10851,15 @@ msgstr "Nieprawidłowy typ captcha."
 msgid "%s verification failed. Please contact your site administrator."
 msgstr "Weryfikacja %s nie powiodła się. Proszę skontaktować się z administratorem strony."
 
-#: inc/frontend-assets.php:130
+#: inc/frontend-assets.php:145
 msgid "Turnstile sitekey verification failed. Please contact your site administrator."
 msgstr "Weryfikacja klucza witryny Turnstile nie powiodła się. Proszę skontaktować się z administratorem witryny."
 
-#: inc/frontend-assets.php:131
+#: inc/frontend-assets.php:146
 msgid "Google Captcha sitekey verification failed. Please contact your site administrator."
 msgstr "Weryfikacja klucza witryny Google Captcha nie powiodła się. Proszę skontaktować się z administratorem witryny."
 
-#: inc/frontend-assets.php:132
+#: inc/frontend-assets.php:147
 msgid "HCaptcha sitekey verification failed. Please contact your site administrator."
 msgstr "Weryfikacja klucza witryny HCaptcha nie powiodła się. Proszę skontaktować się z administratorem witryny."
 
@@ -11243,8 +11243,8 @@ msgstr "Opisz formularz, który chcesz utworzyć"
 msgid "We are building your form…"
 msgstr "Budujemy Twój formularz…"
 
-#: admin/admin.php:1251
-#: admin/admin.php:1252
+#: admin/admin.php:1303
+#: admin/admin.php:1304
 msgid "SMTP"
 msgstr "SMTP"
 
@@ -11376,29 +11376,29 @@ msgstr "Włącz powiadomienia administratora"
 msgid "Admin notifications keep you informed about new form entries since your last visit."
 msgstr "Powiadomienia administracyjne informują Cię o nowych wpisach formularza od Twojej ostatniej wizyty."
 
-#: admin/admin.php:2412
-#: admin/admin.php:2510
-#: admin/admin.php:2548
-#: admin/admin.php:2569
-#: admin/admin.php:2790
+#: admin/admin.php:2464
+#: admin/admin.php:2562
+#: admin/admin.php:2600
+#: admin/admin.php:2621
+#: admin/admin.php:2842
 msgid "Unauthorized user."
 msgstr "Nieautoryzowany użytkownik."
 
 #. translators: 1: opening span, 2: opening strong (inline), 3: closing strong, 4: closing span, 5: opening strong (block), 6: closing strong
-#: admin/admin.php:2519
+#: admin/admin.php:2571
 #, php-format
 msgid "%1$sGet started by %2$sbuilding your first form%3$s.%4$s%5$sExperience the power of our intuitive AI Form Builder%6$s"
 msgstr "%1$sZacznij od %2$szbudowania swojego pierwszego formularza%3$s.%4$s%5$sDoświadcz mocy naszego intuicyjnego Kreatora Formularzy AI%6$s"
 
-#: admin/admin.php:2530
+#: admin/admin.php:2582
 msgid "SureForms is waiting for you!"
 msgstr "SureForms czeka na Ciebie!"
 
-#: admin/admin.php:2532
+#: admin/admin.php:2584
 msgid "Build My First Form"
 msgstr "Zbuduj mój pierwszy formularz"
 
-#: admin/admin.php:2533
+#: admin/admin.php:2585
 msgid "Dismiss"
 msgstr "Odrzuć"
 
@@ -11418,51 +11418,51 @@ msgstr "Zaloguj się"
 msgid "Register"
 msgstr "Zarejestruj się"
 
-#: admin/admin.php:2819
+#: admin/admin.php:2871
 msgid "Recent Entries"
 msgstr "Ostatnie wpisy"
 
-#: admin/admin.php:2820
+#: admin/admin.php:2872
 msgid "( Last 7 days )"
 msgstr "( Ostatnie 7 dni )"
 
-#: admin/admin.php:3189
+#: admin/admin.php:3284
 msgid "Use Conditional Logic to show only what matters"
 msgstr "Użyj logiki warunkowej, aby pokazać tylko to, co ważne"
 
-#: admin/admin.php:3190
+#: admin/admin.php:3285
 msgid "Split your form into steps to keep it easy"
 msgstr "Podziel swój formularz na etapy, aby był łatwy."
 
-#: admin/admin.php:3191
+#: admin/admin.php:3286
 msgid "Let people upload files directly to your form"
 msgstr "Pozwól ludziom przesyłać pliki bezpośrednio do Twojego formularza"
 
-#: admin/admin.php:3192
+#: admin/admin.php:3287
 msgid "Turn responses into downloadable PDFs automatically"
 msgstr "Automatycznie przekształcaj odpowiedzi w pliki PDF do pobrania"
 
-#: admin/admin.php:3193
+#: admin/admin.php:3288
 msgid "Let users sign with a simple signature field"
 msgstr "Pozwól użytkownikom podpisać się w prostym polu podpisu"
 
-#: admin/admin.php:3194
+#: admin/admin.php:3289
 msgid "Connect your form to other tools using webhooks"
 msgstr "Połącz swój formularz z innymi narzędziami za pomocą webhooków"
 
-#: admin/admin.php:3195
+#: admin/admin.php:3290
 msgid "Use Conversational Forms for a chat-like experience"
 msgstr "Użyj Formularzy Konwersacyjnych, aby uzyskać doświadczenie podobne do czatu"
 
-#: admin/admin.php:3196
+#: admin/admin.php:3291
 msgid "Let users register or log in through your form"
 msgstr "Pozwól użytkownikom zarejestrować się lub zalogować przez Twój formularz"
 
-#: admin/admin.php:3197
+#: admin/admin.php:3292
 msgid "Build forms that create WordPress user accounts"
 msgstr "Twórz formularze, które tworzą konta użytkowników WordPress"
 
-#: admin/admin.php:3198
+#: admin/admin.php:3293
 msgid "Add calculations to auto-total scores or prices"
 msgstr "Dodaj obliczenia do automatycznego sumowania wyników lub cen"
 
@@ -11952,8 +11952,8 @@ msgstr "Miniatura wideo SureForms"
 msgid "Expected format for emails - email@sureforms.com or John Doe <email@sureforms.com>"
 msgstr "Oczekiwany format dla e-maili - email@sureforms.com lub John Doe <email@sureforms.com>"
 
-#: admin/admin.php:1371
-#: admin/admin.php:1372
+#: admin/admin.php:1423
+#: admin/admin.php:1424
 #: assets/build/dashboard.js:172
 #: assets/build/entries.js:172
 #: assets/build/forms.js:172
@@ -15164,7 +15164,7 @@ msgstr "Wartość pola zmiennej kwoty jest wymagana."
 msgid "Payment amount below minimum. Minimum: %1$s, received %2$s."
 msgstr "Kwota płatności poniżej minimum. Minimum: %1$s, otrzymano %2$s."
 
-#: inc/rest-api.php:1876
+#: inc/rest-api.php:1892
 msgid " (Copy)"
 msgstr "(Kopiuj)"
 
@@ -15363,12 +15363,12 @@ msgid "Stripe Settings"
 msgstr "Ustawienia Stripe"
 
 #. translators: %1$s: SureForms version, %2$s: SureForms Pro Plugin Name, %3$s: SureForms Pro Version.
-#: admin/admin.php:2177
+#: admin/admin.php:2229
 #, php-format
 msgid "SureForms %1$s requires minimum %2$s %3$s to work properly. Please update to the latest version."
 msgstr "SureForms %1$s wymaga co najmniej %2$s %3$s do prawidłowego działania. Proszę zaktualizować do najnowszej wersji."
 
-#: admin/admin.php:2190
+#: admin/admin.php:2242
 msgid "Update Now"
 msgstr "Zaktualizuj teraz"
 
@@ -15416,8 +15416,8 @@ msgstr "Pozycja znaku waluty"
 msgid "Select the position of the currency symbol relative to the amount."
 msgstr "Wybierz pozycję symbolu waluty względem kwoty."
 
-#: admin/admin.php:1314
-#: admin/admin.php:1315
+#: admin/admin.php:1366
+#: admin/admin.php:1367
 #: assets/build/dashboard.js:172
 #: assets/build/entries.js:172
 #: assets/build/forms.js:172
@@ -15431,40 +15431,40 @@ msgstr "Wybierz pozycję symbolu waluty względem kwoty."
 msgid "Learn"
 msgstr "Ucz się"
 
-#: admin/admin.php:2303
+#: admin/admin.php:2355
 msgid "Amazing! SureForms is powering your forms and submissions - let's keep growing together!"
 msgstr "Niesamowite! SureForms napędza Twoje formularze i zgłoszenia - rozwijajmy się razem!"
 
-#: admin/admin.php:2304
+#: admin/admin.php:2356
 msgid "If SureForms has been helpful, would you mind taking a moment to leave a 5-star review on WordPress.org?"
 msgstr "Jeśli SureForms okazał się pomocny, czy mógłbyś poświęcić chwilę na pozostawienie 5-gwiazdkowej recenzji na WordPress.org?"
 
-#: admin/admin.php:2307
-#: admin/admin.php:2351
+#: admin/admin.php:2359
+#: admin/admin.php:2403
 msgid "Maybe later"
 msgstr "Może później"
 
-#: admin/admin.php:2308
+#: admin/admin.php:2360
 msgid "I already did"
 msgstr "Już to zrobiłem"
 
-#: admin/admin.php:2347
+#: admin/admin.php:2399
 msgid "SureForms is ready to power your forms — explore what's possible!"
 msgstr "SureForms jest gotowy, aby zasilić Twoje formularze — odkryj, co jest możliwe!"
 
-#: admin/admin.php:2348
+#: admin/admin.php:2400
 msgid "Manage your forms, track submissions, and discover features like AI Form Builder, payment integrations, and more from the SureForms dashboard."
 msgstr "Zarządzaj swoimi formularzami, śledź zgłoszenia i odkrywaj funkcje takie jak AI Form Builder, integracje płatności i inne z poziomu pulpitu SureForms."
 
-#: admin/admin.php:2350
+#: admin/admin.php:2402
 msgid "Go to Dashboard"
 msgstr "Przejdź do pulpitu nawigacyjnego"
 
-#: admin/admin.php:2352
+#: admin/admin.php:2404
 msgid "I already know"
 msgstr "Już wiem"
 
-#: admin/admin.php:2439
+#: admin/admin.php:2491
 msgid "Invalid parameters."
 msgstr "Nieprawidłowe parametry."
 
@@ -16427,7 +16427,7 @@ msgid "Duplicate form?"
 msgstr "Powielić formularz?"
 
 #: assets/build/formSubmit.js:2
-#: assets/js/unminified/form-submit.js:495
+#: assets/js/unminified/form-submit.js:580
 msgid "An error occurred while submitting your form. Please try again."
 msgstr "Wystąpił błąd podczas przesyłania formularza. Proszę spróbować ponownie."
 
@@ -16798,19 +16798,19 @@ msgstr "Tajny klucz webhooka nie jest skonfigurowany."
 msgid "Invalid webhook signature."
 msgstr "Nieprawidłowy podpis webhooka."
 
-#: admin/admin.php:1153
-#: admin/admin.php:1747
+#: admin/admin.php:1205
+#: admin/admin.php:1799
 #: assets/build/formEditor.js:172
 msgid "Quizzes"
 msgstr "Quizy"
 
-#: admin/admin.php:1152
+#: admin/admin.php:1204
 msgid "Quiz Entries"
 msgstr "Wpisy do quizu"
 
-#: admin/admin.php:1155
-#: admin/admin.php:1188
-#: admin/admin.php:1221
+#: admin/admin.php:1207
+#: admin/admin.php:1240
+#: admin/admin.php:1273
 #: assets/build/settings.js:172
 msgid "New"
 msgstr "Nowy"
@@ -17328,43 +17328,43 @@ msgstr "Idealne do edukacji, szkoleń i zabawnych ciekawostek"
 msgid "Select this to create a quiz with scored questions and graded results."
 msgstr "Wybierz to, aby utworzyć quiz z punktowanymi pytaniami i ocenianymi wynikami."
 
-#: admin/admin.php:1185
-#: admin/admin.php:1186
-#: admin/admin.php:1752
+#: admin/admin.php:1237
+#: admin/admin.php:1238
+#: admin/admin.php:1804
 msgid "Survey Reports"
 msgstr "Raporty z ankiet"
 
-#: inc/frontend-assets.php:311
+#: inc/frontend-assets.php:339
 #: assets/build/formEditor.js:172
 #: assets/build/settings.js:172
 msgid "Heading 1"
 msgstr "Nagłówek 1"
 
-#: inc/frontend-assets.php:312
+#: inc/frontend-assets.php:340
 #: assets/build/formEditor.js:172
 #: assets/build/settings.js:172
 msgid "Heading 2"
 msgstr "Nagłówek 2"
 
-#: inc/frontend-assets.php:313
+#: inc/frontend-assets.php:341
 #: assets/build/formEditor.js:172
 #: assets/build/settings.js:172
 msgid "Heading 3"
 msgstr "Nagłówek 3"
 
-#: inc/frontend-assets.php:314
+#: inc/frontend-assets.php:342
 #: assets/build/formEditor.js:172
 #: assets/build/settings.js:172
 msgid "Heading 4"
 msgstr "Nagłówek 4"
 
-#: inc/frontend-assets.php:315
+#: inc/frontend-assets.php:343
 #: assets/build/formEditor.js:172
 #: assets/build/settings.js:172
 msgid "Heading 5"
 msgstr "Nagłówek 5"
 
-#: inc/frontend-assets.php:316
+#: inc/frontend-assets.php:344
 #: assets/build/formEditor.js:172
 #: assets/build/settings.js:172
 msgid "Heading 6"
@@ -17894,9 +17894,9 @@ msgstr "Odpowiedź AI była pusta. Proszę dopracować swój prompt i spróbowa�
 msgid "Unable to build form fields from the AI response."
 msgstr "Nie można utworzyć pól formularza z odpowiedzi AI."
 
-#: admin/admin.php:1218
-#: admin/admin.php:1219
-#: admin/admin.php:1757
+#: admin/admin.php:1270
+#: admin/admin.php:1271
+#: admin/admin.php:1809
 msgid "Partial Entries"
 msgstr "Częściowe wpisy"
 
@@ -18767,23 +18767,23 @@ msgstr "Nie można zweryfikować kwoty płatności dla tego formularza. Proszę 
 msgid "Cancellation is not supported for this payment gateway."
 msgstr "Anulowanie nie jest obsługiwane dla tej bramki płatności."
 
-#: admin/admin.php:2641
+#: admin/admin.php:2693
 msgid "SureForms AI Quick Draft"
 msgstr "SureForms AI Szybki Szkic"
 
-#: admin/admin.php:2660
+#: admin/admin.php:2712
 msgid "Describe the form and let SureForms AI generate it for you."
 msgstr "Opisz formularz, a SureForms AI wygeneruje go dla Ciebie."
 
-#: admin/admin.php:2663
+#: admin/admin.php:2715
 msgid "Describe your form"
 msgstr "Opisz swój formularz"
 
-#: admin/admin.php:2670
+#: admin/admin.php:2722
 msgid "Example: Create a contact form with name, email, phone, and message fields."
 msgstr "Przykład: Utwórz formularz kontaktowy z polami na imię, email, telefon i wiadomość."
 
-#: admin/admin.php:2711
+#: admin/admin.php:2763
 msgid "Redirecting..."
 msgstr "Przekierowywanie..."
 
@@ -18890,80 +18890,100 @@ msgstr "Przepraszamy, nie masz uprawnień do renderowania tego formularza."
 msgid "This form requires a payment. Please complete the payment and submit again."
 msgstr "Ten formularz wymaga płatności. Proszę dokończyć płatność i przesłać ponownie."
 
-#: admin/admin.php:474
+#: admin/admin.php:526
 msgid "You are not allowed to update this prompt."
 msgstr "Nie masz uprawnień do aktualizacji tego polecenia."
 
-#: admin/admin.php:517
+#: admin/admin.php:569
 msgid "Finish setting up your form"
 msgstr "Dokończ konfigurowanie formularza"
 
-#: admin/admin.php:549
+#: admin/admin.php:601
 msgid "Review or edit your form"
 msgstr "Przejrzyj lub edytuj formularz"
 
-#: admin/admin.php:550
-#: admin/admin.php:3038
+#: admin/admin.php:602
+#: admin/admin.php:3133
 msgid "Edit form"
 msgstr "Edytuj formularz"
 
-#: admin/admin.php:555
+#: admin/admin.php:607
 msgid "Personalize the Thank You message"
 msgstr "Spersonalizuj wiadomość podziękowania"
 
-#: admin/admin.php:556
+#: admin/admin.php:608
 msgid "Edit message"
 msgstr "Edytuj wiadomość"
 
-#: admin/admin.php:561
+#: admin/admin.php:613
 msgid "Choose who gets notified of new replies"
 msgstr "Wybierz, kto zostanie powiadomiony o nowych odpowiedziach"
 
-#: admin/admin.php:562
+#: admin/admin.php:614
 msgid "Set up email"
 msgstr "Skonfiguruj e-mail"
 
-#: admin/admin.php:570
+#: admin/admin.php:622
 msgid "your form"
 msgstr "twój formularz"
 
 #. translators: %s: form title.
-#: admin/admin.php:573
+#: admin/admin.php:625
 #, php-format
 msgid "Finish setting up %s"
 msgstr "Dokończ konfigurowanie %s"
 
 #. translators: %s: form title.
-#: admin/admin.php:581
+#: admin/admin.php:633
 #, php-format
 msgid "View %s (opens in a new tab)"
 msgstr "Zobacz %s (otwiera się w nowej karcie)"
 
-#: admin/admin.php:586
+#: admin/admin.php:638
 msgid "Customize your form to get it ready for real submissions:"
 msgstr "Dostosuj swój formularz, aby był gotowy do rzeczywistych zgłoszeń:"
 
-#: admin/admin.php:3021
+#: admin/admin.php:3116
 msgid "We’ve already created this form for you. Finish customising it so it’s ready to collect real submissions."
 msgstr "Już stworzyliśmy ten formularz dla Ciebie. Dokończ jego dostosowywanie, aby był gotowy do zbierania rzeczywistych zgłoszeń."
 
 #. translators: %s: form name.
-#: admin/admin.php:3030
+#: admin/admin.php:3125
 #, php-format
 msgid "Finish setting up “%s”"
 msgstr "Dokończ konfigurowanie „%s”"
 
-#: admin/admin.php:3039
+#: admin/admin.php:3134
 msgid "Edit the Thank You message"
 msgstr "Edytuj wiadomość podziękowania"
 
-#: admin/admin.php:3040
+#: admin/admin.php:3135
 msgid "Set where replies go"
 msgstr "Ustaw, gdzie mają trafiać odpowiedzi"
 
 #: inc/generate-form-markup.php:1445
 msgid "(opens in a new tab)"
 msgstr "(otwiera się w nowej karcie)"
+
+#: assets/build/formEditor.js:172
+#: assets/build/settings.js:172
+msgid "The image uploaded but could not be inserted. Please try again."
+msgstr "Obraz został przesłany, ale nie można go było wstawić. Proszę spróbować ponownie."
+
+#: assets/build/formEditor.js:172
+#: assets/build/settings.js:172
+msgid "The image could not be uploaded. It may be too large, or you may not have permission to upload files."
+msgstr "Nie można przesłać obrazu. Może być zbyt duży lub możesz nie mieć uprawnień do przesyłania plików."
+
+#: assets/build/formEditor.js:172
+#: assets/build/settings.js:172
+msgid "Please choose an image file."
+msgstr "Proszę wybrać plik graficzny."
+
+#: assets/build/formSubmit.js:2
+#: assets/js/unminified/form-submit.js:325
+msgid "This form could not be submitted. Please refresh the page and try again."
+msgstr "Nie można było przesłać tego formularza. Proszę odświeżyć stronę i spróbować ponownie."
 
 #: inc/post-types.php:265
 msgctxt "post type general name"
@@ -19389,34 +19409,34 @@ msgctxt "block keyword"
 msgid "color"
 msgstr "kolor"
 
-#: inc/frontend-assets.php:310
+#: inc/frontend-assets.php:338
 #: assets/build/formEditor.js:172
 #: assets/build/settings.js:172
 msgctxt "Quill heading picker: default paragraph style"
 msgid "Normal"
 msgstr "Normalny"
 
-#: inc/frontend-assets.php:317
+#: inc/frontend-assets.php:345
 msgctxt "Quill link tooltip label"
 msgid "Visit URL:"
 msgstr "Odwiedź URL:"
 
-#: inc/frontend-assets.php:318
+#: inc/frontend-assets.php:346
 msgctxt "Quill link tooltip label"
 msgid "Enter link:"
 msgstr "Wprowadź link:"
 
-#: inc/frontend-assets.php:319
+#: inc/frontend-assets.php:347
 msgctxt "Quill link tooltip action"
 msgid "Edit"
 msgstr "Edytuj"
 
-#: inc/frontend-assets.php:320
+#: inc/frontend-assets.php:348
 msgctxt "Quill link tooltip action"
 msgid "Save"
 msgstr "Zapisz"
 
-#: inc/frontend-assets.php:321
+#: inc/frontend-assets.php:349
 msgctxt "Quill link tooltip action"
 msgid "Remove"
 msgstr "Usuń"
