@@ -789,7 +789,22 @@ class Smart_Tags {
 	 * @return mixed
 	 */
 	private static function parse_user_props( $value ) {
-		$user = wp_get_current_user();
+		// Resolved via Helper rather than wp_get_current_user(): these tags are parsed
+		// during submission, on a REST request that carries no nonce, which core
+		// de-authenticates before dispatch. wp_get_current_user() therefore returns the
+		// ID-0 placeholder even for a signed-in submitter, and every tag below would
+		// render empty in notifications.
+		$user_id = Helper::get_submitting_user_id();
+
+		if ( ! $user_id ) {
+			return '';
+		}
+
+		$user = get_userdata( $user_id );
+
+		if ( ! $user instanceof \WP_User ) {
+			return '';
+		}
 
 		$user_info = get_user_meta( $user->ID );
 
