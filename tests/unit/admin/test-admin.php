@@ -513,6 +513,261 @@ class Test_Admin extends TestCase {
 		$after = (int) Helper::get_srfm_option( 'ai_dashboard_widget_uses', 0 );
 		$this->assertSame( $before + 1, $after, 'Usage tracking must increment the ai_dashboard_widget_uses counter.' );
 	}
+
+	// ---------------------------------------------------------------
+	// Missing entries table — notice and repair
+	// ---------------------------------------------------------------
+
+	/**
+	 * The classic notice must never render outside the WP dashboard. The React
+	 * notice already covers SureForms' own screens, so an admin-wide classic notice
+	 * would stack two warnings on the same page and nag on every screen in wp-admin.
+	 *
+	 * Both directions are asserted: with the table genuinely missing, an empty
+	 * result on another screen only means something if the dashboard renders.
+	 */
+	public function test_database_notice_only_renders_on_the_dashboard() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+
+		$this->break_entries_table();
+
+		set_current_screen( 'edit-post' );
+		ob_start();
+		Admin::get_instance()->render_database_repair_notice();
+		$elsewhere = ob_get_clean();
+
+		set_current_screen( 'dashboard' );
+		ob_start();
+		Admin::get_instance()->render_database_repair_notice();
+		$on_dashboard = ob_get_clean();
+
+		$this->restore_entries_table();
+
+		$this->assertSame( '', $elsewhere );
+		$this->assertStringContainsString( 'notice-warning', $on_dashboard );
+	}
+
+	/**
+	 * A healthy install must never see the prompt — a false positive here would put
+	 * a "your database needs updating" warning on every working site.
+	 */
+	public function test_database_notice_is_absent_on_a_healthy_install() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+
+		set_current_screen( 'dashboard' );
+		ob_start();
+		Admin::get_instance()->render_database_repair_notice();
+		$output = ob_get_clean();
+
+		$this->assertSame( '', $output );
+	}
+
+	/**
+	 * A subscriber must never be shown the repair prompt, let alone the link that
+	 * performs it. The capability check runs before anything else in the method.
+	 */
+	public function test_database_notice_is_hidden_from_users_without_the_capability() {
+		wp_set_current_user( $this->make_user( 'subscriber' ) );
+
+		set_current_screen( 'dashboard' );
+		$_GET['srfm_db_repair'] = 'done';
+
+		ob_start();
+		Admin::get_instance()->render_database_repair_notice();
+		$output = ob_get_clean();
+
+		$this->assertSame( '', $output );
+	}
+
+	/**
+	 * The post-repair confirmation is the one branch a healthy site still renders,
+	 * so it doubles as proof the dashboard gate lets the right screen through.
+	 */
+	public function test_database_notice_reports_a_completed_repair() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+
+		set_current_screen( 'dashboard' );
+		$_GET['srfm_db_repair'] = 'done';
+
+		ob_start();
+		Admin::get_instance()->render_database_repair_notice();
+		$output = ob_get_clean();
+
+		$this->assertStringContainsString( 'notice-success', $output );
+	}
+
+	/**
+	 * A failed repair means the host refuses to let SureForms create tables. It must
+	 * read as something to act on, not as a success, and must not claim the table is
+	 * fixed.
+	 */
+	public function test_database_notice_reports_a_failed_repair_as_a_warning() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+
+		set_current_screen( 'dashboard' );
+		$_GET['srfm_db_repair'] = 'failed';
+
+		ob_start();
+		Admin::get_instance()->render_database_repair_notice();
+		$output = ob_get_clean();
+
+		$this->assertStringContainsString( 'notice-warning', $output );
+		$this->assertStringNotContainsString( 'notice-success', $output );
+	}
+
+	/**
+	 * The repair link must carry a nonce. Without one, any page that can make the
+	 * admin follow a link could trigger a table operation.
+	 */
+	public function test_repair_url_is_nonce_protected() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+
+		$method = new ReflectionMethod( Admin::class, 'get_database_repair_url' );
+		$method->setAccessible( true );
+		$url = $method->invoke( Admin::get_instance() );
+
+		$this->assertStringContainsString( 'action=srfm_repair_entries_table', $url );
+
+		$query = [];
+		parse_str( (string) wp_parse_url( html_entity_decode( $url ), PHP_URL_QUERY ), $query );
+
+		$this->assertArrayHasKey( '_wpnonce', $query );
+		$this->assertSame( 1, wp_verify_nonce( $query['_wpnonce'], 'srfm_repair_entries_table' ) );
+	}
+
+	/**
+	 * `database_error` must be an accepted notice id, or the Fix-now and dismiss
+	 * clicks are dropped and the feature ships with no analytics at all.
+	 */
+	public function test_database_error_is_an_accepted_notice_id() {
+		$this->assertTrue( $this->post_notice_response( 'database_error', 'fix_now' ) );
+		$this->assertTrue( $this->post_notice_response( 'database_error', 'dismissed' ) );
+	}
+
+	/**
+	 * An unknown notice id, or a button the notice does not define, must be rejected
+	 * rather than allowed to write an arbitrary event name into the analytics payload.
+	 */
+	public function test_unknown_notice_ids_and_buttons_are_rejected() {
+		$this->assertFalse( $this->post_notice_response( 'not_a_real_notice', 'fix_now' ) );
+		$this->assertFalse( $this->post_notice_response( 'database_error', 'drop_everything' ) );
+	}
+
+	/**
+	 * Drive the real AJAX handler and report whether it accepted the pair.
+	 *
+	 * wp_send_json_*() ends the request through wp_die(), so this points the AJAX
+	 * die handler at the suite's disable-able one and reads the buffered JSON.
+	 * Going through the handler rather than reading the allowlist directly means the
+	 * nonce and capability gates are exercised too.
+	 *
+	 * @param string $notice_id Notice identifier to send.
+	 * @param string $button    Button identifier to send.
+	 * @return bool Whether the handler responded with success.
+	 */
+	private function post_notice_response( $notice_id, $button ) {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+
+		$_POST['nonce']     = wp_create_nonce( 'srfm_notice_response' );
+		$_POST['notice_id'] = $notice_id;
+		$_POST['button']    = $button;
+		$_REQUEST           = $_POST;
+
+		add_filter( 'wp_doing_ajax', '__return_true' );
+
+		// Core's _ajax_wp_die_handler() calls die(), which would take the test runner
+		// with it. The suite's handler is a no-op while wp_die is disabled, leaving
+		// the JSON payload in the buffer to assert on.
+		add_filter( 'wp_die_ajax_handler', '_wp_die_handler_filter' );
+		_disable_wp_die();
+
+		ob_start();
+		Admin::get_instance()->handle_notice_response();
+		$body = (string) ob_get_clean();
+
+		_enable_wp_die();
+		remove_filter( 'wp_die_ajax_handler', '_wp_die_handler_filter' );
+		remove_filter( 'wp_doing_ajax', '__return_true' );
+		$_POST    = [];
+		$_REQUEST = [];
+
+		$decoded = json_decode( $body, true );
+
+		return is_array( $decoded ) && ! empty( $decoded['success'] );
+	}
+
+	/**
+	 * The shared repair routine must report the state of the database, and must
+	 * leave the entries table in place either way.
+	 */
+	public function test_do_database_repair_reports_the_table_state() {
+		$this->assertTrue( Admin::get_instance()->do_database_repair() );
+		$this->assertFalse( \SRFM\Inc\Database\Register::is_entries_table_missing( true ) );
+	}
+
+	/**
+	 * Drop the entries table, reproducing the state the notice exists to catch.
+	 *
+	 * @return void
+	 */
+	private function break_entries_table() {
+		global $wpdb;
+
+		$table               = \SRFM\Inc\Database\Tables\Entries::get_instance()->get_tablename();
+		$versions            = (array) get_option( 'srfm_database_table_versions', [] );
+		$versions['entries'] = 2;
+		update_option( 'srfm_database_table_versions', $versions );
+
+		$wpdb->query( "CREATE TABLE `{$table}_srfmbak` LIKE `{$table}`" ); // phpcs:ignore -- Preserving the schema across the drop under test.
+		$wpdb->query( "DROP TABLE `{$table}`" ); // phpcs:ignore -- Reproducing the dropped-table state under test.
+
+		$this->reset_table_cache();
+	}
+
+	/**
+	 * Put the entries table back after break_entries_table().
+	 *
+	 * @return void
+	 */
+	private function restore_entries_table() {
+		global $wpdb;
+
+		$table = \SRFM\Inc\Database\Tables\Entries::get_instance()->get_tablename();
+
+		$wpdb->query( "DROP TABLE IF EXISTS `{$table}`" ); // phpcs:ignore -- Discarding anything a repair under test created.
+		$wpdb->query( "RENAME TABLE `{$table}_srfmbak` TO `{$table}`" ); // phpcs:ignore -- Restoring the table this test dropped.
+
+		$this->reset_table_cache();
+	}
+
+	/**
+	 * Clear the per-request memo and the transient behind is_entries_table_missing().
+	 *
+	 * @return void
+	 */
+	private function reset_table_cache() {
+		delete_transient( \SRFM\Inc\Database\Register::ENTRIES_TABLE_CHECK_TRANSIENT );
+
+		$memo = new ReflectionProperty( \SRFM\Inc\Database\Register::class, 'entries_table_present' );
+		$memo->setAccessible( true );
+		$memo->setValue( null, null );
+	}
+
+	/**
+	 * Create a user with the given role and return its ID.
+	 *
+	 * @param string $role Role to assign.
+	 * @return int
+	 */
+	private function make_user( $role ) {
+		return (int) wp_insert_user(
+			[
+				'user_login' => 'srfm_db_' . uniqid(),
+				'user_pass'  => 'password',
+				'role'       => $role,
+			]
+		);
+	}
 }
 
 /**

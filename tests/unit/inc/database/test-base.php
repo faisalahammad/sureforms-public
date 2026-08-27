@@ -433,4 +433,52 @@ class Test_Database_Base extends TestCase {
 		$this->assertFalse( $this->base->maybe_add_new_columns( [] ) );
 		$this->assertFalse( $this->base->maybe_add_new_columns() );
 	}
+
+	// ---------------------------------------------------------------
+	// table_exists
+	// ---------------------------------------------------------------
+
+	/**
+	 * The happy path. Both concrete tables exist on a working install, so a false
+	 * here would put a "your database needs updating" warning on every healthy site.
+	 */
+	public function test_table_exists_reports_a_present_table() {
+		$this->assertTrue( $this->entries_table->table_exists() );
+		$this->assertTrue( $this->base->table_exists() );
+	}
+
+	/**
+	 * `$wpdb->prefix` contains an underscore, which is a LIKE wildcard. Without
+	 * esc_like(), `wp_srfm_entries` would also match `wpXsrfm_entries` and the check
+	 * could report a table that is not ours. Compare the returned name, not just
+	 * emptiness, to pin that down.
+	 */
+	public function test_table_exists_matches_the_exact_table_name() {
+		global $wpdb;
+
+		$table = $this->entries_table->get_tablename();
+		$found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) ); // phpcs:ignore -- Test assertion helper.
+
+		$this->assertSame( $table, $found );
+	}
+
+	/**
+	 * A dropped table must read as missing — this is the state the whole
+	 * detect-and-repair feature exists to catch.
+	 */
+	public function test_table_exists_reports_a_dropped_table_as_missing() {
+		global $wpdb;
+
+		$table = $this->entries_table->get_tablename();
+
+		$wpdb->query( "CREATE TABLE `{$table}_srfmbak` LIKE `{$table}`" ); // phpcs:ignore -- Preserving the schema across the drop under test.
+		$wpdb->query( "DROP TABLE `{$table}`" ); // phpcs:ignore -- Reproducing the dropped-table state under test.
+
+		$missing = $this->entries_table->table_exists();
+
+		$wpdb->query( "RENAME TABLE `{$table}_srfmbak` TO `{$table}`" ); // phpcs:ignore -- Restoring the table this test dropped.
+
+		$this->assertFalse( $missing );
+		$this->assertTrue( $this->entries_table->table_exists() );
+	}
 }

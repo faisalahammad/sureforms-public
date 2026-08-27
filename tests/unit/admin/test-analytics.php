@@ -1022,4 +1022,76 @@ class Test_Analytics extends TestCase {
 
 		return $post;
 	}
+
+	// ---------------------------------------------------------------
+	// Missing entries table
+	// ---------------------------------------------------------------
+
+	/**
+	 * The daily payload must carry the missing-table state. The impression event
+	 * fires once per site, so without this KPI a site that stays broken for months
+	 * looks identical to one that fixed itself the same day.
+	 */
+	public function test_analytics_payload_reports_the_entries_table_state() {
+		$data = Analytics::get_instance()->add_srfm_analytics_data( [] );
+
+		$this->assertArrayHasKey(
+			'db_entries_table_missing',
+			$data['plugin_data']['sureforms']['boolean_values']
+		);
+		$this->assertFalse( $data['plugin_data']['sureforms']['boolean_values']['db_entries_table_missing'] );
+	}
+
+	/**
+	 * Every query against the entries table errors while it is missing. Before this
+	 * guard the daily send tripped over get_total_entries_by_status() on exactly the
+	 * sites whose breakage we most need reported.
+	 */
+	public function test_analytics_does_not_query_a_missing_entries_table() {
+		global $wpdb;
+
+		$table = \SRFM\Inc\Database\Tables\Entries::get_instance()->get_tablename();
+
+		$versions            = (array) get_option( 'srfm_database_table_versions', [] );
+		$versions['entries'] = 2;
+		update_option( 'srfm_database_table_versions', $versions );
+
+		$wpdb->query( "CREATE TABLE `{$table}_srfmbak` LIKE `{$table}`" ); // phpcs:ignore -- Preserving the schema across the drop under test.
+		$wpdb->query( "DROP TABLE `{$table}`" ); // phpcs:ignore -- Reproducing the dropped-table state under test.
+		$this->reset_table_cache();
+
+		// Record every query the payload runs. Asserting on $wpdb->last_error would
+		// pass by accident, because a later successful query clears it.
+		$seen = [];
+		$spy  = static function ( $query ) use ( &$seen, $table ) {
+			if ( false !== strpos( (string) $query, $table ) ) {
+				$seen[] = $query;
+			}
+			return $query;
+		};
+
+		add_filter( 'query', $spy );
+		$data = Analytics::get_instance()->add_srfm_analytics_data( [] );
+		remove_filter( 'query', $spy );
+
+		$wpdb->query( "RENAME TABLE `{$table}_srfmbak` TO `{$table}`" ); // phpcs:ignore -- Restoring the table this test dropped.
+		$this->reset_table_cache();
+
+		$this->assertSame( [], $seen, 'The analytics payload must not query a missing entries table.' );
+		$this->assertSame( 0, $data['plugin_data']['sureforms']['numeric_values']['total_entries'] );
+		$this->assertTrue( $data['plugin_data']['sureforms']['boolean_values']['db_entries_table_missing'] );
+	}
+
+	/**
+	 * Clear the per-request memo and the transient behind is_entries_table_missing().
+	 *
+	 * @return void
+	 */
+	private function reset_table_cache() {
+		delete_transient( \SRFM\Inc\Database\Register::ENTRIES_TABLE_CHECK_TRANSIENT );
+
+		$memo = new ReflectionProperty( \SRFM\Inc\Database\Register::class, 'entries_table_present' );
+		$memo->setAccessible( true );
+		$memo->setValue( null, null );
+	}
 }
