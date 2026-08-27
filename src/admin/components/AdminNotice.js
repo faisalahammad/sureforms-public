@@ -113,8 +113,15 @@ const SingleNotice = ( { variant = 'info', message, title, actions = [] } ) => {
 			await handler();
 			// Reload rather than mutating local state: the notice is rendered from a
 			// PHP-localized array, so the server is the only thing that can say it is
-			// resolved. The reloaded page carries the success notice.
-			window.location.reload();
+			// resolved.
+			//
+			// The flag has to be added by hand. PHP registers the confirmation off
+			// `srfm_db_repair`, and a bare reload would drop the warning with nothing
+			// in its place — the same silent outcome as a failure. The admin-post
+			// fallback redirects with this exact arg, so both paths land identically.
+			const next = new URL( window.location.href );
+			next.searchParams.set( 'srfm_db_repair', 'done' );
+			window.location.assign( next.toString() );
 		} catch ( error ) {
 			setStatus( {
 				busy: false,
