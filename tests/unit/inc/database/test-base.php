@@ -463,6 +463,70 @@ class Test_Database_Base extends TestCase {
 	}
 
 	/**
+	 * The table name is always derived from the live `$wpdb->prefix`, never cached
+	 * from install time — that derivation is what makes a prefix change detectable
+	 * rather than silently fatal.
+	 */
+	public function test_get_tablename() {
+		global $wpdb;
+
+		$this->assertSame( $wpdb->prefix . 'srfm_entries', $this->entries_table->get_tablename() );
+		$this->assertSame( $wpdb->prefix . 'srfm_payments', $this->base->get_tablename() );
+	}
+
+	/**
+	 * create() must refuse an empty column definition rather than emit a CREATE TABLE
+	 * with no body. Guard-clause coverage for the function that gained the
+	 * srfm_db_upgrade_query_failed failure hook.
+	 */
+	public function test_create() {
+		$this->assertFalse( $this->entries_table->create( [] ) );
+	}
+
+	/**
+	 * A name match is not a data match: has_expected_columns() is the guard that stops
+	 * an unrelated table being renamed into place just because it ends in the right
+	 * words. True for the real table, false for one carrying only an id.
+	 */
+	public function test_has_expected_columns() {
+		global $wpdb;
+
+		$method = new \ReflectionMethod( $this->entries_table, 'has_expected_columns' );
+		$method->setAccessible( true );
+
+		$this->assertTrue( $method->invoke( $this->entries_table, $this->entries_table->get_tablename() ) );
+
+		$bare = $wpdb->prefix . 'srfm_bare_probe';
+		$wpdb->query( "CREATE TABLE `{$bare}` ( id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY )" ); // phpcs:ignore -- Scratch table for this test.
+		$wrong = $method->invoke( $this->entries_table, $bare );
+		$wpdb->query( "DROP TABLE `{$bare}`" ); // phpcs:ignore -- Dropping the scratch table this test created.
+
+		$this->assertFalse( $wrong );
+	}
+
+	/**
+	 * Nothing is adoptable while the table is in place — the live table always wins,
+	 * so a stray differently-prefixed copy must not be reported as a candidate.
+	 *
+	 * The missing-table cases, and every refusal guard, are covered in
+	 * Test_Database_Register alongside the repair that consumes them.
+	 */
+	public function test_find_adoptable_table() {
+		$this->assertSame( '', $this->entries_table->find_adoptable_table() );
+	}
+
+	/**
+	 * adopt_table() renames a table, so its refusals matter more than its happy path:
+	 * nothing to adopt is not a repair, and renaming a table onto itself is a MySQL
+	 * error rather than a no-op. The successful adoption is covered in
+	 * Test_Database_Register, where the rows can be seeded and read back.
+	 */
+	public function test_adopt_table() {
+		$this->assertFalse( $this->entries_table->adopt_table( '' ) );
+		$this->assertFalse( $this->entries_table->adopt_table( $this->entries_table->get_tablename() ) );
+	}
+
+	/**
 	 * A dropped table must read as missing — this is the state the whole
 	 * detect-and-repair feature exists to catch.
 	 */

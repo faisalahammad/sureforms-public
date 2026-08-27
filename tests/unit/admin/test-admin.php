@@ -8,6 +8,7 @@
 use Yoast\PHPUnitPolyfills\TestCases\TestCase;
 
 use SRFM\Admin\Admin;
+use SRFM\Inc\Database\Register;
 use SRFM\Inc\Helper;
 
 require_once __DIR__ . '/trait-astra-notices-helper.php';
@@ -526,7 +527,7 @@ class Test_Admin extends TestCase {
 	 * Both directions are asserted: with the table genuinely missing, an empty
 	 * result on another screen only means something if the dashboard renders.
 	 */
-	public function test_database_notice_only_renders_on_the_dashboard() {
+	public function test_render_database_repair_notice() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
 
 		$this->break_entries_table();
@@ -545,6 +546,106 @@ class Test_Admin extends TestCase {
 
 		$this->assertSame( '', $elsewhere );
 		$this->assertStringContainsString( 'notice-warning', $on_dashboard );
+	}
+
+	/**
+	 * The React notice must actually be registered when the table is missing, and
+	 * must carry the opaque `action` id rather than an endpoint for the browser to
+	 * call. Priority 5 on admin_init is load-bearing: Notice_Manager hands notices to
+	 * the front end during admin_enqueue_scripts, so anything registering later never
+	 * reaches the page.
+	 */
+	public function test_register_database_repair_notice() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+
+		\SRFM\Admin\Notice_Manager::clear_notices();
+		$this->break_entries_table();
+
+		Admin::get_instance()->register_database_repair_notice();
+		$notices = \SRFM\Admin\Notice_Manager::get_notices();
+
+		$this->restore_entries_table();
+		\SRFM\Admin\Notice_Manager::clear_notices();
+
+		$ids = wp_list_pluck( $notices, 'id' );
+		$this->assertContains( 'srfm-database-maintenance', $ids );
+
+		$notice = null;
+		foreach ( $notices as $candidate ) {
+			if ( 'srfm-database-maintenance' === $candidate['id'] ) {
+				$notice = $candidate;
+			}
+		}
+
+		$this->assertSame( 'warning', $notice['variant'], 'This is routine maintenance, not an error.' );
+		$this->assertSame( 'repair-entries-table', $notice['actions'][0]['action'] );
+	}
+
+	/**
+	 * Nothing may be registered on a healthy install — a false positive would put a
+	 * "database update needed" notice on every working site.
+	 */
+	public function test_register_database_repair_notice_is_silent_when_healthy() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+
+		\SRFM\Admin\Notice_Manager::clear_notices();
+		Admin::get_instance()->register_database_repair_notice();
+		$ids = wp_list_pluck( \SRFM\Admin\Notice_Manager::get_notices(), 'id' );
+		\SRFM\Admin\Notice_Manager::clear_notices();
+
+		$this->assertNotContains( 'srfm-database-maintenance', $ids );
+	}
+
+	/**
+	 * The admin-post entry point repairs a table, so the capability check must come
+	 * first — ahead of the nonce, and ahead of any write. A subscriber following the
+	 * link must be stopped before anything touches the database.
+	 */
+	public function test_handle_database_repair() {
+		wp_set_current_user( $this->make_user( 'subscriber' ) );
+
+		// wp_die() ends the request; make it throw so the runner survives and we can
+		// assert that the capability check stopped us before anything else ran.
+		$throw_handler = static function () {
+			return static function () {
+				throw new \WPDieException( 'srfm_test_die' );
+			};
+		};
+		add_filter( 'wp_die_handler', $throw_handler );
+
+		$died = false;
+
+		ob_start();
+		try {
+			Admin::get_instance()->handle_database_repair();
+		} catch ( \WPDieException $e ) {
+			$died = true;
+		} finally {
+			ob_end_clean();
+			remove_filter( 'wp_die_handler', $throw_handler );
+		}
+
+		$this->assertTrue( $died, 'A subscriber must be stopped before the repair runs.' );
+	}
+
+	/**
+	 * The Pro compatibility notices must stay off a free-only install. The guard is
+	 * a single early return over three conditions, so a free site is the case most
+	 * likely to regress into seeing a notice about a plugin it does not have.
+	 */
+	public function test_register_pro_compatibility_notices() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+
+		\SRFM\Admin\Notice_Manager::clear_notices();
+		Admin::get_instance()->register_pro_compatibility_notices();
+		$notices = \SRFM\Admin\Notice_Manager::get_notices();
+		\SRFM\Admin\Notice_Manager::clear_notices();
+
+		if ( Helper::has_pro() ) {
+			$this->markTestSkipped( 'Pro is active; this asserts the free-only path.' );
+		}
+
+		$this->assertSame( [], $notices );
 	}
 
 	/**
@@ -702,7 +803,7 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_do_database_repair_reports_the_table_state() {
 		$this->assertTrue( Admin::get_instance()->do_database_repair() );
-		$this->assertFalse( \SRFM\Inc\Database\Register::is_entries_table_missing( true ) );
+		$this->assertFalse( Register::is_entries_table_missing( true ) );
 	}
 
 	/**
@@ -746,9 +847,9 @@ class Test_Admin extends TestCase {
 	 * @return void
 	 */
 	private function reset_table_cache() {
-		delete_transient( \SRFM\Inc\Database\Register::ENTRIES_TABLE_CHECK_TRANSIENT );
+		delete_transient( Register::ENTRIES_TABLE_CHECK_TRANSIENT );
 
-		$memo = new ReflectionProperty( \SRFM\Inc\Database\Register::class, 'entries_table_present' );
+		$memo = new ReflectionProperty( Register::class, 'entries_table_present' );
 		$memo->setAccessible( true );
 		$memo->setValue( null, null );
 	}

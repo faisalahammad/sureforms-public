@@ -66,7 +66,7 @@ class Test_Database_Register extends TestCase {
 	/**
 	 * A healthy install must never raise the notice.
 	 */
-	public function test_reports_present_when_the_table_exists() {
+	public function test_is_entries_table_missing() {
 		$this->assertFalse( Register::is_entries_table_missing( true ) );
 	}
 
@@ -127,7 +127,7 @@ class Test_Database_Register extends TestCase {
 	/**
 	 * With nothing to adopt, repair creates the table from the schema.
 	 */
-	public function test_repair_recreates_a_missing_table() {
+	public function test_repair_entries_table() {
 		$this->record_entries_version( 2 );
 		$this->drop_entries_table();
 
@@ -243,10 +243,25 @@ class Test_Database_Register extends TestCase {
 	 * The notice copy branches on this, so it must stay empty on a healthy site
 	 * rather than reporting whatever happens to be lying around.
 	 */
-	public function test_reports_nothing_adoptable_while_the_table_is_present() {
+	public function test_get_adoptable_entries_table() {
 		$this->clone_entries_table( 'srfmtest1_srfm_entries' );
 
 		$this->assertSame( '', Register::get_adoptable_entries_table() );
+	}
+
+	/**
+	 * The table map is what init() and the repair both iterate, so a table dropping
+	 * out of it would silently stop being created or repaired at all.
+	 */
+	public function test_get_db_tables() {
+		$tables = Register::get_db_tables();
+
+		$this->assertArrayHasKey( 'entries', $tables );
+		$this->assertArrayHasKey( 'payments', $tables );
+
+		foreach ( $tables as $table ) {
+			$this->assertInstanceOf( \SRFM\Inc\Database\Base::class, $table );
+		}
 	}
 
 	// ---------------------------------------------------------------
