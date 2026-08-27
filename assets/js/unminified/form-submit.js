@@ -224,14 +224,73 @@ function initializeFormHandlers() {
  *
  * Fires a single beacon per form the first time it scrolls into view, so views are
  * counted even on fully page-cached pages (the beacon runs client-side). Non-JS
- * crawlers never execute this, so they are excluded naturally. Privileged users and
- * builder/Instant Form previews are excluded via the server-set
- * `window.srfm_view_beacon.enabled` flag.
+ * crawlers never execute this, so they are excluded naturally.
+ *
+ * `window.srfm_view_beacon.enabled` only reports whether counting has ever started,
+ * because that value is printed into cacheable HTML. Per-request exclusions
+ * (privileged users, builder/Instant Form previews) are enforced server-side in
+ * track_view(), which cannot go stale in a page cache.
  *
  * @param {Array} forms - The `.srfm-form` elements collected during initialization.
  */
+
+/**
+ * One observer for the whole document, created lazily on first use.
+ *
+ * Not one per form: initializeFormHandlers() re-runs on `elementor/popup/show` and on
+ * every `srfm_form_initialize` event, and a per-form observer was created on each of
+ * those passes for any form that had not yet been seen. Opening a popup twenty times
+ * left twenty live observers on a below-the-fold form, each retaining the element and
+ * its closure even after the node was removed from the DOM.
+ */
+let srfmViewObserver = null;
+
+/**
+ * Form IDs already counted in this page load.
+ *
+ * Keyed on the form ID rather than the DOM element because one page can embed the
+ * same form more than once (the reason the instance counter above exists). Two
+ * elements meant two beacons for a single page view, which inflated views and halved
+ * that form's conversion rate. It also survives a node being replaced and re-inited,
+ * which the previous `data-srfm-view-tracked` attribute did not.
+ */
+const srfmCountedFormIds = new Set();
+
+function srfmSendViewBeacon( formId, viewToken ) {
+	const beaconUrl = window.srfm_view_beacon?.url;
+
+	// Bail before anything is marked counted, so a missing URL does not silently
+	// burn the view the way an unguarded request would.
+	if ( ! beaconUrl ) {
+		return;
+	}
+
+	srfmCountedFormIds.add( formId );
+
+	// Plain fetch(), not wp.apiFetch(): `srfm-form-submit` does not declare
+	// `wp-api-fetch` as a dependency, so `window.wp.apiFetch` is undefined and calling
+	// it throws a synchronous TypeError that no `.catch()` can intercept. The endpoint
+	// authenticates with the HMAC token below, so none of apiFetch's middleware
+	// (root-URL resolution, nonce injection) is needed — the same reasoning that moved
+	// the two submission calls in this file to fetch().
+	//
+	// keepalive: the beacon commonly fires as the visitor is navigating away; without
+	// it the browser cancels the request in flight and the view is lost.
+	fetch( beaconUrl, {
+		method: 'POST',
+		keepalive: true,
+		headers: {
+			'Content-Type': 'application/json',
+			'X-WP-Submit-Token': viewToken,
+		},
+		body: JSON.stringify( { form_id: formId } ),
+	} ).catch( () => {
+		// Beacon is best-effort; never disrupt the page on failure.
+	} );
+}
+
 function trackFormViews( forms ) {
-	// Respect the server-side exclusion flag (admins/editors, previews).
+	// Has counting ever been switched on for this site?
 	if ( '1' !== String( window.srfm_view_beacon?.enabled ?? '0' ) ) {
 		return;
 	}
@@ -240,60 +299,63 @@ function trackFormViews( forms ) {
 		return;
 	}
 
-	for ( const form of forms ) {
-		// Count each form once per page load.
-		if ( form.hasAttribute( 'data-srfm-view-tracked' ) ) {
-			continue;
-		}
-
-		const formId = form.getAttribute( 'form-id' );
-		const viewToken = form.getAttribute( 'data-view-token' );
-
-		// Reject a malformed form-id up front. Marking the element tracked and
-		// disconnecting the observer before discovering the id is unusable would
-		// silently lose the view to a guaranteed 400.
-		const numericFormId = parseInt( formId, 10 );
-		if ( ! Number.isInteger( numericFormId ) || numericFormId < 1 || ! viewToken ) {
-			continue;
-		}
-
-		const observer = new window.IntersectionObserver(
-			( entries, obs ) => {
+	if ( ! srfmViewObserver ) {
+		srfmViewObserver = new window.IntersectionObserver(
+			( entries ) => {
 				for ( const entry of entries ) {
 					if ( ! entry.isIntersecting ) {
 						continue;
 					}
 
-					// Guard again inside the callback: if initializeFormHandlers()
-					// re-ran and attached a second observer to a still-unviewed form,
-					// this prevents both observers from counting the same impression.
-					if ( form.hasAttribute( 'data-srfm-view-tracked' ) ) {
-						obs.disconnect();
+					// threshold 0 alone reports a zero-area target as intersecting, so a
+					// form in a collapsed accordion or an inactive tab panel counted as
+					// "appeared on screen". Require real painted area instead.
+					const rect = entry.intersectionRect;
+					if ( ! rect || rect.width <= 0 || rect.height <= 0 ) {
 						continue;
 					}
 
-					// Mark + stop observing before the request so it fires only once.
-					form.setAttribute( 'data-srfm-view-tracked', '1' );
-					obs.disconnect();
+					// Stop watching this element regardless of the outcome below.
+					srfmViewObserver.unobserve( entry.target );
 
-					window.wp.apiFetch( {
-						path: 'sureforms/v1/forms/track-view',
-						method: 'POST',
-						data: { form_id: numericFormId },
-						headers: {
-							'X-WP-Submit-Token': viewToken,
-						},
-					} ).catch( () => {
-						// Beacon is best-effort; never disrupt the page on failure.
-					} );
+					const formId = Number(
+						entry.target.getAttribute( 'form-id' )
+					);
+					const viewToken =
+						entry.target.getAttribute( 'data-view-token' );
+
+					if ( srfmCountedFormIds.has( formId ) || ! viewToken ) {
+						continue;
+					}
+
+					srfmSendViewBeacon( formId, viewToken );
 				}
 			},
 			// threshold 0 → count as soon as any part of the form is visible,
 			// so tall forms on short viewports are not missed.
 			{ threshold: 0 }
 		);
+	}
 
-		observer.observe( form );
+	for ( const form of forms ) {
+		// Already watched, or already counted via another embed of the same form.
+		if ( form.hasAttribute( 'data-srfm-view-observed' ) ) {
+			continue;
+		}
+
+		// Number(), not parseInt(): parseInt( '42abc' ) is 42, so a malformed
+		// attribute passed the guard and was sent as a plausible-looking ID.
+		const numericFormId = Number( form.getAttribute( 'form-id' ) );
+		if (
+			! Number.isInteger( numericFormId ) ||
+			numericFormId < 1 ||
+			! form.getAttribute( 'data-view-token' )
+		) {
+			continue;
+		}
+
+		form.setAttribute( 'data-srfm-view-observed', '1' );
+		srfmViewObserver.observe( form );
 	}
 }
 

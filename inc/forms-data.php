@@ -337,7 +337,21 @@ class Forms_Data {
 		$rows = [];
 		foreach ( $id_query->posts as $post_id ) {
 			$form_id = Helper::get_integer_value( $post_id );
-			$metrics = $this->calculate_form_metrics( $form_id );
+
+			// Same three arguments the render path passes. Calling this with only the
+			// form ID left $post_date_gmt empty, so strtotime() returned false, the
+			// "form is younger than the window" shortcut could never be taken, and the
+			// windowed COUNT ran for every row — both a second query per form and, for
+			// any entry whose created_at predates the form's post_date (an import, a
+			// migration, a restored backup), a different number than the column shows.
+			// The comment below promises order and display can never disagree; passing
+			// different arguments here is what made them disagree.
+			$post    = get_post( $form_id );
+			$metrics = $this->calculate_form_metrics(
+				$form_id,
+				$post->post_date_gmt ?? '',
+				Helper::get_integer_value( Entries::get_total_entries_by_status( 'all', $form_id ) )
+			);
 
 			// Same helper the column renders from, so the order always matches the
 			// numbers on screen. An unmeasurable rate sorts as -1 rather than 0, so

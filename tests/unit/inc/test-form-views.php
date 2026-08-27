@@ -106,6 +106,51 @@ class Test_Form_Views extends TestCase {
 		wp_delete_user( $editor );
 	}
 
+	/**
+	 * The privileged-user exclusion must survive REST's anonymous reset.
+	 *
+	 * Core's rest_cookie_check_errors() calls wp_set_current_user( 0 ) for any
+	 * cookie-bearing REST request that carries no nonce ( wp-includes/rest-api.php ).
+	 * The beacon sends only X-WP-Submit-Token, so that is every beacon request an
+	 * administrator or editor makes while browsing their own site. Resolving identity
+	 * with get_current_user_id() therefore sees 0 and counts their page views as
+	 * anonymous traffic, which is exactly what the setting promises it will not do.
+	 *
+	 * This models the dispatch state rather than the pre-dispatch one: the auth cookie
+	 * is present, the current user has already been reset.
+	 */
+	public function test_should_track_excludes_privileged_user_after_rest_anonymous_reset() {
+		$editor = wp_insert_user(
+			[
+				'user_login' => 'srfm_views_rest_editor_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_views_rest_editor_' . wp_rand() . '@example.com',
+				'role'       => 'editor',
+			]
+		);
+
+		$expiration                    = time() + HOUR_IN_SECONDS;
+		$_COOKIE[ LOGGED_IN_COOKIE ]   = wp_generate_auth_cookie( $editor, $expiration, 'logged_in' );
+
+		// What core has already done by the time the permission callback runs.
+		wp_set_current_user( 0 );
+
+		$this->assertSame(
+			$editor,
+			\SRFM\Inc\Helper::get_submitting_user_id(),
+			'Sanity: the auth cookie must still identify the editor after the reset.'
+		);
+
+		$this->assertFalse(
+			$this->call_private_method( $this->views, 'should_track' ),
+			'An editor browsing their own site must not be counted as a visitor.'
+		);
+
+		unset( $_COOKIE[ LOGGED_IN_COOKIE ] );
+		wp_set_current_user( 0 );
+		wp_delete_user( $editor );
+	}
+
 	// ──────────────────────────────────────────────
 	// is_tracking_enabled (global General-settings toggle)
 	// ──────────────────────────────────────────────
@@ -460,5 +505,74 @@ class Test_Form_Views extends TestCase {
 
 		wp_dequeue_script( 'srfm-form-submit' );
 		wp_deregister_script( 'srfm-form-submit' );
+	}
+
+	/**
+	 * The localized flag must not depend on anything request-specific.
+	 *
+	 * localize_beacon() prints into HTML that a full-page cache stores and replays to
+	 * every visitor. If the flag were computed from should_track(), whichever request
+	 * happened to populate the cache would freeze its own answer for everyone — a page
+	 * first cached while an editor was logged in would bake in '0' and silently stop
+	 * counting site-wide until that cache entry expired. It is therefore gated on the
+	 * site-wide tracking stamp, and the per-request exclusions stay in track_view().
+	 */
+	public function test_localize_beacon_flag_is_cache_safe() {
+		wp_register_script( 'srfm-form-submit', '', [], '1.0.0', true );
+		wp_enqueue_script( 'srfm-form-submit' );
+
+		$editor = wp_insert_user(
+			[
+				'user_login' => 'srfm_views_beacon_editor_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_views_beacon_editor_' . wp_rand() . '@example.com',
+				'role'       => 'editor',
+			]
+		);
+		wp_set_current_user( $editor );
+
+		// This user must be excluded from counting...
+		$this->assertFalse(
+			$this->call_private_method( $this->views, 'should_track' ),
+			'Sanity: an editor must not be counted.'
+		);
+
+		// ...but the cacheable flag must still say the site is counting, or their
+		// page view would disable the beacon for every later reader of that cache entry.
+		$this->views->localize_beacon();
+		$data = wp_scripts()->get_data( 'srfm-form-submit', 'data' );
+
+		$this->assertStringContainsString( '"enabled":"1"', (string) $data );
+		$this->assertStringContainsString( 'track-view', (string) $data, 'The beacon needs a resolved REST URL to fetch().' );
+
+		wp_set_current_user( 0 );
+		wp_delete_user( $editor );
+		wp_dequeue_script( 'srfm-form-submit' );
+		wp_deregister_script( 'srfm-form-submit' );
+	}
+
+	/**
+	 * Two racing first-views can leave two meta rows; the counter must self-repair.
+	 *
+	 * wp_postmeta has no unique index on ( post_id, meta_key ), so add_post_meta()'s
+	 * $unique flag is a SELECT followed by an INSERT. Left alone, every later UPDATE
+	 * increments both rows while get_post_meta() reads only the first — the form
+	 * silently reports roughly half its views for the rest of its life.
+	 */
+	public function test_duplicate_view_rows_are_collapsed_without_losing_counts() {
+		$form_id = $this->make_form();
+
+		// Simulate the race directly: two rows for the same key.
+		add_post_meta( $form_id, Form_Views::META_KEY, 7 );
+		add_post_meta( $form_id, Form_Views::META_KEY, 5 );
+		$this->assertCount( 2, get_post_meta( $form_id, Form_Views::META_KEY, false ), 'Sanity: the race state exists.' );
+
+		$this->call_private_method( $this->views, 'collapse_duplicate_view_rows', [ $form_id ] );
+
+		$rows = get_post_meta( $form_id, Form_Views::META_KEY, false );
+		$this->assertCount( 1, $rows, 'Duplicates must be folded into a single row.' );
+		$this->assertSame( 12, $this->views->get_views( $form_id ), 'No counted view may be discarded by the repair.' );
+
+		wp_delete_post( $form_id, true );
 	}
 }

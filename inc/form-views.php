@@ -101,6 +101,9 @@ class Form_Views {
 		// first time — the case this stamp exists for.
 		add_action( 'update_option_srfm_general_settings_options', [ $this, 'maybe_start_tracking' ], 10, 2 );
 		add_action( 'add_option_srfm_general_settings_options', [ $this, 'maybe_start_tracking' ], 10, 2 );
+
+		// Repairs a toggle that was switched on by a route that fires neither hook.
+		add_action( 'admin_init', [ $this, 'maybe_repair_tracking_window' ] );
 	}
 
 	/**
@@ -261,8 +264,24 @@ class Form_Views {
 			// scalar with (string), so false arrives as '' and true as '1'. That
 			// happens to work with a truthiness check today, but anyone later
 			// 'tidying' this to send '0' would invert the gate, because '0' is a
-			// truthy JS string. Same contract as admin.php's form_views_tracking.
-			[ 'enabled' => $this->should_track() ? '1' : '0' ]
+			// truthy JS string. The JS side compares with '1' !== rather than
+			// truthiness for exactly that reason.
+			[
+				// Gated on the tracking-started stamp, NOT on should_track(). This value
+				// is printed into HTML that a full-page cache stores and replays to
+				// everyone, so anything request-specific here is frozen at whichever
+				// request happened to populate the cache: a page first cached while an
+				// editor was logged in would bake in '0' and silently stop counting for
+				// every visitor until the cache was purged. The stamp is site-wide and
+				// only ever flips once, so it is safe to cache. Per-request exclusions
+				// (privileged users, live previews) stay server-side in track_view(),
+				// which re-checks should_track() on every call and cannot go stale.
+				'enabled' => $this->get_tracking_started_at() > 0 ? '1' : '0',
+				// Fully resolved so the beacon can use a plain fetch(). rest_url()
+				// handles plain permalinks (?rest_route=), subdirectory installs and
+				// multisite domain mapping — the only thing wp.apiFetch offered here.
+				'url'     => esc_url_raw( rest_url( 'sureforms/v1/forms/track-view' ) ),
+			]
 		);
 	}
 
@@ -299,20 +318,39 @@ class Form_Views {
 			return false;
 		}
 
-		$enabled = (bool) $general[ self::SETTING_KEY ];
+		return (bool) $general[ self::SETTING_KEY ];
+	}
 
-		// Self-heal the window. maybe_start_tracking() covers every route that goes
-		// through update_option(), but the setting can also arrive by a path that
-		// fires no hook — a settings import, a partial database restore, a direct
-		// $wpdb write. Left alone, that state shows the columns while nothing ever
-		// counts, and re-saving the identical array would not repair it because
-		// update_option() short-circuits on an unchanged value. Writing only when the
-		// toggle is already on keeps a read from a never-enabled site harmless.
-		if ( $enabled && $this->get_tracking_started_at() <= 0 ) {
-			add_option( self::TRACKING_STARTED_OPTION, time(), '', false );
+	/**
+	 * Repair a toggle that is on while the counting window was never opened.
+	 *
+	 * The maybe_start_tracking() hooks cover every route that goes through
+	 * update_option(), but the setting can also arrive by a path that fires no hook —
+	 * a settings import, a partial restore, a direct $wpdb write. Left alone that state
+	 * shows the columns while nothing ever counts, and re-saving the identical array
+	 * would not repair it because update_option() short-circuits on an unchanged
+	 * value.
+	 *
+	 * Deliberately hooked to admin_init rather than folded into is_tracking_enabled().
+	 * That getter is reached from REST GETs and from the weekly analytics cron, so
+	 * repairing there stamped the window at "whenever a reader happened to run first"
+	 * — on an imported site, most likely a cron pass days later — and silently made a
+	 * getter write. Here the write happens in a request that is already administrative
+	 * and the stamp keeps meaning "when an administrator had this switched on".
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function maybe_repair_tracking_window() {
+		if ( ! $this->is_tracking_enabled() ) {
+			return;
 		}
 
-		return $enabled;
+		if ( $this->get_tracking_started_at() > 0 ) {
+			return;
+		}
+
+		add_option( self::TRACKING_STARTED_OPTION, time(), '', false );
 	}
 
 	/**
@@ -339,7 +377,15 @@ class Form_Views {
 			return false;
 		}
 
-		if ( is_user_logged_in() && current_user_can( 'edit_posts' ) ) {
+		// Not is_user_logged_in()/current_user_can(): core's rest_cookie_check_errors()
+		// calls wp_set_current_user( 0 ) for any cookie-bearing REST request that
+		// carries no nonce, and the beacon deliberately sends only the HMAC token.
+		// Reading the current user therefore sees 0 for an administrator browsing
+		// their own site and counts them as a visitor. get_submitting_user_id()
+		// falls back to wp_validate_auth_cookie(), which the reset does not touch.
+		$user_id = Helper::get_submitting_user_id();
+
+		if ( $user_id > 0 && user_can( $user_id, 'edit_posts' ) ) {
 			return false;
 		}
 
@@ -391,11 +437,59 @@ class Form_Views {
 						self::META_KEY
 					)
 				);
+			} else {
+				// The insert succeeded, but so may a racing one: the $unique flag is a
+				// SELECT then an INSERT and wp_postmeta has no unique index on
+				// ( post_id, meta_key ). Two surviving rows are unrecoverable on their
+				// own — every later UPDATE increments both while get_post_meta() reads
+				// only the first, so the form silently reports about half its views for
+				// the rest of its life. Collapse them now; this runs once per form.
+				self::collapse_duplicate_view_rows( $form_id );
 			}
 		}
 
 		// Keep the post-meta cache consistent after the direct write.
 		wp_cache_delete( $form_id, 'post_meta' );
+	}
+
+	/**
+	 * Fold duplicate view-counter rows for a form back into a single row.
+	 *
+	 * Only ever reachable when two first-views raced each other into add_post_meta().
+	 * The surviving row keeps the SUM, so no counted view is discarded.
+	 *
+	 * @param int $form_id Form post ID.
+	 * @since x.x.x
+	 * @return void
+	 */
+	private static function collapse_duplicate_view_rows( $form_id ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$meta_ids = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT meta_id FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s ORDER BY meta_id ASC",
+				$form_id,
+				self::META_KEY
+			)
+		);
+
+		if ( ! is_array( $meta_ids ) || count( $meta_ids ) < 2 ) {
+			return;
+		}
+
+		$total = 0;
+		foreach ( $meta_ids as $meta_id ) {
+			$total += Helper::get_integer_value( get_metadata_by_mid( 'post', $meta_id )->meta_value ?? 0 );
+		}
+
+		$keep = array_shift( $meta_ids );
+
+		foreach ( $meta_ids as $meta_id ) {
+			delete_metadata_by_mid( 'post', $meta_id );
+		}
+
+		update_metadata_by_mid( 'post', $keep, (string) $total );
 	}
 
 	/**
@@ -412,6 +506,21 @@ class Form_Views {
 		// bucket each time, and inflate the view counter without bound.
 		$ip = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
 
+		/**
+		 * Filters the client IP used to bucket view-tracking rate limits.
+		 *
+		 * REMOTE_ADDR is the only value that cannot be spoofed by the client, so it is
+		 * the default. Behind a CDN or load balancer it is the proxy's address and is
+		 * identical for every visitor, which collapses the whole site into one bucket
+		 * and caps counted views at RATE_LIMIT_MAX per form per minute. Sites that
+		 * terminate at a trusted proxy can return the real client address here — only
+		 * do so when the header it comes from is set by infrastructure you control.
+		 *
+		 * @since x.x.x
+		 * @param string $ip The connection's REMOTE_ADDR.
+		 */
+		$ip = (string) apply_filters( 'srfm_form_views_client_ip', $ip );
+
 		if ( empty( $ip ) || ! filter_var( $ip, FILTER_VALIDATE_IP ) ) {
 			return true; // Fail closed if IP cannot be determined.
 		}
@@ -421,14 +530,19 @@ class Form_Views {
 		// them a fresh allowance — plus a fresh wp_options row — for each one.
 		$bucket = self::network_bucket( $ip );
 
-		// Per-form ceiling first, and it is the one that actually bounds a
-		// distributed flood: the per-network counter can always be escaped by
-		// rotating networks, and the first hit on a new bucket is free.
-		if ( self::hit_counter( 'form_' . $form_id ) > self::RATE_LIMIT_FORM_MAX ) {
+		// The caller's own bucket is charged FIRST, and a caller that is over its own
+		// limit returns here without touching the shared per-form counter. Charging
+		// the shared ceiling first let one address spend the whole form's budget and
+		// then keep spending it: every rejected request still incremented it, so from
+		// request 201 onward every genuine visitor was refused for the rest of the
+		// window, and each refusal still cost two wp_options writes.
+		if ( self::hit_counter( $bucket . '_' . $form_id ) > self::RATE_LIMIT_MAX ) {
 			return true;
 		}
 
-		return self::hit_counter( $bucket . '_' . $form_id ) > self::RATE_LIMIT_MAX;
+		// The per-form ceiling still bounds a distributed flood, where rotating
+		// networks defeats the per-network counter above.
+		return self::hit_counter( 'form_' . $form_id ) > self::RATE_LIMIT_FORM_MAX;
 	}
 
 	/**
@@ -479,7 +593,18 @@ class Form_Views {
 			// add() only succeeds for the first caller, so exactly one request seeds
 			// the window and every other one increments atomically.
 			wp_cache_add( $key, 0, self::RATE_LIMIT_GROUP, MINUTE_IN_SECONDS );
-			return Helper::get_integer_value( wp_cache_incr( $key, 1, self::RATE_LIMIT_GROUP ) );
+
+			$count = wp_cache_incr( $key, 1, self::RATE_LIMIT_GROUP );
+
+			// incr() returns false when the backend errors or the key was evicted
+			// between the add() and here. Returning 0 for that would report "no hits
+			// yet" and admit every request, so a broken cache would silently remove
+			// the limiter. Report the ceiling instead: an unavailable backend denies.
+			if ( false === $count ) {
+				return self::RATE_LIMIT_FORM_MAX + 1;
+			}
+
+			return Helper::get_integer_value( $count );
 		}
 
 		$transient_key = 'srfm_view_' . md5( $key );
