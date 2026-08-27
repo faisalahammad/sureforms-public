@@ -552,6 +552,40 @@ class Test_Form_Views extends TestCase {
 	}
 
 	/**
+	 * The admin_init repair opens a window only when the toggle is on and unstamped.
+	 *
+	 * This exists for settings that arrive by a route firing neither option hook — an
+	 * import, a partial restore, a direct $wpdb write — which would otherwise show the
+	 * columns while nothing was ever counted. It must not open a window on a site that
+	 * never enabled the feature, and it must never move a window that is already open:
+	 * the stored counts cover the original period, so advancing the stamp would measure
+	 * them against a shorter entry window and inflate the conversion rate.
+	 */
+	public function test_maybe_repair_tracking_window() {
+		// Toggle off → nothing to repair, and no window may be opened.
+		delete_option( Form_Views::TRACKING_STARTED_OPTION );
+		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => false ] );
+		$this->views->maybe_repair_tracking_window();
+		$this->assertSame( 0, $this->views->get_tracking_started_at(), 'A disabled site must not start counting.' );
+
+		// Toggle on but never stamped (the imported-settings case) → repair it.
+		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => true ] );
+		delete_option( Form_Views::TRACKING_STARTED_OPTION );
+		$this->views->maybe_repair_tracking_window();
+		$stamp = $this->views->get_tracking_started_at();
+		$this->assertGreaterThan( 0, $stamp, 'An enabled but unstamped site must have its window opened.' );
+
+		// Already stamped → must be left exactly where it was.
+		$original = $stamp - DAY_IN_SECONDS;
+		update_option( Form_Views::TRACKING_STARTED_OPTION, $original );
+		$this->views->maybe_repair_tracking_window();
+		$this->assertSame( $original, $this->views->get_tracking_started_at(), 'An open window must never be moved forward.' );
+
+		delete_option( 'srfm_general_settings_options' );
+		delete_option( Form_Views::TRACKING_STARTED_OPTION );
+	}
+
+	/**
 	 * Two racing first-views can leave two meta rows; the counter must self-repair.
 	 *
 	 * wp_postmeta has no unique index on ( post_id, meta_key ), so add_post_meta()'s
