@@ -298,10 +298,102 @@ function prepareAddressesData( form ) {
  * @throws {Object|Error} The parsed error body on a non-2xx response, or the
  *                         original Error if the body wasn't valid JSON.
  */
+/**
+ * Client-side debug log for form submission failures.
+ *
+ * Ships to the server only while the "Enable Logs" setting is on, and only on a
+ * failure. The server re-checks that setting on every request, so the flag here
+ * is a hint that keeps us from posting needlessly -- it is baked into cached
+ * HTML and can be a full cache TTL out of date.
+ *
+ * Deliberately not a window.fetch wrapper: patching a global is uninstallable
+ * once another script patches on top, and captures every request on the page.
+ * These are five explicit call sites instead.
+ */
+const srfmLog = {
+	entries: [],
+	token: '',
+
+	isOn() {
+		return !! window.srfm_submit?.logging_enabled;
+	},
+
+	add( entry ) {
+		if ( ! this.isOn() ) {
+			return;
+		}
+		// Bound the buffer. A page that fails repeatedly must not grow without limit.
+		if ( this.entries.length < 10 ) {
+			this.entries.push( entry );
+		}
+	},
+
+	/**
+	 * Send whatever has been buffered, then forget it.
+	 *
+	 * Uses fetch rather than navigator.sendBeacon: the token travels in a header
+	 * and sendBeacon cannot set one. Beacon semantics are not needed anyway --
+	 * the page is still alive after a failed submit.
+	 *
+	 * @param {HTMLFormElement} form Form the failure belongs to.
+	 */
+	flush( form ) {
+		if ( ! this.isOn() || ! this.entries.length ) {
+			return;
+		}
+
+		const url = window.srfm_submit?.log_error_url;
+		const token = this.token;
+		const formId = Number( form?.getAttribute( 'form-id' ) ) || 0;
+
+		if ( ! url ) {
+			this.entries = [];
+			return;
+		}
+
+		const body = JSON.stringify( {
+			form_id: formId,
+			entries: this.entries,
+		} );
+
+		this.entries = [];
+
+		// Fire and forget. A logging failure must never affect the submission.
+		fetch( url, {
+			method: 'POST',
+			keepalive: true,
+			headers: {
+				'Content-Type': 'application/json',
+				'X-WP-Submit-Token': token || '',
+			},
+			body,
+		} ).catch( () => {} );
+	},
+};
+
 async function parseRestResponse( response ) {
 	let body = null;
 	try {
-		body = await response.json();
+		// Clone before reading: a Response body can only be consumed once, and on a
+		// parse failure the raw text is the whole diagnosis -- a WAF block page, a
+		// PHP fatal, or a stray warning printed ahead of the JSON. Without this the
+		// log says "submission failed", which the admin already knew.
+		const rawForLog = srfmLog.isOn() ? response.clone() : null;
+
+		try {
+			body = await response.json();
+		} catch ( parseError ) {
+			if ( rawForLog ) {
+				const text = await rawForLog.text().catch( () => '' );
+				srfmLog.add( {
+					type: 'response',
+					status: response.status,
+					message: `Response was not JSON: ${ parseError?.message ?? '' }`,
+					body: String( text ).slice( 0, 500 ),
+				} );
+			}
+			throw parseError;
+		}
 	} catch ( parseError ) {
 		if ( response.ok ) {
 			return null;
@@ -335,6 +427,9 @@ async function submitFormData( form ) {
 	const formData = new FormData( form );
 	const filteredFormData = new FormData();
 	const submitToken = form.getAttribute( 'data-submit-token' );
+
+	// Stash for srfmLog.flush(); the log route is gated by the same token.
+	srfmLog.token = submitToken;
 
 	// Define keys to exclude from filtered form data
 	const blockTheseKeys = [ 'srfm-email-confirm', 'srfm-password-confirm' ];
@@ -431,6 +526,8 @@ async function submitFormData( form ) {
 		}
 	} );
 
+	const startedAt = performance.now();
+
 	try {
 		const response = await fetch( submitFormUrl, {
 			method: 'POST',
@@ -439,10 +536,41 @@ async function submitFormData( form ) {
 				'X-WP-Submit-Token': submitToken,
 			},
 		} );
-		return await parseRestResponse( response );
+
+		// Read status here, before parseRestResponse consumes the body. Once it
+		// throws, the Response is gone and this is the only place the status,
+		// content type and round-trip time still exist.
+		const status = response.status;
+		const contentType = response.headers.get( 'content-type' ) ?? '';
+		const durationMs = Math.round( performance.now() - startedAt );
+
+		const parsed = await parseRestResponse( response );
+
+		if ( ! response.ok || parsed?.success === false ) {
+			srfmLog.add( {
+				type: 'network',
+				status,
+				duration_ms: durationMs,
+				message: `Submission responded ${ status } (${ contentType })`,
+				// Keys only, never values -- the log must not become a data export.
+				field_keys: [ ...filteredFormData.keys() ],
+			} );
+		}
+
+		return parsed;
 	} catch ( e ) {
 		// Intentional: Log form submission errors to aid debugging in production.
 		console.error( e );
+
+		// "TypeError: Failed to fetch" with a short duration is itself the
+		// diagnosis: the request never reached PHP -- blocked, offline or CORS.
+		srfmLog.add( {
+			type: 'error',
+			duration_ms: Math.round( performance.now() - startedAt ),
+			message: `${ e?.name ?? 'Error' }: ${
+				typeof e?.message === 'string' ? e.message : ''
+			}${ e?.code ? ` (${ e.code })` : '' }`,
+		} );
 
 		/**
 		 * Surface the server's own message (e.g. an expired submission token, a
@@ -843,6 +971,16 @@ async function handleFormSubmission(
 			const errorData = formStatus?.data || {};
 			showErrorMessage( { form, ...errorData } );
 			loader.classList.remove( 'srfm-active' );
+
+			// Record the message the visitor actually saw, then ship everything
+			// buffered for this attempt.
+			srfmLog.add( {
+				type: 'message',
+				message: String(
+					errorData.log_message || errorData.message || ''
+				).slice( 0, 500 ),
+			} );
+			srfmLog.flush( form );
 
 			// Re-enable submit button after error.
 			enableSubmitButton( form );

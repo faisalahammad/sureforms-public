@@ -25,6 +25,11 @@ class Events_Scheduler {
 	 */
 	public function __construct() {
 		add_action( 'init', [ $this, 'srfm_schedule_daily_action' ] );
+
+		// Client debug logging expires on its own. Registered here rather than in
+		// Client_Logger because that class is entirely static and has no bootstrap
+		// of its own.
+		add_action( 'srfm_daily_scheduled_action', [ Client_Logger::class, 'maybe_expire' ] );
 	}
 
 	/**

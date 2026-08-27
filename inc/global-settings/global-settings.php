@@ -8,6 +8,7 @@
 
 namespace SRFM\Inc\Global_Settings;
 
+use SRFM\Inc\Client_Logger;
 use SRFM\Inc\Events_Scheduler;
 use SRFM\Inc\Helper;
 use SRFM\Inc\Payments\Payment_Helper;
@@ -152,12 +153,18 @@ class Global_Settings {
 		$srfm_form_analytics     = $setting_options['srfm_form_analytics'] ?? false;
 		$srfm_bsf_analytics      = $setting_options['srfm_bsf_analytics'] ?? false;
 		$srfm_admin_notification = isset( $setting_options['srfm_admin_notification'] ) ? (bool) $setting_options['srfm_admin_notification'] : true;
+		$srfm_enable_logs        = isset( $setting_options['srfm_enable_logs'] ) ? (bool) $setting_options['srfm_enable_logs'] : false;
 
 		$settings = [
 			'srfm_ip_log'             => $srfm_ip_log,
 			'srfm_form_analytics'     => $srfm_form_analytics,
 			'srfm_admin_notification' => $srfm_admin_notification,
+			'srfm_enable_logs'        => $srfm_enable_logs,
 		];
+
+		// Stamp when logging was switched on so it can expire on its own. Support
+		// asks people to turn this on; nobody remembers to turn it off.
+		Client_Logger::set_enabled_at( $srfm_enable_logs );
 
 		/**
 		 * We are updating sureforms_analytics_optin option from the general settings as it has been introduced
@@ -663,12 +670,22 @@ class Global_Settings {
 					'srfm_ip_log'             => false,
 					'srfm_form_analytics'     => false,
 					'srfm_admin_notification' => true,
+					'srfm_enable_logs'        => false,
 				];
 		}
 
 		if ( ! isset( $global_setting_options['srfm_general_settings_options']['srfm_admin_notification'] ) ) {
 				$global_setting_options['srfm_general_settings_options']['srfm_admin_notification'] = true;
 		}
+
+		// Back-fill for installs whose option predates the setting, and surface the
+		// state the settings screen needs to render the download row.
+		if ( ! isset( $global_setting_options['srfm_general_settings_options']['srfm_enable_logs'] ) ) {
+				$global_setting_options['srfm_general_settings_options']['srfm_enable_logs'] = false;
+		}
+
+		$global_setting_options['srfm_log_file_size']  = Client_Logger::get_file_size();
+		$global_setting_options['srfm_log_expires_at'] = Client_Logger::get_expiry();
 
 		/**
 		 * We have introduced toggle for analytics optin in the general settings.

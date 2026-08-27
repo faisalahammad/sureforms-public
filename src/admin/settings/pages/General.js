@@ -261,11 +261,129 @@ const UsageTrackingContent = ( {
 	);
 };
 
+/**
+ * Debug logging settings section.
+ *
+ * @param {Object}   props
+ * @param {Object}   props.generalTabOptions    - General settings.
+ * @param {Function} props.updateGlobalSettings - Settings update handler.
+ * @param {Object}   props.logMeta              - Server-reported log size and expiry.
+ * @param {Function} props.setLogMeta           - Updates the reported log status.
+ */
+// Mirrors Client_Logger::MAX_FILE_SIZE. Once the file is full it stops accepting
+// lines rather than evicting the repro someone is trying to capture, so the UI has
+// to say so — silently dropping new entries is the one bad outcome here.
+const MAX_LOG_SIZE = 1048576;
+
+const LogsContent = ( {
+	generalTabOptions,
+	updateGlobalSettings,
+	logMeta,
+	setLogMeta,
+} ) => {
+	const [ clearing, setClearing ] = useState( false );
+
+	const nonce = window?.srfm_admin?.client_logs_nonce ?? '';
+	const ajaxUrl = window?.srfm_admin?.ajax_url ?? '';
+	const downloadUrl = `${ ajaxUrl }?action=srfm_download_logs&_wpnonce=${ nonce }`;
+
+	const formatSize = ( bytes ) => {
+		if ( bytes < 1024 ) {
+			return `${ bytes } B`;
+		}
+		if ( bytes < 1048576 ) {
+			return `${ Math.round( bytes / 1024 ) } KB`;
+		}
+		return `${ ( bytes / 1048576 ).toFixed( 1 ) } MB`;
+	};
+
+	const handleClear = async () => {
+		if ( clearing ) {
+			return;
+		}
+		setClearing( true );
+		try {
+			await fetch(
+				`${ ajaxUrl }?action=srfm_clear_logs&_wpnonce=${ nonce }`,
+				{ method: 'POST', credentials: 'same-origin' }
+			);
+			setLogMeta( { ...logMeta, size: 0 } );
+			toast.success( __( 'Log cleared.', 'sureforms' ) );
+		} catch ( error ) {
+			toast.error( __( 'Could not clear the log.', 'sureforms' ) );
+		} finally {
+			setClearing( false );
+		}
+	};
+
+	return (
+		<>
+			<Switch
+				label={ {
+					heading: __( 'Enable logs', 'sureforms' ),
+					description: __(
+						'Records form submission failures reported by the browser, so you can send them to support instead of reading the console. Turn this on only while reproducing a problem — it switches itself off after 7 days.',
+						'sureforms'
+					),
+				} }
+				value={ generalTabOptions.srfm_enable_logs }
+				onChange={ ( value ) =>
+					updateGlobalSettings(
+						'srfm_enable_logs',
+						value,
+						'general-settings'
+					)
+				}
+			/>
+			{ generalTabOptions.srfm_enable_logs && (
+				<div className="flex items-center gap-3">
+					<Button
+						variant="outline"
+						size="md"
+						tag="a"
+						href={ downloadUrl }
+						className="bg-background-secondary"
+					>
+						{ __( 'Download log', 'sureforms' ) }
+					</Button>
+					<Button
+						variant="ghost"
+						size="md"
+						onClick={ handleClear }
+						icon={ clearing && <Loader /> }
+						iconPosition="left"
+					>
+						{ __( 'Clear', 'sureforms' ) }
+					</Button>
+					<span
+						className={
+							logMeta?.size >= MAX_LOG_SIZE
+								? 'text-sm text-support-error'
+								: 'text-sm text-text-secondary'
+						}
+					>
+						{ logMeta?.size >= MAX_LOG_SIZE
+							? __(
+								'Log is full — download and clear it to keep recording.',
+								'sureforms'
+							  )
+							: logMeta?.size
+								? formatSize( logMeta.size )
+								: __( 'Empty', 'sureforms' ) }
+					</span>
+				</div>
+			) }
+		</>
+	);
+};
+
 const GeneralPage = ( {
 	loading,
 	generalTabOptions,
 	emailTabOptions,
 	updateGlobalSettings,
+	logMeta,
+	setLogMeta,
 } ) => {
 	// Detect if user arrived from the Learn section (email-notification lesson).
 	const [ isLearnSource ] = useState(
@@ -335,6 +453,18 @@ const GeneralPage = ( {
 					<UsageTrackingContent
 						generalTabOptions={ generalTabOptions }
 						updateGlobalSettings={ updateGlobalSettings }
+					/>
+				}
+			/>
+			<ContentSection
+				loading={ loading }
+				title={ __( 'Logs', 'sureforms' ) }
+				content={
+					<LogsContent
+						generalTabOptions={ generalTabOptions }
+						updateGlobalSettings={ updateGlobalSettings }
+						logMeta={ logMeta }
+						setLogMeta={ setLogMeta }
 					/>
 				}
 			/>
