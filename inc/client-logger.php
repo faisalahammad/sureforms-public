@@ -47,24 +47,6 @@ class Client_Logger {
 	public const FILENAME_OPTION = 'srfm_client_log_file';
 
 	/**
-	 * Option holding the Unix timestamp at which logging was switched on.
-	 *
-	 * Stored as a timestamp rather than a bool so logging can expire on its own.
-	 * Support asks a site owner to turn logging on; nobody remembers to turn it
-	 * off, and an indefinitely open write path is the long-term risk here.
-	 *
-	 * @since x.x.x
-	 */
-	public const ENABLED_AT_OPTION = 'srfm_client_log_enabled_at';
-
-	/**
-	 * How long logging stays on before it switches itself off, in seconds.
-	 *
-	 * @since x.x.x
-	 */
-	public const MAX_ENABLED_DURATION = 7 * DAY_IN_SECONDS;
-
-	/**
 	 * Maximum size of the log file in bytes.
 	 *
 	 * @since x.x.x
@@ -81,9 +63,17 @@ class Client_Logger {
 	/**
 	 * Whether client error logging is currently switched on.
 	 *
-	 * This is the one authority. The frontend also carries a flag, but that flag
-	 * is baked into cached HTML and can be up to a full cache TTL out of date, so
-	 * it is only ever a hint — every write path re-checks here.
+	 * On by default, including on installs whose stored settings predate the
+	 * option. The point of the log is that the evidence already exists when a
+	 * support ticket arrives -- a default of off would mean asking the reporter to
+	 * enable it and reproduce, which is the round trip this feature removes.
+	 *
+	 * Costs nothing on a healthy site: only failures are ever written, so a site
+	 * whose forms work never creates the file at all.
+	 *
+	 * This is the one authority. The frontend also carries a flag, but that flag is
+	 * baked into cached HTML and can be a full cache TTL out of date, so every
+	 * write path re-checks here.
 	 *
 	 * @since x.x.x
 	 * @return bool
@@ -91,76 +81,11 @@ class Client_Logger {
 	public static function is_enabled() {
 		$general = get_option( 'srfm_general_settings_options', [] );
 
-		if ( ! is_array( $general ) || empty( $general['srfm_enable_logs'] ) ) {
-			return false;
-		}
-
-		$enabled_at = Helper::get_integer_value( get_option( self::ENABLED_AT_OPTION, 0 ) );
-
-		// No recorded start means the setting was written by something that did not
-		// stamp it. Treat it as on rather than silently ignoring the site owner.
-		if ( ! $enabled_at ) {
+		if ( ! is_array( $general ) || ! isset( $general['srfm_enable_logs'] ) ) {
 			return true;
 		}
 
-		return time() - $enabled_at < self::MAX_ENABLED_DURATION;
-	}
-
-	/**
-	 * Unix timestamp at which logging switches itself off, or 0 when not running.
-	 *
-	 * @since x.x.x
-	 * @return int
-	 */
-	public static function get_expiry() {
-		$enabled_at = Helper::get_integer_value( get_option( self::ENABLED_AT_OPTION, 0 ) );
-
-		return $enabled_at ? $enabled_at + self::MAX_ENABLED_DURATION : 0;
-	}
-
-	/**
-	 * Record that logging has just been switched on, or clear that record.
-	 *
-	 * @param bool $enabled Whether logging is being switched on.
-	 * @since x.x.x
-	 * @return void
-	 */
-	public static function set_enabled_at( $enabled ) {
-		if ( ! $enabled ) {
-			delete_option( self::ENABLED_AT_OPTION );
-			return;
-		}
-
-		// Only stamp a fresh start. Re-saving the settings page with logging
-		// already on must not extend the window indefinitely.
-		if ( ! Helper::get_integer_value( get_option( self::ENABLED_AT_OPTION, 0 ) ) ) {
-			update_option( self::ENABLED_AT_OPTION, time(), false );
-		}
-	}
-
-	/**
-	 * Switch logging off once it has been on longer than the maximum duration.
-	 *
-	 * Hooked - srfm_daily_scheduled_action.
-	 *
-	 * @since x.x.x
-	 * @return void
-	 */
-	public static function maybe_expire() {
-		$enabled_at = Helper::get_integer_value( get_option( self::ENABLED_AT_OPTION, 0 ) );
-
-		if ( ! $enabled_at || time() - $enabled_at < self::MAX_ENABLED_DURATION ) {
-			return;
-		}
-
-		$general = get_option( 'srfm_general_settings_options', [] );
-
-		if ( is_array( $general ) ) {
-			$general['srfm_enable_logs'] = false;
-			update_option( 'srfm_general_settings_options', $general );
-		}
-
-		delete_option( self::ENABLED_AT_OPTION );
+		return (bool) $general['srfm_enable_logs'];
 	}
 
 	/**

@@ -51,53 +51,16 @@ class Test_Client_Logger extends TestCase {
 	}
 
 	/**
-	 * Logging must expire on its own. Support asks a site owner to switch it on
-	 * and nobody remembers to switch it off, so an indefinitely open write path is
-	 * the long-term risk this guards.
+	 * Logging is on by default, including on an install whose stored settings
+	 * predate the option — an absent key must read as on, not off, or every
+	 * existing site silently gets nothing.
 	 */
-	public function test_is_enabled_expires_after_the_maximum_duration() {
-		update_option( Client_Logger::ENABLED_AT_OPTION, time() - Client_Logger::MAX_ENABLED_DURATION - 1 );
+	public function test_is_enabled_defaults_to_on() {
+		$general = (array) get_option( 'srfm_general_settings_options', [] );
+		unset( $general['srfm_enable_logs'] );
+		update_option( 'srfm_general_settings_options', $general );
 
-		$this->assertFalse( Client_Logger::is_enabled() );
-	}
-
-	/**
-	 * The daily job must clear the stored setting too, not just report expiry —
-	 * otherwise the settings screen keeps showing the toggle on.
-	 */
-	public function test_maybe_expire() {
-		update_option( Client_Logger::ENABLED_AT_OPTION, time() - Client_Logger::MAX_ENABLED_DURATION - 1 );
-
-		Client_Logger::maybe_expire();
-
-		$general = get_option( 'srfm_general_settings_options', [] );
-
-		$this->assertFalse( (bool) $general['srfm_enable_logs'] );
-		$this->assertSame( 0, Client_Logger::get_expiry() );
-	}
-
-	/**
-	 * Re-saving the settings page while logging is already on must not push the
-	 * expiry further out, or the seven-day limit never arrives.
-	 */
-	public function test_set_enabled_at_does_not_extend_a_running_window() {
-		$started = time() - 1000;
-		update_option( Client_Logger::ENABLED_AT_OPTION, $started );
-
-		Client_Logger::set_enabled_at( true );
-
-		$this->assertSame( $started + Client_Logger::MAX_ENABLED_DURATION, Client_Logger::get_expiry() );
-	}
-
-	/**
-	 * Expiry is only meaningful while logging runs.
-	 */
-	public function test_get_expiry() {
-		$this->assertGreaterThan( time(), Client_Logger::get_expiry() );
-
-		Client_Logger::set_enabled_at( false );
-
-		$this->assertSame( 0, Client_Logger::get_expiry() );
+		$this->assertTrue( Client_Logger::is_enabled() );
 	}
 
 	// ---------------------------------------------------------------
@@ -309,11 +272,6 @@ class Test_Client_Logger extends TestCase {
 		$general['srfm_enable_logs'] = $enabled;
 		update_option( 'srfm_general_settings_options', $general );
 
-		if ( $enabled ) {
-			update_option( Client_Logger::ENABLED_AT_OPTION, time() );
-		} else {
-			delete_option( Client_Logger::ENABLED_AT_OPTION );
-		}
 	}
 
 	/**

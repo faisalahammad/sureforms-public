@@ -44,7 +44,7 @@ const Component = ( { path, subpage } ) => {
 	} );
 	// Server-reported log status. Deliberately outside generalTabOptions: it is
 	// read-only, so including it would make the tab permanently dirty.
-	const [ logMeta, setLogMeta ] = useState( { size: 0, expiresAt: 0 } );
+	const [ logMeta, setLogMeta ] = useState( { size: 0 } );
 	const [ emailTabOptions, setEmailTabOptions ] = useState( {
 		srfm_email_summary: false,
 		srfm_email_sent_to: srfm_admin.admin_email,
@@ -285,7 +285,6 @@ const Component = ( { path, subpage } ) => {
 					nextBaselines[ 'general-settings' ] = snap;
 					setLogMeta( {
 						size: Number( data.srfm_log_file_size ) || 0,
-						expiresAt: Number( data.srfm_log_expires_at ) || 0,
 					} );
 				}
 

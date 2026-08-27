@@ -334,7 +334,6 @@ class Test_Admin_Ajax extends TestCase {
 		$general                     = (array) get_option( 'srfm_general_settings_options', [] );
 		$general['srfm_enable_logs'] = true;
 		update_option( 'srfm_general_settings_options', $general );
-		update_option( Client_Logger::ENABLED_AT_OPTION, time() );
 
 		Client_Logger::append( [ 'type' => 'error', 'message' => 'temporary' ] );
 		$path = Client_Logger::get_log_path( false );
@@ -348,7 +347,6 @@ class Test_Admin_Ajax extends TestCase {
 
 		$general['srfm_enable_logs'] = false;
 		update_option( 'srfm_general_settings_options', $general );
-		delete_option( Client_Logger::ENABLED_AT_OPTION );
 	}
 
 	/**

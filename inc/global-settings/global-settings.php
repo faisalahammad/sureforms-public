@@ -162,10 +162,6 @@ class Global_Settings {
 			'srfm_enable_logs'        => $srfm_enable_logs,
 		];
 
-		// Stamp when logging was switched on so it can expire on its own. Support
-		// asks people to turn this on; nobody remembers to turn it off.
-		Client_Logger::set_enabled_at( $srfm_enable_logs );
-
 		/**
 		 * We are updating sureforms_analytics_optin option from the general settings as it has been introduced
 		 * as part of general settings. Since the option sureforms_analytics_optin is already available from BSF analytics library
@@ -678,14 +674,13 @@ class Global_Settings {
 				$global_setting_options['srfm_general_settings_options']['srfm_admin_notification'] = true;
 		}
 
-		// Back-fill for installs whose option predates the setting, and surface the
-		// state the settings screen needs to render the download row.
+		// Back-fill for installs whose option predates the setting. Logging is on by
+		// default, so an absent key means on, not off.
 		if ( ! isset( $global_setting_options['srfm_general_settings_options']['srfm_enable_logs'] ) ) {
-				$global_setting_options['srfm_general_settings_options']['srfm_enable_logs'] = false;
+				$global_setting_options['srfm_general_settings_options']['srfm_enable_logs'] = true;
 		}
 
-		$global_setting_options['srfm_log_file_size']  = Client_Logger::get_file_size();
-		$global_setting_options['srfm_log_expires_at'] = Client_Logger::get_expiry();
+		$global_setting_options['srfm_log_file_size'] = Client_Logger::get_file_size();
 
 		/**
 		 * We have introduced toggle for analytics optin in the general settings.

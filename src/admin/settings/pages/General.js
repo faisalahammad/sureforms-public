@@ -322,7 +322,7 @@ const LogsContent = ( {
 				label={ {
 					heading: __( 'Enable logs', 'sureforms' ),
 					description: __(
-						'Records form submission failures reported by the browser, so you can send them to support instead of reading the console. Turn this on only while reproducing a problem — it switches itself off after 7 days.',
+						'Records form submission failures reported by the browser, so you can send the log to support instead of reading the console. Nothing is written while your forms are working, and submitted values are never stored.',
 						'sureforms'
 					),
 				} }

@@ -1155,11 +1155,6 @@ class Test_Form_Submit extends TestCase {
 		$general['srfm_enable_logs'] = $enabled;
 		update_option( 'srfm_general_settings_options', $general );
 
-		if ( $enabled ) {
-			update_option( Client_Logger::ENABLED_AT_OPTION, time() );
-		} else {
-			delete_option( Client_Logger::ENABLED_AT_OPTION );
-		}
 	}
 
 }
