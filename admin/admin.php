@@ -75,6 +75,17 @@ class Admin {
 	public const QUILL_1X_INLINE_CSS = '.ql-editor ul,.ql-editor ol{padding-left:1.5em}.ql-editor ul>li,.ql-editor ol>li{list-style-type:none}.ql-editor ol li:not(.ql-direction-rtl),.ql-editor ul li:not(.ql-direction-rtl){padding-left:1.5em}.ql-editor ol li.ql-direction-rtl,.ql-editor ul li.ql-direction-rtl{padding-right:1.5em}.ql-editor ul>li::before{content:"\2022"}.ql-editor li::before{display:inline-block;white-space:nowrap;width:1.2em}.ql-editor li:not(.ql-direction-rtl)::before{margin-left:-1.5em;margin-right:.3em;text-align:right}.ql-editor li.ql-direction-rtl::before{margin-left:.3em;margin-right:-1.5em}.ql-editor ol li{counter-reset:list-1 list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9;counter-increment:list-0}.ql-editor ol li::before{content:counter(list-0,decimal) ". "}.ql-editor ol li.ql-indent-1{counter-increment:list-1;counter-reset:list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-1::before{content:counter(list-1,lower-alpha) ". "}.ql-editor ol li.ql-indent-2{counter-increment:list-2;counter-reset:list-3 list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-2::before{content:counter(list-2,lower-roman) ". "}.ql-editor ol li.ql-indent-3{counter-increment:list-3;counter-reset:list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-3::before{content:counter(list-3,decimal) ". "}.ql-editor ol li.ql-indent-4{counter-increment:list-4;counter-reset:list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-4::before{content:counter(list-4,lower-alpha) ". "}.ql-editor ol li.ql-indent-5{counter-increment:list-5;counter-reset:list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-5::before{content:counter(list-5,lower-roman) ". "}.ql-editor ol li.ql-indent-6{counter-increment:list-6;counter-reset:list-7 list-8 list-9}.ql-editor ol li.ql-indent-6::before{content:counter(list-6,decimal) ". "}.ql-editor ol li.ql-indent-7{counter-increment:list-7;counter-reset:list-8 list-9}.ql-editor ol li.ql-indent-7::before{content:counter(list-7,lower-alpha) ". "}.ql-editor ol li.ql-indent-8{counter-increment:list-8;counter-reset:list-9}.ql-editor ol li.ql-indent-8::before{content:counter(list-8,lower-roman) ". "}.ql-editor ol li.ql-indent-9{counter-increment:list-9}.ql-editor ol li.ql-indent-9::before{content:counter(list-9,decimal) ". "}';
 
 	/**
+	 * Notice id for the "Finish setting up" Thank You prompt (#3030).
+	 *
+	 * A single stable id (not per-form): keeps both the autoloaded
+	 * `allowed_astra_notices` option and the per-user dismissal meta bounded to one
+	 * row, and lets a dismissed user short-circuit before the query runs.
+	 *
+	 * @since x.x.x
+	 */
+	public const THANKYOU_PROMPT_NOTICE_ID = 'srfm-thankyou-prompt';
+
+	/**
 	 * Dashboard widget entries data.
 	 *
 	 * @var array
@@ -109,17 +120,6 @@ class Admin {
 	 * @since 2.12.4
 	 */
 	private static $thankyou_prompt_cache = null;
-
-	/**
-	 * Notice id for the "Finish setting up" Thank You prompt (#3030).
-	 *
-	 * A single stable id (not per-form): keeps both the autoloaded
-	 * `allowed_astra_notices` option and the per-user dismissal meta bounded to one
-	 * row, and lets a dismissed user short-circuit before the query runs.
-	 *
-	 * @since x.x.x
-	 */
-	public const THANKYOU_PROMPT_NOTICE_ID = 'srfm-thankyou-prompt';
 
 	/**
 	 * Request memo for the dashboard setup-checklist card (#3031).
@@ -3332,7 +3332,6 @@ JS;
 		$page = sanitize_key( wp_unslash( $_GET['page'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only screen detection, no state change.
 		return 0 === strpos( $page, 'sureforms' ) || 0 === strpos( $page, 'srfm' );
 	}
-
 
 	/**
 	 * Callback for displaying the rating notice conditionally.

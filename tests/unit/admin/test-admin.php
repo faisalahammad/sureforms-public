@@ -1524,6 +1524,84 @@ class Test_Thankyou_Prompt_Notice extends TestCase {
 	}
 
 	/**
+	 * The extracted predicate is the single source of truth for "should the prompt show".
+	 *
+	 * Both the renderer and the two suppressing notices read it, so each guard it owns
+	 * is asserted here rather than only through the notices that consume it: the
+	 * dashboard screen is excluded, a dismissal short-circuits before the query, and
+	 * the disabling filter wins over everything.
+	 */
+	public function test_get_displayable_thankyou_prompt() {
+		$admin = Admin::get_instance();
+
+		if ( ! class_exists( '\Astra_Notices' ) || ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'Astra_Notices / CPT not available.' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$admin_user = wp_insert_user(
+			[
+				'user_login' => 'srfm_ty_pred_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_ty_pred_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		$user_id = is_wp_error( $admin_user ) ? 0 : (int) $admin_user;
+		wp_set_current_user( $user_id );
+		set_current_screen( 'plugins' );
+		delete_user_meta( $user_id, Admin::THANKYOU_PROMPT_NOTICE_ID );
+
+		try {
+			// No qualifying form yet.
+			Admin::reset_thankyou_prompt_cache();
+			$this->assertNull( $admin->get_displayable_thankyou_prompt(), 'No qualifying form means no prompt.' );
+
+			$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Predicate TY' ] );
+			update_post_meta( $form_id, Admin::ASTRA_SITES_IMPORT_META, 1 );
+			delete_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT );
+			update_post_meta(
+				$form_id,
+				'_srfm_form_confirmation',
+				[ [ 'confirmation_type' => 'same page', 'message' => \SRFM\Inc\Global_Settings\Global_Settings::get_default_confirmation_message() ] ]
+			);
+
+			Admin::reset_thankyou_prompt_cache();
+			$form = $admin->get_displayable_thankyou_prompt();
+			$this->assertIsArray( $form, 'A qualifying import should produce a prompt payload.' );
+			$this->assertSame( $form_id, (int) $form['id'], 'The payload should describe the qualifying form.' );
+
+			// The main dashboard is excluded — the prompt would compete with core's
+			// own welcome panel there.
+			set_current_screen( 'dashboard' );
+			Admin::reset_thankyou_prompt_cache();
+			$this->assertNull( $admin->get_displayable_thankyou_prompt(), 'The dashboard screen must be excluded.' );
+			set_current_screen( 'plugins' );
+
+			// A dismissal short-circuits before the query runs.
+			update_user_meta( $user_id, Admin::THANKYOU_PROMPT_NOTICE_ID, 'notice-dismissed' );
+			Admin::reset_thankyou_prompt_cache();
+			$this->assertNull( $admin->get_displayable_thankyou_prompt(), 'A dismissed prompt must stay dismissed.' );
+			delete_user_meta( $user_id, Admin::THANKYOU_PROMPT_NOTICE_ID );
+
+			// The disabling filter wins over a qualifying form.
+			add_filter( 'srfm_show_thankyou_prompt', '__return_false' );
+			Admin::reset_thankyou_prompt_cache();
+			$this->assertNull( $admin->get_displayable_thankyou_prompt(), 'The filter must be able to turn it off.' );
+			remove_all_filters( 'srfm_show_thankyou_prompt' );
+
+			wp_delete_post( $form_id, true );
+		} finally {
+			remove_all_filters( 'srfm_show_thankyou_prompt' );
+			Admin::reset_thankyou_prompt_cache();
+			wp_set_current_user( 0 );
+			if ( ! is_wp_error( $admin_user ) ) {
+				wp_delete_user( (int) $admin_user );
+			}
+		}
+	}
+
+	/**
 	 * Only one SureForms notice may be on screen at a time.
 	 *
 	 * The Getting Started nudge and the "Finish setting up" prompt were registered
@@ -1621,9 +1699,9 @@ class Test_Thankyou_Prompt_Notice extends TestCase {
 	}
 
 	/**
-	 * The Thank You notice styling prints the brand accent colour (#3030).
+	 * The shared notice stylesheet prints the brand accent colour (#3030).
 	 */
-	public function test_print_thankyou_notice_styles() {
+	public function test_print_srfm_notice_styles() {
 		$admin = Admin::get_instance();
 
 		ob_start();
