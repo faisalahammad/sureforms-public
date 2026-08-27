@@ -7,6 +7,7 @@
 
 use Yoast\PHPUnitPolyfills\TestCases\TestCase;
 
+use SRFM\Inc\Client_Logger;
 use SRFM\Inc\Database\Tables\Entries as EntriesTable;
 use SRFM\Inc\Form_Submit;
 use SRFM\Inc\Helper;
@@ -1030,4 +1031,135 @@ class Test_Form_Submit extends TestCase {
 		$this->assertStringContainsString( 'lang=hi', $result );
 		$this->assertStringNotContainsString( '#frag', $result, 'Fragment must be dropped.' );
 	}
+
+	// ---------------------------------------------------------------
+	// Client error log route
+	// ---------------------------------------------------------------
+
+	/**
+	 * The enabled check must run first and answer 404, not 403.
+	 *
+	 * It is the only thing that actually stops logging: the frontend flag is baked
+	 * into cached HTML and can be a whole cache TTL out of date, so switching the
+	 * setting off does not stop already-cached pages from posting. 404 rather than
+	 * 403 so the route is indistinguishable from one that does not exist.
+	 */
+	public function test_client_error_log_permissions_check() {
+		$this->set_client_logging( false );
+
+		$request = new WP_REST_Request( 'POST', '/sureforms/v1/log-client-error' );
+		$request->set_param( 'form_id', 7 );
+		$request->set_header( 'X-WP-Submit-Token', Submit_Token::generate( 7 ) );
+
+		$result = Form_Submit::get_instance()->client_error_log_permissions_check( $request );
+
+		$this->assertInstanceOf( WP_Error::class, $result );
+		$this->assertSame( 404, $result->get_error_data()['status'] );
+	}
+
+	/**
+	 * With logging on, a valid token passes and a bad one is refused. The token is
+	 * per-form, so one issued for another form must not be accepted here either.
+	 */
+	public function test_client_error_log_permissions_check_requires_a_valid_token() {
+		$this->set_client_logging( true );
+
+		$request = new WP_REST_Request( 'POST', '/sureforms/v1/log-client-error' );
+		$request->set_param( 'form_id', 7 );
+		$request->set_header( 'X-WP-Submit-Token', Submit_Token::generate( 7 ) );
+
+		$this->assertTrue( Form_Submit::get_instance()->client_error_log_permissions_check( $request ) );
+
+		$wrong_form = new WP_REST_Request( 'POST', '/sureforms/v1/log-client-error' );
+		$wrong_form->set_param( 'form_id', 7 );
+		$wrong_form->set_header( 'X-WP-Submit-Token', Submit_Token::generate( 8 ) );
+
+		$refused = Form_Submit::get_instance()->client_error_log_permissions_check( $wrong_form );
+
+		$this->assertInstanceOf( WP_Error::class, $refused );
+		$this->assertSame( 403, $refused->get_error_data()['status'] );
+
+		$this->set_client_logging( false );
+	}
+
+	/**
+	 * The route answers 204 whatever happens, and writes only entries that survive
+	 * the schema. A response that distinguished "written" from "dropped" would
+	 * report back whether logging is on, whether the log is full, and whether the
+	 * caller is being throttled.
+	 */
+	public function test_handle_client_error_log() {
+		$this->set_client_logging( true );
+		$_SERVER['REMOTE_ADDR'] = '203.0.113.9';
+		Client_Logger::clear();
+
+		$request = new WP_REST_Request( 'POST', '/sureforms/v1/log-client-error' );
+		$request->set_param( 'form_id', 7 );
+		$request->set_param(
+			'entries',
+			[
+				[ 'type' => 'error', 'message' => 'TypeError: Failed to fetch' ],
+				[ 'type' => 'not_a_real_type', 'message' => 'should be dropped' ],
+			]
+		);
+
+		$response = Form_Submit::get_instance()->handle_client_error_log( $request );
+
+		$this->assertSame( 204, $response->get_status() );
+
+		$path  = Client_Logger::get_log_path( false );
+		$lines = file_exists( $path ) ? file( $path, FILE_SKIP_EMPTY_LINES ) : [];
+
+		$this->assertCount( 1, $lines, 'Only the entry matching the schema may be written.' );
+		$this->assertStringContainsString( 'Failed to fetch', $lines[0] );
+
+		Client_Logger::clear();
+		$this->set_client_logging( false );
+		unset( $_SERVER['REMOTE_ADDR'] );
+	}
+
+	/**
+	 * A batch must not be able to consume the file in one request.
+	 */
+	public function test_handle_client_error_log_caps_the_batch() {
+		$this->set_client_logging( true );
+		$_SERVER['REMOTE_ADDR'] = '203.0.113.10';
+		Client_Logger::clear();
+
+		$entries = array_fill( 0, 40, [ 'type' => 'error', 'message' => 'repeated failure' ] );
+
+		$request = new WP_REST_Request( 'POST', '/sureforms/v1/log-client-error' );
+		$request->set_param( 'form_id', 7 );
+		$request->set_param( 'entries', $entries );
+
+		Form_Submit::get_instance()->handle_client_error_log( $request );
+
+		$path  = Client_Logger::get_log_path( false );
+		$lines = file_exists( $path ) ? file( $path, FILE_SKIP_EMPTY_LINES ) : [];
+
+		$this->assertCount( 10, $lines );
+
+		Client_Logger::clear();
+		$this->set_client_logging( false );
+		unset( $_SERVER['REMOTE_ADDR'] );
+	}
+
+	/**
+	 * Switch the client log setting on or off.
+	 *
+	 * @param bool $enabled Whether logging should be on.
+	 * @return void
+	 */
+	private function set_client_logging( $enabled ) {
+		$general                     = (array) get_option( 'srfm_general_settings_options', [] );
+		$general['srfm_enable_logs'] = $enabled;
+		update_option( 'srfm_general_settings_options', $general );
+
+		if ( $enabled ) {
+			update_option( Client_Logger::ENABLED_AT_OPTION, time() );
+		} else {
+			delete_option( Client_Logger::ENABLED_AT_OPTION );
+		}
+	}
+
 }

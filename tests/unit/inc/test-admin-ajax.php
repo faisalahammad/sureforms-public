@@ -8,6 +8,7 @@
 use Yoast\PHPUnitPolyfills\TestCases\TestCase;
 
 use SRFM\Inc\Admin_Ajax;
+use SRFM\Inc\Client_Logger;
 
 class Test_Admin_Ajax extends TestCase {
 
@@ -288,4 +289,127 @@ class Test_Admin_Ajax extends TestCase {
 		unset( $_POST['security'], $_REQUEST['security'] );
 		wp_set_current_user( 0 );
 	}
+
+	// ---------------------------------------------------------------
+	// Client debug log: download and clear
+	// ---------------------------------------------------------------
+
+	/**
+	 * The download must refuse anyone without the capability, and must refuse a
+	 * missing or wrong nonce. Capability is checked first, matching the ordering of
+	 * the sibling handlers in this class.
+	 */
+	public function test_download_client_log() {
+		wp_set_current_user( $this->make_user( 'subscriber' ) );
+
+		$this->assertStringContainsString(
+			'permission',
+			$this->run_log_handler( 'download_client_log', wp_create_nonce( 'srfm_client_logs' ) ),
+			'A subscriber must be refused on the capability check, before the nonce.'
+		);
+
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+
+		$this->assertStringContainsString(
+			'Security check failed',
+			$this->run_log_handler( 'download_client_log', 'not-a-real-nonce' ),
+			'A bad nonce must be refused even for an administrator.'
+		);
+	}
+
+	/**
+	 * Clearing deletes the file, and is gated the same way as the download — it is
+	 * a destructive action reachable by a link.
+	 */
+	public function test_clear_client_log() {
+		wp_set_current_user( $this->make_user( 'subscriber' ) );
+
+		$this->assertStringContainsString(
+			'permission',
+			$this->run_log_handler( 'clear_client_log', wp_create_nonce( 'srfm_client_logs' ) ),
+			'A subscriber must not be able to clear the log.'
+		);
+
+		// With the capability and a good nonce it succeeds and removes the file.
+		$general                     = (array) get_option( 'srfm_general_settings_options', [] );
+		$general['srfm_enable_logs'] = true;
+		update_option( 'srfm_general_settings_options', $general );
+		update_option( Client_Logger::ENABLED_AT_OPTION, time() );
+
+		Client_Logger::append( [ 'type' => 'error', 'message' => 'temporary' ] );
+		$path = Client_Logger::get_log_path( false );
+		$this->assertFileExists( $path );
+
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		$body = $this->run_log_handler( 'clear_client_log', wp_create_nonce( 'srfm_client_logs' ) );
+
+		$this->assertStringContainsString( '"success":true', $body );
+		$this->assertFileDoesNotExist( $path );
+
+		$general['srfm_enable_logs'] = false;
+		update_option( 'srfm_general_settings_options', $general );
+		delete_option( Client_Logger::ENABLED_AT_OPTION );
+	}
+
+	/**
+	 * Run a log handler and return what it emitted.
+	 *
+	 * Both handlers end the request -- on rejection through wp_die(), on success
+	 * through wp_send_json_success(). Asserting merely that the request ended
+	 * cannot tell those apart, so this returns the body and the caller checks it.
+	 *
+	 * @param string $method Handler method name.
+	 * @param string $nonce  Nonce to send.
+	 * @return string Emitted body.
+	 */
+	private function run_log_handler( $method, $nonce ) {
+		$_REQUEST['_wpnonce'] = $nonce;
+
+		// Pass the message through: distinguishing the capability refusal from the
+		// nonce refusal is the whole point of these assertions.
+		$throw_handler = static function () {
+			return static function ( $message = '' ) {
+				throw new \WPDieException( is_string( $message ) ? $message : 'srfm_die' );
+			};
+		};
+
+		add_filter( 'wp_die_handler', $throw_handler );
+		add_filter( 'wp_die_ajax_handler', $throw_handler );
+		add_filter( 'wp_doing_ajax', '__return_true' );
+
+		$body = '';
+
+		ob_start();
+		try {
+			Admin_Ajax::get_instance()->$method();
+		} catch ( \WPDieException $e ) {
+			$body = $e->getMessage();
+		} finally {
+			$body .= (string) ob_get_clean();
+			remove_filter( 'wp_die_handler', $throw_handler );
+			remove_filter( 'wp_die_ajax_handler', $throw_handler );
+			remove_filter( 'wp_doing_ajax', '__return_true' );
+			unset( $_REQUEST['_wpnonce'] );
+			wp_set_current_user( 0 );
+		}
+
+		return $body;
+	}
+
+	/**
+	 * Create a user with the given role and return its ID.
+	 *
+	 * @param string $role Role to assign.
+	 * @return int
+	 */
+	private function make_user( $role ) {
+		return (int) wp_insert_user(
+			[
+				'user_login' => 'srfm_log_' . uniqid(),
+				'user_pass'  => 'password',
+				'role'       => $role,
+			]
+		);
+	}
+
 }

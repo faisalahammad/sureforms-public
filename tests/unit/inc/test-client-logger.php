@@ -161,13 +161,16 @@ class Test_Client_Logger extends TestCase {
 		if ( '' !== $existing ) {
 			$dir = dirname( $existing );
 
-			foreach ( [ '.htaccess', 'index.html' ] as $guard ) {
-				if ( file_exists( $dir . '/' . $guard ) ) {
-					wp_delete_file( $dir . '/' . $guard );
+			Client_Logger::clear();
+
+			// Remove everything, not just the files this class knows about: an
+			// earlier test in another class may have left a log behind, and a
+			// non-empty directory would make the rmdir fail.
+			foreach ( (array) glob( $dir . '/{,.}*', GLOB_BRACE ) as $file ) {
+				if ( is_string( $file ) && is_file( $file ) ) {
+					wp_delete_file( $file );
 				}
 			}
-
-			Client_Logger::clear();
 
 			if ( is_dir( $dir ) ) {
 				rmdir( $dir ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- Test fixture teardown of a directory this suite created.
