@@ -17,6 +17,15 @@ require_once __DIR__ . '/trait-astra-notices-helper.php';
  */
 class Test_Admin extends TestCase {
 
+    protected function tearDown(): void {
+        // Without this, an assertion failure anywhere in this class leaves $_GET and
+        // the current user set for every test that runs after it, turning one real
+        // failure into a wall of unrelated ones.
+        $_GET = [];
+        wp_set_current_user( 0 );
+        parent::tearDown();
+    }
+
     protected function setUp(): void {
         parent::setUp();
 
@@ -597,14 +606,57 @@ class Test_Admin extends TestCase {
 		$admin->maybe_track_edit_form_button_click();
 		$this->assertSame( 1, $count(), 'A genuine pill click should be counted.' );
 
-		// Cumulative, not one-time — a second visit counts again.
+		// Deduped: the same editor reopening the same form inside the window does not
+		// count again. Without this the metric would measure editor loads carrying the
+		// marker — a refresh or a back-navigation re-counts — rather than pill clicks.
 		$admin->maybe_track_edit_form_button_click();
-		$this->assertSame( 2, $count(), 'The counter should be cumulative.' );
+		$this->assertSame( 1, $count(), 'A repeat visit inside the window must not count again.' );
+
+		// The counter is still cumulative across distinct forms.
+		$other_form = wp_insert_post(
+			[
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_title'  => 'Second pill form',
+				'post_status' => 'publish',
+			]
+		);
+		$_GET       = [ 'post' => $other_form, $arg => 'embed' ];
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 2, $count(), 'A different form is a separate count.' );
 
 		// A user who cannot edit the form gets nothing, marker or not.
+		$_GET = [ 'post' => $form_id, $arg => 'embed' ];
 		wp_set_current_user( is_wp_error( $subscriber ) ? 0 : (int) $subscriber );
 		$admin->maybe_track_edit_form_button_click();
 		$this->assertSame( 2, $count(), 'A user without edit_post must not be counted.' );
+
+		// Rejection paths that previously went unasserted.
+		wp_set_current_user( is_wp_error( $administrator ) ? 0 : (int) $administrator );
+
+		$_GET = [ 'post' => $form_id, $arg => '' ];
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 2, $count(), 'An empty marker must not be counted.' );
+
+		// Wrong type. isset() is satisfied, so this reaches sanitize_key() unless the
+		// handler rejects non-strings first — on older supported WordPress versions
+		// that is a fatal rather than a no-op.
+		$_GET = [ 'post' => $form_id, $arg => [ 'embed' ] ];
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 2, $count(), 'A non-scalar marker must no-op, not fatal.' );
+
+		$deleted = wp_insert_post(
+			[
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_title'  => 'Deleted pill form',
+				'post_status' => 'publish',
+			]
+		);
+		wp_delete_post( $deleted, true );
+		$_GET = [ 'post' => $deleted, $arg => 'embed' ];
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 2, $count(), 'A deleted form must not be counted.' );
+
+		wp_delete_post( $other_form, true );
 
 		$_GET = [];
 		wp_set_current_user( 0 );

@@ -866,14 +866,11 @@ class Generate_Form_Markup {
 
 			// Admin-only shortcut into the form editor. Emitted here, immediately
 			// above the <form>, so it occupies its own row in normal flow and can
-			// never overlap a field. Gated on the same condition as the
-			// `.srfm-form-container` open above, so a zero-block form (no
-			// container) never emits an orphaned pill. Works for every embed
-			// method (block, shortcode, widget) because they all render through
-			// this function.
-			if ( '' !== $id && 0 !== $block_count ) {
-				self::render_edit_form_button( (int) $id );
-			}
+			// never overlap a field. Already inside the `.srfm-form-container`
+			// branch, so a zero-block form (no container) never reaches here and
+			// cannot emit an orphaned pill. Works for every embed method (block,
+			// shortcode, widget) because they all render through this function.
+			self::render_edit_form_button( (int) $id );
 
 			?>
 				<form method="post" enctype="multipart/form-data" id="srfm-form-<?php echo esc_attr( Helper::get_string_value( $id ) ); ?>" class="srfm-form <?php echo esc_attr( 'sureforms_form' === $post_type ? 'srfm-single-form ' : '' ); ?>"
@@ -1413,8 +1410,14 @@ class Generate_Form_Markup {
 		// that reachable — test-generate-form-markup.php hit it. The bundled stub
 		// types $instance as non-nullable, which is why PHPStan reads the isset()
 		// as redundant and has to be told otherwise.
+		//
+		// ->editor is checked for the same reason one level down: Elementor assigns it
+		// in init_components() on `init`, while the singleton itself is created on
+		// `plugins_loaded`. Between those two hooks $instance is set and ->editor is
+		// still null, so checking only the singleton reproduces the original fatal a
+		// property later.
 		// @phpstan-ignore-next-line -- Stub disagrees with runtime; see above.
-		if ( class_exists( '\Elementor\Plugin' ) && isset( \Elementor\Plugin::$instance ) && \Elementor\Plugin::$instance->editor->is_edit_mode() ) {
+		if ( class_exists( '\Elementor\Plugin' ) && isset( \Elementor\Plugin::$instance->editor ) && \Elementor\Plugin::$instance->editor->is_edit_mode() ) {
 			return;
 		}
 		if ( function_exists( 'bricks_is_builder' ) && bricks_is_builder() ) {
@@ -1433,7 +1436,7 @@ class Generate_Form_Markup {
 			return;
 		}
 
-		$edit_link = get_edit_post_link( $form_id );
+		$edit_link = get_edit_post_link( $form_id, 'url' );
 
 		if ( empty( $edit_link ) ) {
 			return;
@@ -1443,6 +1446,10 @@ class Generate_Form_Markup {
 		// when the editor loads. Added before the filter below so an integration that
 		// replaces the link wholesale drops the marker with it, rather than having our
 		// query arg appended to a third-party URL.
+		// 'url' context, not the default 'display': the latter returns &amp;-escaped
+		// separators, and feeding those to add_query_arg() only round-trips because
+		// build_query() happens to re-emit the mangled `amp;action` key verbatim. The
+		// raw form has no such dependency, and esc_url() below still escapes on output.
 		$edit_link = add_query_arg( self::EDIT_FORM_BUTTON_SOURCE_ARG, 'embed', $edit_link );
 
 		/**

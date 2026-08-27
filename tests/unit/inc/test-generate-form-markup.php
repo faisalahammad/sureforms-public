@@ -90,7 +90,20 @@ class Test_Generate_Form_Markup extends TestCase {
 		$admin  = $this->set_current_user_with_role( 'administrator' );
 		$markup = Generate_Form_Markup::get_form_markup( $form_id );
 		$this->assertStringContainsString( 'class="srfm-edit-form-btn"', $markup );
-		$this->assertStringContainsString( 'post=' . $form_id, $markup );
+
+		// Assert the whole href, not just `post=<id>`. The marker is appended with
+		// add_query_arg(), so the thing worth guarding is that the link still points
+		// at the editor — a refactor that lost `action=edit` would leave a bare
+		// `post=<id>` assertion green while the pill stopped opening the editor.
+		$expected_href = esc_url(
+			add_query_arg(
+				Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG,
+				'embed',
+				get_edit_post_link( $form_id, 'url' )
+			)
+		);
+		$this->assertStringContainsString( 'href="' . $expected_href . '"', $markup, 'The pill href should be the editor link for this form, carrying the marker.' );
+		$this->assertMatchesRegularExpression( '/post=' . $form_id . '&(amp;|#0?38;)?action=edit/', $markup, 'The link must still open the editor.' );
 		$this->assertTrue( wp_style_is( 'srfm-edit-form-btn', 'enqueued' ), 'The Edit Form stylesheet should be enqueued.' );
 
 		// The pill sits in normal flow ABOVE the form, which is what stops it
@@ -109,7 +122,12 @@ class Test_Generate_Form_Markup extends TestCase {
 		// acceptance criterion, and a guard against passing the wrong post ID.
 		$markup2 = Generate_Form_Markup::get_form_markup( $form_id2 );
 		$this->assertStringContainsString( 'post=' . $form_id2, $markup2 );
-		$this->assertStringNotContainsString( 'post=' . $form_id . '&', html_entity_decode( $markup2 ) );
+
+		// Anchored on the full param rather than a `post=<id>&` prefix, which only
+		// avoided a collision between the two IDs by the shape they happen to have.
+		preg_match_all( '/post=(\d+)/', html_entity_decode( $markup2 ), $matches );
+		$this->assertNotEmpty( $matches[1], 'The second form should link to an editor.' );
+		$this->assertNotContains( (string) $form_id, $matches[1], 'The second form must not link to the first form\'s editor.' );
 
 		// A suppression filter removes it even for an administrator.
 		add_filter( 'srfm_show_edit_form_button', '__return_false' );

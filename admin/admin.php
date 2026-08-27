@@ -183,6 +183,7 @@ class Admin {
 		add_action( 'wp_ajax_srfm_notice_response', [ $this, 'handle_notice_response' ] );
 		add_action( 'wp_ajax_srfm_ai_widget_usage', [ $this, 'track_ai_widget_usage' ] );
 		add_action( 'load-post.php', [ $this, 'maybe_track_edit_form_button_click' ] );
+		add_filter( 'removable_query_args', [ $this, 'add_removable_query_args' ] );
 
 		// Register dashboard widget only if there are recent entries.
 		add_action( 'admin_init', [ $this, 'maybe_register_dashboard_widget' ] );
@@ -2846,16 +2847,31 @@ JS;
 	 *
 	 * No nonce, deliberately: the pill is rendered into front-end HTML that may be
 	 * page-cached, so a nonce would either be baked into the cache or be stale on
-	 * arrival. Nothing here is worth protecting with one — the effect is a private
-	 * usage counter for a user who can already edit the form, so the worst a forged
-	 * link achieves is inflating our own telemetry by one.
+	 * arrival. The effect is a private usage counter for a user who can already edit
+	 * the form, and nothing attacker-controlled reaches the analytics payload — the
+	 * value sent is an integer read back from stored state.
+	 *
+	 * Because the marker is just a query arg, the invariant that bounds this is the
+	 * dedup transient below, not the arg: a given editor moves the counter at most
+	 * once per form per hour, no matter how many times the URL is requested. That is
+	 * also what keeps the metric honest — without it a refresh or a back-navigation
+	 * would count again, and each count is a read-modify-write of the whole
+	 * `srfm_options` row, which holds unrelated settings.
 	 *
 	 * @return void
 	 * @since x.x.x
 	 */
 	public function maybe_track_edit_form_button_click() {
+		// is_string() before sanitize_key(): `?srfm_edit_src[]=x` satisfies isset(),
+		// and wp_unslash() hands the array straight through. sanitize_key() only grew
+		// its is_scalar() guard after this plugin's minimum WordPress, so on the older
+		// supported versions that reaches strtolower( array ) — a TypeError on PHP 8,
+		// i.e. the one input shape that ended in a fatal rather than in the no-op the
+		// rest of this method guarantees.
+		$arg = Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG;
+
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only attribution marker; see docblock for why a nonce is neither possible nor needed.
-		$source = isset( $_GET[ Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG ] ) ? sanitize_key( wp_unslash( $_GET[ Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG ] ) ) : '';
+		$source = isset( $_GET[ $arg ] ) && is_string( $_GET[ $arg ] ) ? sanitize_key( wp_unslash( $_GET[ $arg ] ) ) : '';
 
 		if ( 'embed' !== $source ) {
 			return;
@@ -2864,8 +2880,15 @@ JS;
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Same read-only path as above.
 		$post_id = isset( $_GET['post'] ) ? absint( wp_unslash( $_GET['post'] ) ) : 0;
 
-		// Resolve the post type from the stored post, never from the request, and
-		// confirm the visitor may edit that specific form before counting anything.
+		// Resolve the post type from the stored post, never from the request.
+		//
+		// The capability below reads as per-post but is not: sureforms_form is
+		// registered with an explicit capabilities map and no `map_meta_cap`
+		// (inc/post-types.php), so core short-circuits `edit_post` to the post type's
+		// `edit_post` capability — `manage_options` — without ever consulting $post_id.
+		// The real gate is therefore "site administrator", which is stricter than a
+		// per-form check, not weaker. Written down because a later `map_meta_cap` on
+		// the CPT would silently change what this line means with no diff here.
 		if ( 0 === $post_id || SRFM_FORMS_POST_TYPE !== get_post_type( $post_id ) ) {
 			return;
 		}
@@ -2874,12 +2897,47 @@ JS;
 			return;
 		}
 
+		// One count per editor per form per hour. Without this the metric measures
+		// "editor loads carrying the marker" rather than pill clicks — a refresh or a
+		// back-navigation re-counts — and a forged page could drive the counter, and
+		// the writes behind it, without bound.
+		$dedup_key = 'srfm_pill_click_' . get_current_user_id() . '_' . $post_id;
+
+		if ( false !== get_transient( $dedup_key ) ) {
+			return;
+		}
+
+		set_transient( $dedup_key, 1, HOUR_IN_SECONDS );
+
 		$count = Helper::get_integer_value( Helper::get_srfm_option( 'edit_form_button_clicks', 0 ) ) + 1;
 		Helper::update_srfm_option( 'edit_form_button_clicks', $count );
 
 		// $force = true because this is a cumulative counter, not a one-time event —
 		// it must re-send the latest count each cycle (bypasses one-time dedup).
 		Analytics::events()->track( 'edit_form_button_clicked', (string) $count, [], true );
+	}
+
+	/**
+	 * Let core strip the edit-attribution marker from the admin URL.
+	 *
+	 * Core's wp_admin_canonical_url() rewrites the address bar via replaceState() on
+	 * admin_head, which runs after load-post.php — so the marker has already been
+	 * counted by the time it is removed and no attribution is lost. Without this it
+	 * lingers in the address bar, in bookmarks, and in the Referer header sent to
+	 * every subresource the editor loads.
+	 *
+	 * @param array<string> $args Query args core already removes.
+	 * @since x.x.x
+	 * @return array<string> Args with the marker appended.
+	 */
+	public function add_removable_query_args( $args ) {
+		if ( ! is_array( $args ) ) {
+			return [ Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG ];
+		}
+
+		$args[] = Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG;
+
+		return $args;
 	}
 
 	/**
