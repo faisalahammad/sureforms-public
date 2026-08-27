@@ -111,6 +111,17 @@ class Admin {
 	private static $thankyou_prompt_cache = null;
 
 	/**
+	 * Notice id for the "Finish setting up" Thank You prompt (#3030).
+	 *
+	 * A single stable id (not per-form): keeps both the autoloaded
+	 * `allowed_astra_notices` option and the per-user dismissal meta bounded to one
+	 * row, and lets a dismissed user short-circuit before the query runs.
+	 *
+	 * @since x.x.x
+	 */
+	public const THANKYOU_PROMPT_NOTICE_ID = 'srfm-thankyou-prompt';
+
+	/**
 	 * Request memo for the dashboard setup-checklist card (#3031).
 	 *
 	 * A static property (not a function-local static) so tests can reset it via
@@ -754,12 +765,17 @@ JS;
 	 * stable notice id so the library's built-in ✕ dismissal is one persistent
 	 * choice ("stop nudging me"), not a per-form row.
 	 *
-	 * @since 2.12.4
-	 * @return void
+	 * Split out from the renderer so the decision has exactly one home. The Getting
+	 * Started notice suppresses itself when this returns a form, and duplicating the
+	 * conditions there would have meant two copies drifting apart. Reading it costs
+	 * nothing extra — get_thankyou_prompt_forms() memoizes its query per request.
+	 *
+	 * @since x.x.x
+	 * @return array<string,mixed>|null The form to prompt for, or null when no prompt should render.
 	 */
-	public function render_thankyou_prompt_notice() {
+	public function get_displayable_thankyou_prompt() {
 		if ( ! Helper::current_user_can() || ! class_exists( 'Astra_Notices' ) ) {
-			return;
+			return null;
 		}
 
 		/**
@@ -770,7 +786,7 @@ JS;
 		 * @since 2.12.4
 		 */
 		if ( ! apply_filters( 'srfm_show_thankyou_prompt', true ) ) {
-			return;
+			return null;
 		}
 
 		// Everywhere in wp-admin except the main dashboard. A null screen fails
@@ -778,19 +794,14 @@ JS;
 		$screen = get_current_screen();
 
 		if ( ! $screen || 'dashboard' === $screen->id ) {
-			return;
+			return null;
 		}
-
-		// A single stable notice id (not per-form): keeps both the autoloaded
-		// `allowed_astra_notices` option and the per-user dismissal meta bounded to
-		// one row, and lets a dismissed user short-circuit before the query runs.
-		$notice_id = 'srfm-thankyou-prompt';
 
 		// The library only checks dismissal at render (priority 30, after this
 		// query would already have run). Check it up front so a user who dismissed
 		// the prompt never pays for the WP_Query on subsequent admin page views.
-		if ( 'notice-dismissed' === get_user_meta( get_current_user_id(), $notice_id, true ) ) {
-			return;
+		if ( 'notice-dismissed' === get_user_meta( get_current_user_id(), self::THANKYOU_PROMPT_NOTICE_ID, true ) ) {
+			return null;
 		}
 
 		// array_values so a filter returning a key-preserving array (e.g. the
@@ -806,17 +817,32 @@ JS;
 			|| empty( $prompts[0]['thankyou_url'] ) || empty( $prompts[0]['replies_url'] )
 			|| ! isset( $prompts[0]['title'] )
 		) {
-			return;
+			return null;
 		}
 
-		$form = $prompts[0];
+		return $prompts[0];
+	}
+
+	/**
+	 * Render the "Finish setting up" Thank You notice (#3030).
+	 *
+	 * @since 2.12.4
+	 * @return void
+	 */
+	public function render_thankyou_prompt_notice() {
+		$notice_id = self::THANKYOU_PROMPT_NOTICE_ID;
+		$form      = $this->get_displayable_thankyou_prompt();
+
+		if ( null === $form ) {
+			return;
+		}
 
 		\Astra_Notices::add_notice(
 			[
 				'id'                         => $notice_id,
 				'type'                       => 'info',
 				'message'                    => self::build_thankyou_notice_markup( $form ),
-				'class'                      => 'srfm-thankyou-notice',
+				'class'                      => 'srfm-notice srfm-thankyou-notice',
 				'is_dismissible'             => true,
 				'display-with-other-notices' => true,
 				// Render late so this nudge never pre-empts higher-priority notices
@@ -828,7 +854,7 @@ JS;
 
 		// The message is wp_kses_post'd by the library, so the brand-orange styling
 		// is printed through the notice's pre-markup hook instead of inline.
-		add_action( 'astra_notice_before_markup_' . $notice_id, [ $this, 'print_thankyou_notice_styles' ] );
+		add_action( 'astra_notice_before_markup_' . $notice_id, [ $this, 'print_srfm_notice_styles' ] );
 
 		// Track clicks on the CTAs and the dismiss ✕ via the shared notice-response
 		// endpoint, enqueued only when the notice actually renders.
@@ -920,7 +946,7 @@ JS;
 	 * @since 2.12.4
 	 * @return void
 	 */
-	public function print_thankyou_notice_styles() {
+	public function print_srfm_notice_styles() {
 		// The library wp_kses_post()'s the message, which strips <svg> and data:
 		// image srcs, so the SureForms mark is painted as a CSS background here
 		// (this hook fires outside that kses call). URL-encoded, not base64, so the
@@ -929,18 +955,18 @@ JS;
 			'<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 32 32"><path fill="#D54407" fill-rule="evenodd" clip-rule="evenodd" d="M32 0H0V32H32V0ZM22.8573 6.85728H9.14304V11.4287V13.7144L11.4288 11.4287H22.8573V6.85728ZM20.5717 13.7146H9.14314V18.286V20.5714V20.5718V25.1428H16.0003V20.5714H9.14351L11.4289 18.286H20.5717V13.7146Z"/></svg>'
 		);
 		?>
-		<style id="srfm-thankyou-notice-styles">
-			.srfm-thankyou-notice.notice { border-left-color: #D54407; }
+		<style id="srfm-notice-styles">
+			.srfm-notice.notice { border-left-color: #D54407; }
 			/* Stack our blocks (the library lays the container out as a flex row) and reserve room on the left for the SureForms mark. */
-			.srfm-thankyou-notice .astra-notice-container { display: block; padding: 4px 0 4px 52px; background: url('<?php echo esc_url( $icon, [ 'data' ] ); ?>') no-repeat 4px 6px; background-size: 32px 32px; }
-			.srfm-thankyou-notice .srfm-thankyou-notice__title { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: #1d2327; }
-			.srfm-thankyou-notice .srfm-thankyou-notice__text { margin: 0 0 10px; color: #50575e; }
-			.srfm-thankyou-notice .srfm-thankyou-notice__actions { margin: 12px 0 2px; display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; }
-			.srfm-thankyou-notice .button-primary { background: #D54407; border-color: #D54407; color: #fff; box-shadow: none; text-shadow: none; }
-			.srfm-thankyou-notice .button-primary:hover, .srfm-thankyou-notice .button-primary:focus { background: #C83B00; border-color: #C83B00; color: #fff; box-shadow: none; }
-			.srfm-thankyou-notice .button:not(.button-primary) { background: transparent; border-color: transparent; color: #D54407; box-shadow: none; padding: 0; }
-			.srfm-thankyou-notice .button:not(.button-primary):hover, .srfm-thankyou-notice .button:not(.button-primary):focus { background: transparent; border-color: transparent; color: #C83B00; box-shadow: none; }
-			.srfm-thankyou-notice .button-primary:focus { outline: 2px solid #D54407; outline-offset: 1px; }
+			.srfm-notice .astra-notice-container { display: block; padding: 4px 0 4px 52px; background: url('<?php echo esc_url( $icon, [ 'data' ] ); ?>') no-repeat 4px 6px; background-size: 32px 32px; }
+			.srfm-notice .srfm-notice__title { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: #1d2327; }
+			.srfm-notice .srfm-notice__text { margin: 0 0 10px; color: #50575e; }
+			.srfm-notice .srfm-notice__actions { margin: 12px 0 2px; display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; }
+			.srfm-notice .button-primary { background: #D54407; border-color: #D54407; color: #fff; box-shadow: none; text-shadow: none; }
+			.srfm-notice .button-primary:hover, .srfm-notice .button-primary:focus { background: #C83B00; border-color: #C83B00; color: #fff; box-shadow: none; }
+			.srfm-notice .button:not(.button-primary) { background: transparent; border-color: transparent; color: #D54407; box-shadow: none; padding: 0; }
+			.srfm-notice .button:not(.button-primary):hover, .srfm-notice .button:not(.button-primary):focus { background: transparent; border-color: transparent; color: #C83B00; box-shadow: none; }
+			.srfm-notice .button-primary:focus { outline: 2px solid #D54407; outline-offset: 1px; }
 		</style>
 		<?php
 	}
@@ -2347,27 +2373,50 @@ JS;
 			return;
 		}
 
+		$notice_id = 'srfm-plugin-review-notice';
+
 		Astra_Notices::add_notice(
 			[
-				'id'                         => 'srfm-plugin-review-notice',
+				'id'                         => $notice_id,
 				'type'                       => '',
-				'message'                    => $this->build_notice_markup(
+				'message'                    => self::build_srfm_notice_markup(
 					esc_html__( 'Amazing! SureForms is powering your forms and submissions - let\'s keep growing together!', 'sureforms' ),
 					esc_html__( 'If SureForms has been helpful, would you mind taking a moment to leave a 5-star review on WordPress.org?', 'sureforms' ),
-					esc_url( 'https://wordpress.org/support/plugin/sureforms/reviews/' ),
-					esc_html__( 'Rate SureForms', 'sureforms' ),
-					esc_html__( 'Maybe later', 'sureforms' ),
-					esc_html__( 'I already did', 'sureforms' ),
-					WEEK_IN_SECONDS,
-					true
+					[
+						[
+							'text'     => esc_html__( 'Rate SureForms', 'sureforms' ),
+							'url'      => esc_url( 'https://wordpress.org/support/plugin/sureforms/reviews/' ),
+							'primary'  => true,
+							// Leaves wp-admin, so it also dismisses on the way out.
+							'dismiss'  => true,
+							'external' => true,
+						],
+						[
+							'text'    => esc_html__( 'Maybe later', 'sureforms' ),
+							'url'     => '#',
+							'dismiss' => true,
+							'snooze'  => WEEK_IN_SECONDS,
+						],
+						[
+							'text'    => esc_html__( 'I already did', 'sureforms' ),
+							'url'     => '#',
+							'dismiss' => true,
+						],
+					]
 				),
+				'class'                      => 'srfm-notice srfm-rating-notice',
 				'repeat-notice-after'        => WEEK_IN_SECONDS,
-				'show_if'                    => $this->maybe_display_rating_notice(),
+				// Yields to the Thank You prompt for the same reason the Getting Started
+				// notice does: a specific form to finish beats a recurring review ask,
+				// and a user with three forms who then imports a template would
+				// otherwise see both at once.
+				'show_if'                    => $this->maybe_display_rating_notice() && null === $this->get_displayable_thankyou_prompt(),
 				'display-with-other-notices' => true,
 			]
 		);
 
-		add_action( 'astra_notice_after_markup_srfm-plugin-review-notice', [ $this, 'enqueue_notice_response_script' ] );
+		add_action( 'astra_notice_before_markup_' . $notice_id, [ $this, 'print_srfm_notice_styles' ] );
+		add_action( 'astra_notice_after_markup_' . $notice_id, [ $this, 'enqueue_notice_response_script' ] );
 	}
 
 	/**
@@ -2391,27 +2440,50 @@ JS;
 			return;
 		}
 
+		$notice_id = 'srfm-getting-started-notice';
+
 		Astra_Notices::add_notice(
 			[
-				'id'                         => 'srfm-getting-started-notice',
+				'id'                         => $notice_id,
 				'type'                       => '',
-				'message'                    => $this->build_notice_markup(
+				'message'                    => self::build_srfm_notice_markup(
 					esc_html__( 'SureForms is ready to power your forms — explore what\'s possible!', 'sureforms' ),
 					esc_html__( 'Manage your forms, track submissions, and discover features like AI Form Builder, payment integrations, and more from the SureForms dashboard.', 'sureforms' ),
-					esc_url( admin_url( 'admin.php?page=sureforms_menu' ) ),
-					esc_html__( 'Go to Dashboard', 'sureforms' ),
-					esc_html__( 'Maybe later', 'sureforms' ),
-					esc_html__( 'I already know', 'sureforms' ),
-					WEEK_IN_SECONDS
+					[
+						[
+							'text'    => esc_html__( 'Go to Dashboard', 'sureforms' ),
+							'url'     => esc_url( admin_url( 'admin.php?page=sureforms_menu' ) ),
+							'primary' => true,
+						],
+						[
+							'text'    => esc_html__( 'Maybe later', 'sureforms' ),
+							'url'     => '#',
+							'dismiss' => true,
+							'snooze'  => WEEK_IN_SECONDS,
+						],
+						[
+							'text'    => esc_html__( 'I already know', 'sureforms' ),
+							'url'     => '#',
+							'dismiss' => true,
+						],
+					]
 				),
+				'class'                      => 'srfm-notice srfm-getting-started-notice',
 				'repeat-notice-after'        => WEEK_IN_SECONDS,
-				'show_if'                    => ! $this->maybe_display_rating_notice(),
+				// Yields to both of the other SureForms notices, so only one of ours is
+				// ever on screen. The rating notice supersedes it once the user has real
+				// usage; the Thank You prompt supersedes it because "finish this specific
+				// form" is a concrete next step and this is a generic tour invitation.
+				'show_if'                    => ! $this->maybe_display_rating_notice() && null === $this->get_displayable_thankyou_prompt(),
 				'display-notice-after'       => WEEK_IN_SECONDS,
 				'display-with-other-notices' => true,
 			]
 		);
 
-		add_action( 'astra_notice_after_markup_srfm-getting-started-notice', [ $this, 'enqueue_notice_response_script' ] );
+		// Same pre-markup hook the Thank You prompt uses, so both notices are painted
+		// by one stylesheet instead of two that drift apart.
+		add_action( 'astra_notice_before_markup_' . $notice_id, [ $this, 'print_srfm_notice_styles' ] );
+		add_action( 'astra_notice_after_markup_' . $notice_id, [ $this, 'enqueue_notice_response_script' ] );
 	}
 
 	/**
@@ -3115,24 +3187,90 @@ JS;
 		// changed, while the action buttons point to the specific things to finish.
 		$sentence = __( 'We’ve already created this form for you. Finish customising it so it’s ready to collect real submissions.', 'sureforms' );
 
+		return self::build_srfm_notice_markup(
+			sprintf(
+				/* translators: %s: form name. */
+				__( 'Finish setting up “%s”', 'sureforms' ),
+				$form['title']
+			),
+			$sentence,
+			[
+				[
+					'text'     => __( 'Edit form', 'sureforms' ),
+					'url'      => $form['edit_url'],
+					'primary'  => true,
+					'class'    => 'srfm-ty-edit-form',
+					'external' => true,
+				],
+				[
+					'text'     => __( 'Edit the Thank You message', 'sureforms' ),
+					'url'      => $form['thankyou_url'],
+					'class'    => 'srfm-ty-edit-thankyou',
+					'external' => true,
+				],
+				[
+					'text'     => __( 'Set where replies go', 'sureforms' ),
+					'url'      => $form['replies_url'],
+					'class'    => 'srfm-ty-set-replies',
+					'external' => true,
+				],
+			]
+		);
+	}
+
+	/**
+	 * Build the shared SureForms admin-notice body: title, sentence, action row.
+	 *
+	 * One builder for every SureForms notice so they cannot drift into looking like
+	 * two different plugins. Everything is escaped here rather than by the caller —
+	 * the notices library runs the result through wp_kses_post(), which would strip
+	 * anything richer anyway.
+	 *
+	 * @param string                         $title   Notice heading.
+	 * @param string                         $text    Supporting sentence.
+	 * @param array<int,array<string,mixed>> $actions Action links. Each accepts
+	 *                                                text, url, and optionally
+	 *                                                primary, class, external,
+	 *                                                dismiss and snooze (seconds).
+	 * @since x.x.x
+	 * @return string
+	 */
+	private static function build_srfm_notice_markup( $title, $text, $actions ) {
 		ob_start();
 		?>
-		<p class="srfm-thankyou-notice__title">
+		<p class="srfm-notice__title"><?php echo esc_html( $title ); ?></p>
+		<p class="srfm-notice__text"><?php echo esc_html( $text ); ?></p>
+		<p class="srfm-notice__actions">
 			<?php
-			echo esc_html(
-				sprintf(
-					/* translators: %s: form name. */
-					__( 'Finish setting up “%s”', 'sureforms' ),
-					$form['title']
-				)
-			);
+			foreach ( $actions as $action ) {
+				if ( empty( $action['text'] ) || ! isset( $action['url'] ) ) {
+					continue;
+				}
+
+				$classes = [ 'button' ];
+
+				if ( ! empty( $action['primary'] ) ) {
+					$classes[] = 'button-primary';
+				}
+
+				// astra-notice-close is what the library binds its dismiss handler to.
+				if ( ! empty( $action['dismiss'] ) ) {
+					$classes[] = 'astra-notice-close';
+				}
+
+				if ( ! empty( $action['class'] ) ) {
+					$classes[] = $action['class'];
+				}
+				?>
+				<a
+					class="<?php echo esc_attr( implode( ' ', $classes ) ); ?>"
+					href="<?php echo esc_url( $action['url'] ); ?>"
+					<?php echo empty( $action['snooze'] ) ? '' : ' data-repeat-notice-after="' . esc_attr( (string) $action['snooze'] ) . '"'; ?>
+					<?php echo empty( $action['external'] ) ? '' : ' target="_blank" rel="noopener noreferrer"'; ?>
+				><?php echo esc_html( $action['text'] ); ?></a>
+				<?php
+			}
 			?>
-		</p>
-		<p class="srfm-thankyou-notice__text"><?php echo esc_html( $sentence ); ?></p>
-		<p class="srfm-thankyou-notice__actions">
-			<a class="button button-primary srfm-ty-edit-form" href="<?php echo esc_url( $form['edit_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Edit form', 'sureforms' ); ?></a>
-			<a class="button srfm-ty-edit-thankyou" href="<?php echo esc_url( $form['thankyou_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Edit the Thank You message', 'sureforms' ); ?></a>
-			<a class="button srfm-ty-set-replies" href="<?php echo esc_url( $form['replies_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Set where replies go', 'sureforms' ); ?></a>
 		</p>
 		<?php
 		return (string) ob_get_clean();
@@ -3195,65 +3333,6 @@ JS;
 		return 0 === strpos( $page, 'sureforms' ) || 0 === strpos( $page, 'srfm' );
 	}
 
-	/**
-	 * Build the shared HTML markup for admin notices.
-	 *
-	 * @since 2.5.2
-	 *
-	 * All text parameters must be pre-escaped by the caller (e.g. via esc_html__()).
-	 * URL parameters must be pre-escaped via esc_url().
-	 *
-	 * @param string $heading      The notice heading text (pre-escaped).
-	 * @param string $message      The notice body text (pre-escaped).
-	 * @param string $cta_url      The primary CTA URL (pre-escaped).
-	 * @param string $cta_text     The primary CTA button text (pre-escaped).
-	 * @param string $snooze_text  The snooze button text (pre-escaped).
-	 * @param string $dismiss_text    The dismiss button text (pre-escaped).
-	 * @param int    $snooze_duration Snooze duration in seconds for the data-repeat-notice-after attribute.
-	 * @param bool   $external_cta   Whether the CTA opens in a new tab and also dismisses the notice
-	 *                               via the astra-notice-close class. Default false.
-	 * @return string The notice HTML markup.
-	 */
-	private function build_notice_markup( $heading, $message, $cta_url, $cta_text, $snooze_text, $dismiss_text, $snooze_duration, $external_cta = false ) {
-		$image_path = esc_url( SRFM_URL . 'admin/assets/sureforms-logo.png' );
-		$cta_class  = $external_cta ? 'astra-notice-close button-primary' : 'button-primary';
-		$cta_attrs  = $external_cta ? ' target="_blank" rel="noopener noreferrer"' : '';
-
-		return sprintf(
-			'<div class="notice-image">
-                <img src="%1$s" class="custom-logo" alt="SureForms" itemprop="logo">
-            </div>
-            <div class="notice-content">
-                <div class="notice-heading">
-                    %2$s
-                </div>
-                %3$s<br />
-                <div class="astra-review-notice-container">
-                    <a href="%4$s" class="%5$s"%6$s>
-                    %7$s
-                    </a>
-                <span class="dashicons dashicons-clock" aria-hidden="true"></span>
-                    <a href="#" data-repeat-notice-after="%8$s" class="astra-notice-close">
-                    %9$s
-                    </a>
-                <span class="dashicons dashicons-smiley" aria-hidden="true"></span>
-                    <a href="#" class="astra-notice-close">
-                    %10$s
-                    </a>
-                </div>
-            </div>',
-			$image_path,
-			$heading,
-			$message,
-			$cta_url,
-			esc_attr( $cta_class ),
-			$cta_attrs,
-			$cta_text,
-			$snooze_duration,
-			$snooze_text,
-			$dismiss_text
-		);
-	}
 
 	/**
 	 * Callback for displaying the rating notice conditionally.
