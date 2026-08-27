@@ -524,15 +524,45 @@ class Test_Admin extends TestCase {
 	}
 
 	/**
+	 * The attribution marker must be handed to core's removable-query-args list.
+	 *
+	 * wp_admin_canonical_url() strips those from the address bar on admin_head, which
+	 * runs after load-post.php — so the marker is already counted by the time it is
+	 * removed. Without it the arg lingers in the URL, in bookmarks, and in the Referer
+	 * sent to every subresource the editor loads, and a refresh re-requests it.
+	 *
+	 * The non-array branch is covered because this is a public filter callback: any
+	 * plugin can hand it something else, and returning a bare value there would break
+	 * every other consumer on the filter.
+	 */
+	public function test_add_removable_query_args() {
+		$admin = Admin::get_instance();
+		$arg   = \SRFM\Inc\Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG;
+
+		$result = $admin->add_removable_query_args( [ 'message', 'settings-updated' ] );
+		$this->assertContains( $arg, $result, 'The marker should be appended to the removable list.' );
+		$this->assertContains( 'message', $result, 'Existing removable args must be preserved.' );
+		$this->assertContains( 'settings-updated', $result, 'Existing removable args must be preserved.' );
+
+		// A filter that hands us a non-array must still yield a usable list.
+		$this->assertSame( [ $arg ], $admin->add_removable_query_args( 'not-an-array' ) );
+
+		// And the callback is actually wired to the filter.
+		$this->assertContains( $arg, apply_filters( 'removable_query_args', [] ), 'The filter should carry the marker.' );
+	}
+
+	/**
 	 * The front-end "Edit Form" pill is attributed by a marker query arg rather
 	 * than a click handler, so the counter must only move when the editor is
 	 * genuinely opened from that pill, by someone allowed to edit that form.
 	 *
-	 * Every rejection path is asserted, because each one is a way the counter
-	 * could be inflated by a crafted URL: no marker, a marker with the wrong
-	 * value, a marker pointed at a post that is not a SureForms form, and a user
-	 * without the capability. The counter is read back from the stored option, so
-	 * a guard that silently stops incrementing also fails here.
+	 * Every rejection path is asserted, because each one is a way the counter could
+	 * be moved by a crafted URL: no marker, a marker with the wrong value, an empty
+	 * marker, a non-scalar marker, a marker pointed at a post that is not a SureForms
+	 * form, a deleted post, and a user without the capability. The repeat visit is
+	 * asserted too, since the dedup window is what makes this a click count rather
+	 * than a page-load count. The counter is read back from the stored option, so a
+	 * guard that silently stops incrementing also fails here.
 	 */
 	public function test_maybe_track_edit_form_button_click() {
 		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
