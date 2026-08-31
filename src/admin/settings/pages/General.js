@@ -335,7 +335,7 @@ const LogsContent = ( {
 					)
 				}
 			/>
-			{ generalTabOptions.srfm_enable_logs && logMeta?.size > 0 && (
+			{ generalTabOptions.srfm_enable_logs && (
 				<div className="flex items-center gap-3">
 					<Button
 						variant="outline"
@@ -355,14 +355,15 @@ const LogsContent = ( {
 					>
 						{ __( 'Clear', 'sureforms' ) }
 					</Button>
-					{ logMeta.size >= MAX_LOG_SIZE ? (
+					{ logMeta?.size >= MAX_LOG_SIZE && (
 						<span className="text-sm text-support-error">
 							{ __(
 								'Log is full — download and clear it to keep recording.',
 								'sureforms'
 							) }
 						</span>
-					) : (
+					) }
+					{ logMeta?.size > 0 && logMeta.size < MAX_LOG_SIZE && (
 						<span className="text-sm text-text-secondary">
 							{ formatSize( logMeta.size ) }
 						</span>

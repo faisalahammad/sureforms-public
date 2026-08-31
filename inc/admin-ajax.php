@@ -474,10 +474,23 @@ class Admin_Ajax {
 	public function download_client_log() {
 		$this->verify_log_request();
 
-		$path = Client_Logger::get_log_path( false );
+		$path    = Client_Logger::get_log_path( false );
+		$has_log = '' !== $path && file_exists( $path );
 
-		if ( '' === $path || ! file_exists( $path ) ) {
-			wp_die( esc_html__( 'There are no logs to download yet.', 'sureforms' ) );
+		// The buttons are always offered while logging is on, so downloading before
+		// anything has failed is a normal thing to do. Hand back an explanatory file
+		// rather than a wp_die() screen -- an empty log is the good outcome.
+		if ( ! $has_log ) {
+			header( 'Content-Type: text/plain; charset=utf-8' );
+			header( 'X-Content-Type-Options: nosniff' );
+			header( 'Content-Disposition: attachment; filename="sureforms-debug-log.txt"' );
+
+			if ( ob_get_level() ) {
+				ob_end_clean();
+			}
+
+			echo esc_html__( 'No form submission failures have been recorded.', 'sureforms' );
+			exit;
 		}
 
 		$size = filesize( $path );
