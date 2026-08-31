@@ -853,10 +853,17 @@ class Analytics {
 	 * @return void
 	 */
 	private function detect_state_events() {
-		// plugin_activated: dedup in self::events()->track() ensures this fires only once.
-		$bsf_referrers = get_option( 'bsf_product_referers', [] );
-		$source        = ! empty( $bsf_referrers['sureforms'] ) ? $bsf_referrers['sureforms'] : 'self';
-		self::events()->track( 'plugin_activated', SRFM_VER, [ 'source' => $source ] );
+		// plugin_activated: deferred to 'shutdown' so that a referring plugin/theme's
+		// own BSF_UTM_Analytics::update_referer() call — which some products (incorrectly)
+		// make only after their activate_plugin() call returns, in the same request — has
+		// already run by the time we read bsf_product_referers. Reading this synchronously
+		// here would race that write, since this constructor can execute mid-request while
+		// SureForms itself is being activated by that other plugin.
+		if ( did_action( 'shutdown' ) ) {
+			$this->track_plugin_activated_event();
+		} else {
+			add_action( 'shutdown', [ $this, 'track_plugin_activated_event' ], PHP_INT_MAX );
+		}
 
 		// One-time: re-send onboarding_completed with full properties (v2).
 		if ( ! Helper::get_srfm_option( 'onboarding_event_v2_flushed', false )
@@ -946,6 +953,22 @@ class Analytics {
 		if ( ! empty( $mcp_settings['srfm_mcp_server'] ) ) {
 			self::events()->track( 'mcp_server_enabled' );
 		}
+	}
+
+	/**
+	 * Track the plugin_activated event with the correct install referer.
+	 *
+	 * Dedup in self::events()->track() ensures this fires only once. Runs on
+	 * 'shutdown' (see detect_state_events()) so it reads bsf_product_referers
+	 * after any late-writing referer call has had a chance to run.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function track_plugin_activated_event() {
+		$bsf_referrers = get_option( 'bsf_product_referers', [] );
+		$source        = ! empty( $bsf_referrers['sureforms'] ) ? $bsf_referrers['sureforms'] : 'self';
+		self::events()->track( 'plugin_activated', SRFM_VER, [ 'source' => $source ] );
 	}
 
 	/**
