@@ -47,6 +47,20 @@ class Client_Logger {
 	public const FILENAME_OPTION = 'srfm_client_log_file';
 
 	/**
+	 * Option holding the run of consecutive faults with no successful submission.
+	 *
+	 * @since x.x.x
+	 */
+	public const FAULT_STREAK_OPTION = 'srfm_client_log_fault_streak';
+
+	/**
+	 * Consecutive faults before the site owner is told something is wrong.
+	 *
+	 * @since x.x.x
+	 */
+	public const FAULT_THRESHOLD = 5;
+
+	/**
 	 * Maximum size of the log file in bytes.
 	 *
 	 * @since x.x.x
@@ -86,6 +100,80 @@ class Client_Logger {
 		}
 
 		return (bool) $general['srfm_enable_logs'];
+	}
+
+	/**
+	 * Whether an entry means the site is broken, rather than the visitor.
+	 *
+	 * This distinction is the whole basis of the failure notice. Most of what the
+	 * log records is routine: a mistyped email, an expired captcha, a declined
+	 * card, a submission the server rejected by naming the field to fix. Those are
+	 * the form working correctly, and counting them would tell healthy sites to
+	 * contact support -- on every install, because logging is on by default.
+	 *
+	 * A fault is what a visitor cannot resolve by trying again correctly: the
+	 * request never reached PHP, the response was not JSON, the server returned an
+	 * error status, or a notification email could not be sent.
+	 *
+	 * @param array<string,mixed> $entry Entry as returned by sanitize_entry().
+	 * @since x.x.x
+	 * @return bool
+	 */
+	public static function is_fault( array $entry ) {
+		$type = $entry['type'] ?? '';
+
+		// Allowlist, so an unrecognised or new category is not a fault by default.
+		// 'blocked' is deliberately absent: it is the label the browser puts on a
+		// stop the visitor can clear themselves.
+		if ( in_array( $type, [ 'error', 'response', 'message' ], true ) ) {
+			return true;
+		}
+
+		if ( 'network' !== $type ) {
+			return false;
+		}
+
+		$status = isset( $entry['status'] ) ? Helper::get_integer_value( $entry['status'] ) : 0;
+
+		// 403 is the submit token being refused, which on a cached site means the
+		// page is serving a token the server will not accept.
+		return $status >= 500 || 403 === $status;
+	}
+
+	/**
+	 * How many faults have happened with no successful submission in between.
+	 *
+	 * @since x.x.x
+	 * @return int
+	 */
+	public static function get_fault_streak() {
+		return Helper::get_integer_value( get_option( self::FAULT_STREAK_OPTION, 0 ) );
+	}
+
+	/**
+	 * Whether the form has failed often enough, and recently enough, to say so.
+	 *
+	 * @since x.x.x
+	 * @return bool
+	 */
+	public static function has_persistent_failures() {
+		return self::get_fault_streak() >= self::FAULT_THRESHOLD;
+	}
+
+	/**
+	 * Clear the run of faults.
+	 *
+	 * Hooked - srfm_form_submit, which fires only on the success path. One
+	 * submission getting through is the most reliable evidence available that the
+	 * form is not broken, so it retires the notice without anyone dismissing it.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public static function reset_fault_streak() {
+		if ( self::get_fault_streak() > 0 ) {
+			update_option( self::FAULT_STREAK_OPTION, 0, false );
+		}
 	}
 
 	/**
@@ -132,6 +220,13 @@ class Client_Logger {
 
 		if ( empty( $entry ) ) {
 			return false;
+		}
+
+		// Counted before the file is touched. A full log or an unwritable uploads
+		// directory must not stop the site owner being told the form is failing --
+		// on a badly broken site those are exactly the conditions that occur.
+		if ( self::is_fault( $entry ) ) {
+			update_option( self::FAULT_STREAK_OPTION, self::get_fault_streak() + 1, false );
 		}
 
 		$path = self::get_log_path();
@@ -215,7 +310,7 @@ class Client_Logger {
 	 * @return array<string,mixed> Empty when nothing usable survived.
 	 */
 	public static function sanitize_entry( array $raw ) {
-		$allowed_types = [ 'network', 'response', 'error', 'message' ];
+		$allowed_types = [ 'network', 'response', 'error', 'message', 'blocked' ];
 		$type          = isset( $raw['type'] ) ? sanitize_key( Helper::get_string_value( $raw['type'] ) ) : '';
 
 		if ( ! in_array( $type, $allowed_types, true ) ) {

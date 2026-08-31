@@ -8,6 +8,8 @@
 use Yoast\PHPUnitPolyfills\TestCases\TestCase;
 
 use SRFM\Admin\Admin;
+use SRFM\Admin\Notice_Manager;
+use SRFM\Inc\Client_Logger;
 use SRFM\Inc\Helper;
 
 require_once __DIR__ . '/trait-astra-notices-helper.php';
@@ -512,6 +514,125 @@ class Test_Admin extends TestCase {
 
 		$after = (int) Helper::get_srfm_option( 'ai_dashboard_widget_uses', 0 );
 		$this->assertSame( $before + 1, $after, 'Usage tracking must increment the ai_dashboard_widget_uses counter.' );
+	}
+
+	// ---------------------------------------------------------------
+	// Repeated submission failures
+	// ---------------------------------------------------------------
+
+	/**
+	 * Both surfaces must stay silent on a site whose forms are working. Logging is
+	 * on by default, so a false positive here reaches every install.
+	 */
+	public function test_render_submission_failure_notice_is_absent_when_healthy() {
+		wp_set_current_user( $this->make_log_user( 'administrator' ) );
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+
+		set_current_screen( 'dashboard' );
+
+		ob_start();
+		Admin::get_instance()->render_submission_failure_notice();
+
+		$this->assertSame( '', ob_get_clean() );
+	}
+
+	/**
+	 * After a run of faults the dashboard says so, and nowhere else does -- the
+	 * React notice already covers SureForms' own screens, so an admin-wide classic
+	 * notice would stack two on one page.
+	 */
+	public function test_render_submission_failure_notice() {
+		wp_set_current_user( $this->make_log_user( 'administrator' ) );
+		update_option( Client_Logger::FAULT_STREAK_OPTION, Client_Logger::FAULT_THRESHOLD );
+
+		set_current_screen( 'edit-post' );
+		ob_start();
+		Admin::get_instance()->render_submission_failure_notice();
+		$elsewhere = ob_get_clean();
+
+		set_current_screen( 'dashboard' );
+		ob_start();
+		Admin::get_instance()->render_submission_failure_notice();
+		$on_dashboard = ob_get_clean();
+
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+
+		$this->assertSame( '', $elsewhere );
+		$this->assertStringContainsString( 'notice-error', $on_dashboard );
+		$this->assertStringContainsString( 'Contact support', $on_dashboard );
+	}
+
+	/**
+	 * A subscriber must not be told about the site's internals.
+	 */
+	public function test_render_submission_failure_notice_is_hidden_without_the_capability() {
+		wp_set_current_user( $this->make_log_user( 'subscriber' ) );
+		update_option( Client_Logger::FAULT_STREAK_OPTION, Client_Logger::FAULT_THRESHOLD );
+
+		set_current_screen( 'dashboard' );
+
+		ob_start();
+		Admin::get_instance()->render_submission_failure_notice();
+		$output = ob_get_clean();
+
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+
+		$this->assertSame( '', $output );
+	}
+
+	/**
+	 * The React notice must actually register, and read as an error rather than a
+	 * routine warning -- entries are being lost.
+	 */
+	public function test_register_submission_failure_notice() {
+		wp_set_current_user( $this->make_log_user( 'administrator' ) );
+		update_option( Client_Logger::FAULT_STREAK_OPTION, Client_Logger::FAULT_THRESHOLD );
+
+		Notice_Manager::clear_notices();
+		Admin::get_instance()->register_submission_failure_notice();
+		$notices = Notice_Manager::get_notices();
+		Notice_Manager::clear_notices();
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+
+		$ids = wp_list_pluck( $notices, 'id' );
+		$this->assertContains( 'srfm-submission-failure', $ids );
+
+		foreach ( $notices as $notice ) {
+			if ( 'srfm-submission-failure' === $notice['id'] ) {
+				$this->assertSame( 'error', $notice['variant'] );
+			}
+		}
+	}
+
+	/**
+	 * Nothing may register on a healthy site.
+	 */
+	public function test_register_submission_failure_notice_is_silent_when_healthy() {
+		wp_set_current_user( $this->make_log_user( 'administrator' ) );
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+
+		Notice_Manager::clear_notices();
+		Admin::get_instance()->register_submission_failure_notice();
+		$ids = wp_list_pluck( Notice_Manager::get_notices(), 'id' );
+		Notice_Manager::clear_notices();
+
+		$this->assertNotContains( 'srfm-submission-failure', $ids );
+	}
+
+	/**
+	 * Create a user with the given role and return its ID.
+	 *
+	 * @param string $role Role to assign.
+	 * @return int
+	 */
+	private function make_log_user( $role ) {
+		return (int) wp_insert_user(
+			[
+				'user_login' => 'srfm_fail_' . uniqid(),
+				'user_pass'  => 'password',
+				'role'       => $role,
+			]
+		);
 	}
 }
 

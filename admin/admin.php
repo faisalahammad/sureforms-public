@@ -9,6 +9,7 @@ namespace SRFM\Admin;
 
 use Astra_Notices;
 use SRFM\Inc\AI_Form_Builder\AI_Helper;
+use SRFM\Inc\Client_Logger;
 use SRFM\Inc\Database\Tables\Entries;
 use SRFM\Inc\Global_Settings\Global_Settings;
 use SRFM\Inc\Helper;
@@ -156,6 +157,8 @@ class Admin {
 		add_action( 'current_screen', [ $this, 'enable_gutenberg_for_sureforms' ], 100 );
 		// Register notices early for React pages (before admin_enqueue_scripts).
 		add_action( 'admin_init', [ $this, 'register_pro_compatibility_notices' ], 5 );
+		add_action( 'admin_init', [ $this, 'register_submission_failure_notice' ], 5 );
+		add_action( 'admin_notices', [ $this, 'render_submission_failure_notice' ] );
 		// Display notices on traditional WordPress admin pages.
 		add_action( 'admin_notices', [ $this, 'srfm_pro_version_compatibility' ] );
 
@@ -2480,6 +2483,13 @@ JS;
 				'dismissed'      => 'rating_notice_dismiss',
 			],
 			// The "Finish setting up" prompt (#3030): three CTAs, plus the ✕.
+			// Repeated submission failures. `contact_support` is the CTA; `dismissed`
+			// snoozes the notice for a week rather than retiring it, because the
+			// underlying fault is still there.
+			'form_submission_error'       => [
+				'contact_support' => 'submission_failure_notice_cta',
+				'dismissed'       => 'submission_failure_notice_dismiss',
+			],
 			'srfm-thankyou-prompt'        => [
 				'edit_form'     => 'thankyou_notice_edit_form',
 				'set_replies'   => 'thankyou_notice_set_replies',
@@ -2900,6 +2910,82 @@ JS;
 			// Render footer if applicable.
 			$this->render_dashboard_widget_footer( $entries_data );
 			?>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Register the React notice when submissions keep failing.
+	 *
+	 * Hooked - admin_init, priority 5.
+	 *
+	 * Priority 5 is load-bearing: Notice_Manager hands notices to the front end
+	 * during admin_enqueue_scripts, so anything registering later never arrives.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function register_submission_failure_notice() {
+		if ( ! $this->should_show_submission_failure_notice() ) {
+			return;
+		}
+
+		if ( ! class_exists( 'SRFM\Admin\Notice_Manager' ) ) {
+			return;
+		}
+
+		Notice_Manager::register_notice(
+			[
+				'id'      => 'srfm-submission-failure',
+				'variant' => 'error',
+				'title'   => __( 'Form submissions are failing', 'sureforms' ),
+				'message' => $this->get_submission_failure_message(),
+				'actions' => [
+					[
+						'label'  => __( 'Contact support', 'sureforms' ),
+						'url'    => 'https://sureforms.com/contact/',
+						'target' => '_blank',
+					],
+				],
+				'pages'   => [ 'all' ],
+			]
+		);
+	}
+
+	/**
+	 * Classic dashboard notice when submissions keep failing.
+	 *
+	 * Hooked - admin_notices.
+	 *
+	 * Gated to the WP dashboard. The React notice already covers SureForms' own
+	 * screens, so leaving this admin-wide would stack two warnings on one page.
+	 *
+	 * Registered as [ $this, 'method' ] rather than a closure because
+	 * suppress_foreign_admin_notices() strips any callback it cannot attribute to
+	 * a SureForms class -- a closure here would be silently removed.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function render_submission_failure_notice() {
+		if ( ! $this->should_show_submission_failure_notice() ) {
+			return;
+		}
+
+		$screen = get_current_screen();
+
+		if ( ! $screen || 'dashboard' !== $screen->base ) {
+			return;
+		}
+		?>
+		<div class="notice notice-error">
+			<p><strong><?php esc_html_e( 'SureForms — form submissions are failing', 'sureforms' ); ?></strong></p>
+			<p><?php echo esc_html( $this->get_submission_failure_message() ); ?></p>
+			<p>
+				<a href="https://sureforms.com/contact/" class="button button-primary" target="_blank" rel="noopener noreferrer">
+					<?php esc_html_e( 'Contact support', 'sureforms' ); ?>
+				</a>
+			</p>
 		</div>
 		<?php
 	}
@@ -3372,6 +3458,44 @@ JS;
 		}
 
 		return false;
+	}
+
+	/**
+	 * Whether the repeated-failure notice should appear.
+	 *
+	 * @since x.x.x
+	 * @return bool
+	 */
+	private function should_show_submission_failure_notice() {
+		// admin_init also fires on admin-ajax.php, where no notice renders.
+		if ( wp_doing_ajax() || ! Helper::current_user_can() ) {
+			return false;
+		}
+
+		return Client_Logger::has_persistent_failures();
+	}
+
+	/**
+	 * Body copy for the repeated-failure notice.
+	 *
+	 * States the count, because "submissions are failing" invites the reply "are
+	 * you sure?" and the number is the answer. Says entries may be lost, since
+	 * that is the consequence the site owner actually cares about.
+	 *
+	 * @since x.x.x
+	 * @return string
+	 */
+	private function get_submission_failure_message() {
+		return sprintf(
+			/* translators: %d: number of consecutive failed submissions. */
+			_n(
+				'SureForms detected %d form submission in a row that could not be completed, and no successful submission since. Visitors may be unable to reach you, and those entries were not saved. Please contact support to get this resolved.',
+				'SureForms detected %d form submissions in a row that could not be completed, and no successful submission since. Visitors may be unable to reach you, and those entries were not saved. Please contact support to get this resolved.',
+				Client_Logger::get_fault_streak(),
+				'sureforms'
+			),
+			Client_Logger::get_fault_streak()
+		);
 	}
 
 }

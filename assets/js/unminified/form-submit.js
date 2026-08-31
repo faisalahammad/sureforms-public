@@ -574,7 +574,10 @@ async function submitFormData( form ) {
 			const errorCode = parsed?.data?.code ? ` (${ parsed.data.code })` : '';
 
 			srfmLog.add( {
-				type: 'network',
+				// A rejection naming specific fields is the server asking the
+				// visitor to correct something. Recorded, but never counted toward
+				// the "this form is broken" signal.
+				type: rejected.length ? 'blocked' : 'network',
 				status,
 				duration_ms: durationMs,
 				message: `Submission responded ${ status } (${ contentType })${ errorCode }: ${ reason }${ codeText }`,
@@ -913,7 +916,7 @@ async function handleFormSubmission(
 			// where a third-party script breaks a field's own validation -- the
 			// visitor is stopped and the server never hears about it.
 			srfmLog.add( {
-				type: 'message',
+				type: 'blocked',
 				message: isValidate?.validateResult
 					? 'Blocked before submit: field validation failed.'
 					: 'Blocked before submit: captcha validation failed.',
@@ -969,7 +972,7 @@ async function handleFormSubmission(
 			// failure here stops the submission without the submit route ever
 			// being called.
 			srfmLog.add( {
-				type: 'message',
+				type: 'blocked',
 				message: `Blocked before submit: payment. ${
 					paymentResult?.message ?? ''
 				}`,
@@ -1055,7 +1058,7 @@ async function handleFormSubmission(
 			// Record the message the visitor actually saw, then ship everything
 			// buffered for this attempt.
 			srfmLog.add( {
-				type: 'message',
+				type: 'blocked',
 				message: String(
 					errorData.log_message || errorData.message || ''
 				).slice( 0, 500 ),

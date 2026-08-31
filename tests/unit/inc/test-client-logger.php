@@ -23,10 +23,12 @@ class Test_Client_Logger extends TestCase {
 
 		$this->set_logging( true );
 		Client_Logger::clear();
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
 	}
 
 	protected function tearDown(): void {
 		Client_Logger::clear();
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
 		$this->set_logging( false );
 		delete_option( Client_Logger::FILENAME_OPTION );
 
@@ -295,6 +297,112 @@ class Test_Client_Logger extends TestCase {
 		foreach ( $cases as $label => $raw ) {
 			$this->assertNotSame( [], Client_Logger::sanitize_entry( $raw ), $label . ' must be loggable.' );
 		}
+	}
+
+	// ---------------------------------------------------------------
+	// Repeated-failure detection
+	// ---------------------------------------------------------------
+
+	/**
+	 * The distinction the whole notice rests on. A mistyped email, an expired
+	 * captcha, a declined card and a rejection naming the field to fix are the form
+	 * working correctly. Counting them would tell healthy sites to contact support
+	 * -- on every install, because logging is on by default.
+	 */
+	public function test_is_fault() {
+		$visitor_correctable = [
+			'field validation'   => [ 'type' => 'blocked', 'message' => 'field validation failed' ],
+			'captcha'            => [ 'type' => 'blocked', 'message' => 'captcha validation failed' ],
+			'declined card'      => [ 'type' => 'blocked', 'message' => 'payment. Card declined.' ],
+			'rejected field'     => [ 'type' => 'blocked', 'status' => 200, 'field_keys' => [ 'srfm-email-lbl-x' ] ],
+		];
+
+		foreach ( $visitor_correctable as $label => $entry ) {
+			$this->assertFalse( Client_Logger::is_fault( $entry ), $label . ' must not count as a fault.' );
+		}
+
+		$faults = [
+			'transport failure' => [ 'type' => 'error', 'message' => 'TypeError: Failed to fetch' ],
+			'non-JSON response' => [ 'type' => 'response', 'status' => 500, 'body' => 'PHP Fatal error' ],
+			'server error'      => [ 'type' => 'network', 'status' => 502 ],
+			'token refused'     => [ 'type' => 'network', 'status' => 403 ],
+			'email failure'     => [ 'type' => 'message', 'message' => 'Email notification failed to send.' ],
+		];
+
+		foreach ( $faults as $label => $entry ) {
+			$this->assertTrue( Client_Logger::is_fault( $entry ), $label . ' must count as a fault.' );
+		}
+	}
+
+	/**
+	 * A 200 without field errors is the server failing rather than refusing, but a
+	 * 200 is also how every ordinary rejection is returned -- so it must not count
+	 * on its own.
+	 */
+	public function test_is_fault_ignores_an_ordinary_rejection() {
+		$this->assertFalse( Client_Logger::is_fault( [ 'type' => 'network', 'status' => 200 ] ) );
+	}
+
+	/**
+	 * The notice appears only after a run of faults, so one bad request on an
+	 * otherwise healthy site says nothing.
+	 */
+	public function test_has_persistent_failures() {
+		$this->assertFalse( Client_Logger::has_persistent_failures() );
+
+		for ( $i = 0; $i < Client_Logger::FAULT_THRESHOLD - 1; $i++ ) {
+			Client_Logger::append( [ 'type' => 'error', 'message' => 'TypeError: Failed to fetch' ] );
+		}
+
+		$this->assertFalse( Client_Logger::has_persistent_failures(), 'One short of the threshold must stay quiet.' );
+
+		Client_Logger::append( [ 'type' => 'error', 'message' => 'TypeError: Failed to fetch' ] );
+
+		$this->assertTrue( Client_Logger::has_persistent_failures() );
+	}
+
+	/**
+	 * Visitor-correctable failures must never accumulate toward the notice, however
+	 * many of them there are. A busy form produces these constantly.
+	 */
+	public function test_get_fault_streak_ignores_blocked_entries() {
+		for ( $i = 0; $i < 20; $i++ ) {
+			Client_Logger::append( [ 'type' => 'blocked', 'message' => 'field validation failed' ] );
+		}
+
+		$this->assertSame( 0, Client_Logger::get_fault_streak() );
+		$this->assertFalse( Client_Logger::has_persistent_failures() );
+	}
+
+	/**
+	 * One submission getting through is the best evidence the form is not broken,
+	 * and retires the notice without anyone dismissing it.
+	 */
+	public function test_reset_fault_streak() {
+		for ( $i = 0; $i < Client_Logger::FAULT_THRESHOLD; $i++ ) {
+			Client_Logger::append( [ 'type' => 'error', 'message' => 'TypeError: Failed to fetch' ] );
+		}
+
+		$this->assertTrue( Client_Logger::has_persistent_failures() );
+
+		Client_Logger::reset_fault_streak();
+
+		$this->assertSame( 0, Client_Logger::get_fault_streak() );
+		$this->assertFalse( Client_Logger::has_persistent_failures() );
+	}
+
+	/**
+	 * A full log or an unwritable uploads directory must not blind the notice --
+	 * on a badly broken site those are exactly the conditions that occur.
+	 */
+	public function test_get_fault_streak_counts_even_when_the_log_is_full() {
+		$this->fill_log();
+		$this->assertTrue( Client_Logger::is_full() );
+
+		$before = Client_Logger::get_fault_streak();
+		Client_Logger::append( [ 'type' => 'error', 'message' => 'TypeError: Failed to fetch' ] );
+
+		$this->assertSame( $before + 1, Client_Logger::get_fault_streak() );
 	}
 
 	// ---------------------------------------------------------------

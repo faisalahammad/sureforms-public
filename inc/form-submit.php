@@ -54,6 +54,9 @@ class Form_Submit {
 	 */
 	public function __construct() {
 		add_action( 'rest_api_init', [ $this, 'register_custom_endpoint' ] );
+		// One submission getting through retires the failure notice. srfm_form_submit
+		// fires only on the success path.
+		add_action( 'srfm_form_submit', [ Client_Logger::class, 'reset_fault_streak' ] );
 		add_action( 'wp_ajax_validation_ajax_action', [ $this, 'field_unique_validation' ] );
 		add_action( 'wp_ajax_nopriv_validation_ajax_action', [ $this, 'field_unique_validation' ] );
 		// for quick action bar.
