@@ -257,6 +257,29 @@ class Test_Client_Logger extends TestCase {
 		$this->assertStringNotContainsString( '<script>', Client_Logger::scrub_text( '<script>alert(1)</script> hi' ) );
 	}
 
+	/**
+	 * Every failure category the form can produce must survive the schema, or the
+	 * "logs all submission failures" claim quietly stops being true for one of them.
+	 *
+	 * The categories are: a failure the server rejected, a request that never
+	 * reached PHP, a response that was not JSON, and a failure caught in the
+	 * browser before the request went out (client-side validation, captcha,
+	 * payment) or after it returned (the after-submission step, a notification
+	 * email).
+	 */
+	public function test_sanitize_entry_accepts_every_failure_category() {
+		$cases = [
+			'server rejection'  => [ 'type' => 'network', 'status' => 200, 'field_keys' => [ 'srfm-email-lbl-x' ] ],
+			'transport failure' => [ 'type' => 'error', 'message' => 'TypeError: Failed to fetch' ],
+			'non-JSON response' => [ 'type' => 'response', 'status' => 500, 'body' => 'PHP Fatal error' ],
+			'blocked pre-submit' => [ 'type' => 'message', 'message' => 'Blocked before submit: field validation failed.' ],
+		];
+
+		foreach ( $cases as $label => $raw ) {
+			$this->assertNotSame( [], Client_Logger::sanitize_entry( $raw ), $label . ' must be loggable.' );
+		}
+	}
+
 	// ---------------------------------------------------------------
 	// Helpers
 	// ---------------------------------------------------------------

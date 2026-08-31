@@ -312,7 +312,6 @@ function prepareAddressesData( form ) {
  */
 const srfmLog = {
 	entries: [],
-	token: '',
 
 	isOn() {
 		return !! window.srfm_submit?.logging_enabled;
@@ -343,7 +342,9 @@ const srfmLog = {
 		}
 
 		const url = window.srfm_submit?.log_error_url;
-		const token = this.token;
+		// Read both off the form rather than stashing them in submitFormData: the
+		// failures caught before the request goes out never run that function.
+		const token = form?.getAttribute( 'data-submit-token' ) ?? '';
 		const formId = Number( form?.getAttribute( 'form-id' ) ) || 0;
 
 		if ( ! url ) {
@@ -427,9 +428,6 @@ async function submitFormData( form ) {
 	const formData = new FormData( form );
 	const filteredFormData = new FormData();
 	const submitToken = form.getAttribute( 'data-submit-token' );
-
-	// Stash for srfmLog.flush(); the log route is gated by the same token.
-	srfmLog.token = submitToken;
 
 	// Define keys to exclude from filtered form data
 	const blockTheseKeys = [ 'srfm-email-confirm', 'srfm-password-confirm' ];
@@ -547,13 +545,19 @@ async function submitFormData( form ) {
 		const parsed = await parseRestResponse( response );
 
 		if ( ! response.ok || parsed?.success === false ) {
+			// Which fields the server rejected, not just that something was
+			// rejected. Keys only, never values -- the log must not become a data
+			// export.
+			const rejected = Object.keys( parsed?.data?.field_errors ?? {} );
+
 			srfmLog.add( {
 				type: 'network',
 				status,
 				duration_ms: durationMs,
 				message: `Submission responded ${ status } (${ contentType })`,
-				// Keys only, never values -- the log must not become a data export.
-				field_keys: [ ...filteredFormData.keys() ],
+				field_keys: rejected.length
+					? rejected
+					: [ ...filteredFormData.keys() ],
 			} );
 		}
 
@@ -591,7 +595,7 @@ async function submitFormData( form ) {
 	}
 }
 
-async function afterSubmit( formStatus ) {
+async function afterSubmit( formStatus, form ) {
 	// Supplied by the server, already carrying the submission id and nonce.
 	// Assembling it here meant reimplementing two things WordPress already does:
 	// rest_url() knows whether the route is a path or a `?rest_route=` query arg,
@@ -603,11 +607,38 @@ async function afterSubmit( formStatus ) {
 		return;
 	}
 
+	const startedAt = performance.now();
+
 	try {
 		const response = await fetch( afterSubmitUrl, { method: 'GET' } );
+
+		const status = response.status;
+		const durationMs = Math.round( performance.now() - startedAt );
+
 		await parseRestResponse( response );
+
+		if ( ! response.ok ) {
+			srfmLog.add( {
+				type: 'network',
+				status,
+				duration_ms: durationMs,
+				message: `After-submission step responded ${ status }`,
+			} );
+			srfmLog.flush( form );
+		}
 	} catch ( error ) {
 		console.error( error );
+
+		// The submission itself succeeded, so nothing is shown to the visitor and
+		// this would otherwise be invisible outside the console.
+		srfmLog.add( {
+			type: 'error',
+			duration_ms: Math.round( performance.now() - startedAt ),
+			message: `After-submission step failed: ${
+				error?.name ?? 'Error'
+			}: ${ typeof error?.message === 'string' ? error.message : '' }`,
+		} );
+		srfmLog.flush( form );
 	}
 }
 
@@ -854,6 +885,21 @@ async function handleFormSubmission(
 		if ( isValidate?.validateResult || ! isCaptchaValid ) {
 			loader.classList.remove( 'srfm-active' );
 
+			// Logged here because this path returns before submitFormData ever
+			// runs, so nothing downstream can see it. This is the class of failure
+			// where a third-party script breaks a field's own validation -- the
+			// visitor is stopped and the server never hears about it.
+			srfmLog.add( {
+				type: 'message',
+				message: isValidate?.validateResult
+					? 'Blocked before submit: field validation failed.'
+					: 'Blocked before submit: captcha validation failed.',
+				field_keys: isValidate?.firstErrorInput?.name
+					? [ isValidate.firstErrorInput.name ]
+					: [],
+			} );
+			srfmLog.flush( form );
+
 			// Re-enable submit button after validation fails.
 			enableSubmitButton( form );
 
@@ -896,6 +942,17 @@ async function handleFormSubmission(
 		const paymentResult = await handleFormPayment( form );
 
 		if ( ! paymentResult?.valid ) {
+			// The payment leg runs on its own endpoint before the submission, so a
+			// failure here stops the submission without the submit route ever
+			// being called.
+			srfmLog.add( {
+				type: 'message',
+				message: `Blocked before submit: payment. ${
+					paymentResult?.message ?? ''
+				}`,
+			} );
+			srfmLog.flush( form );
+
 			showErrorMessage( { form, message: paymentResult?.message } );
 			// Remove loading.
 			loader.classList.remove( 'srfm-active' );
@@ -965,7 +1022,7 @@ async function handleFormSubmission(
 			}
 			// Moving afterSubmit action out of specific method so it should work for all submission mode
 			if ( formStatus?.data?.after_submit ) {
-				afterSubmit( formStatus );
+				afterSubmit( formStatus, form );
 			}
 		} else {
 			const errorData = formStatus?.data || {};

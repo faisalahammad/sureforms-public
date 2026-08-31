@@ -1084,6 +1084,20 @@ class Form_Submit {
 									]
 								);
 
+								// Also record it in the debug log. The submission itself
+								// succeeded, so the visitor saw nothing wrong and nobody
+								// looks at the entry's own log until a ticket is already
+								// open. The recipient address is not included -- the log
+								// is downloadable and must not carry personal data.
+								Client_Logger::append(
+									Client_Logger::sanitize_entry(
+										[
+											'type'    => 'message',
+											'form_id' => intval( $id ),
+											'message' => 'Email notification failed to send. ' . $reason,
+										]
+									)
+								);
 							}
 						}
 
