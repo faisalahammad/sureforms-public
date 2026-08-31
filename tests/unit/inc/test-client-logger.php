@@ -247,6 +247,23 @@ class Test_Client_Logger extends TestCase {
 	}
 
 	/**
+	 * The scrubber must not eat the diagnosis. Provider error codes, WordPress
+	 * error slugs and bracketed code lists are the payload of a CAPTCHA or
+	 * validation rejection -- a future tightening of the redaction rules that
+	 * strips them leaves entries that say a submission failed and nothing more.
+	 */
+	public function test_scrub_text_preserves_error_codes() {
+		$message = 'Submission responded 200 (application/json) (srfm_invalid_form_id): Google reCAPTCHA verification failed. [invalid-input-response, timeout-or-duplicate]';
+
+		$scrubbed = Client_Logger::scrub_text( $message );
+
+		$this->assertStringContainsString( 'invalid-input-response', $scrubbed );
+		$this->assertStringContainsString( 'timeout-or-duplicate', $scrubbed );
+		$this->assertStringContainsString( 'srfm_invalid_form_id', $scrubbed );
+		$this->assertStringContainsString( '200', $scrubbed );
+	}
+
+	/**
 	 * Long text must be clamped so one entry cannot fill the file, and markup must
 	 * not survive into a document someone opens.
 	 */

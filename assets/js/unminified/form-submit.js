@@ -550,11 +550,34 @@ async function submitFormData( form ) {
 			// export.
 			const rejected = Object.keys( parsed?.data?.field_errors ?? {} );
 
+			// What the endpoint actually said. Without this the entry reads
+			// "responded 200" and tells you nothing -- every server-side rejection
+			// returns 200 with success:false, so the status alone never explains a
+			// failure.
+			//
+			// log_message first: it is the detailed variant the server builds for
+			// exactly this purpose. `parsed.message` is checked because the
+			// entry-insert failure returns its message at the top level rather than
+			// inside `data`, unlike every other branch.
+			const reason =
+				parsed?.data?.log_message ??
+				parsed?.data?.message ??
+				parsed?.message ??
+				'';
+
+			// CAPTCHA rejections carry the provider's own codes, which is the
+			// difference between "verification failed" and a bad secret key,
+			// a duplicated token, or a domain mismatch.
+			const codes = parsed?.data?.api_response?.[ 'error-codes' ];
+			const codeText = Array.isArray( codes ) ? ` [${ codes.join( ', ' ) }]` : '';
+
+			const errorCode = parsed?.data?.code ? ` (${ parsed.data.code })` : '';
+
 			srfmLog.add( {
 				type: 'network',
 				status,
 				duration_ms: durationMs,
-				message: `Submission responded ${ status } (${ contentType })`,
+				message: `Submission responded ${ status } (${ contentType })${ errorCode }: ${ reason }${ codeText }`,
 				field_keys: rejected.length
 					? rejected
 					: [ ...filteredFormData.keys() ],
