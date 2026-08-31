@@ -335,14 +335,14 @@ const LogsContent = ( {
 					)
 				}
 			/>
-			{ generalTabOptions.srfm_enable_logs && (
+			{ generalTabOptions.srfm_enable_logs && logMeta?.size > 0 && (
 				<div className="flex items-center gap-3">
 					<Button
 						variant="outline"
 						size="md"
 						tag="a"
 						href={ downloadUrl }
-						className="bg-background-secondary"
+						className="bg-background-secondary no-underline hover:no-underline"
 					>
 						{ __( 'Download log', 'sureforms' ) }
 					</Button>
@@ -355,22 +355,18 @@ const LogsContent = ( {
 					>
 						{ __( 'Clear', 'sureforms' ) }
 					</Button>
-					<span
-						className={
-							logMeta?.size >= MAX_LOG_SIZE
-								? 'text-sm text-support-error'
-								: 'text-sm text-text-secondary'
-						}
-					>
-						{ logMeta?.size >= MAX_LOG_SIZE
-							? __(
+					{ logMeta.size >= MAX_LOG_SIZE ? (
+						<span className="text-sm text-support-error">
+							{ __(
 								'Log is full — download and clear it to keep recording.',
 								'sureforms'
-							  )
-							: logMeta?.size
-								? formatSize( logMeta.size )
-								: __( 'Empty', 'sureforms' ) }
-					</span>
+							) }
+						</span>
+					) : (
+						<span className="text-sm text-text-secondary">
+							{ formatSize( logMeta.size ) }
+						</span>
+					) }
 				</div>
 			) }
 		</>
