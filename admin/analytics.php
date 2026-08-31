@@ -720,6 +720,22 @@ class Analytics {
 	}
 
 	/**
+	 * Track the plugin_activated event with the correct install referer.
+	 *
+	 * Dedup in self::events()->track() ensures this fires only once. Runs on
+	 * 'shutdown' (see detect_state_events()) so it reads bsf_product_referers
+	 * after any late-writing referer call has had a chance to run.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function track_plugin_activated_event() {
+		$bsf_referrers = get_option( 'bsf_product_referers', [] );
+		$source        = ! empty( $bsf_referrers['sureforms'] ) ? $bsf_referrers['sureforms'] : 'self';
+		self::events()->track( 'plugin_activated', SRFM_VER, [ 'source' => $source ] );
+	}
+
+	/**
 	 * Extract non-inherit formTheme values from Bricks element data.
 	 *
 	 * Recursively walks the unserialized Bricks elements array looking for
@@ -953,22 +969,6 @@ class Analytics {
 		if ( ! empty( $mcp_settings['srfm_mcp_server'] ) ) {
 			self::events()->track( 'mcp_server_enabled' );
 		}
-	}
-
-	/**
-	 * Track the plugin_activated event with the correct install referer.
-	 *
-	 * Dedup in self::events()->track() ensures this fires only once. Runs on
-	 * 'shutdown' (see detect_state_events()) so it reads bsf_product_referers
-	 * after any late-writing referer call has had a chance to run.
-	 *
-	 * @since x.x.x
-	 * @return void
-	 */
-	public function track_plugin_activated_event() {
-		$bsf_referrers = get_option( 'bsf_product_referers', [] );
-		$source        = ! empty( $bsf_referrers['sureforms'] ) ? $bsf_referrers['sureforms'] : 'self';
-		self::events()->track( 'plugin_activated', SRFM_VER, [ 'source' => $source ] );
 	}
 
 	/**
