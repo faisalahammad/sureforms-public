@@ -28,7 +28,7 @@ class Generate_Form_Markup {
 	 * Query arg marking an editor visit as arriving from the front-end "Edit Form"
 	 * pill, so the click can be attributed without any front-end JavaScript.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	public const EDIT_FORM_BUTTON_SOURCE_ARG = 'srfm_edit_src';
 

@@ -84,7 +84,7 @@ class Admin {
 	 * `allowed_astra_notices` option and the per-user dismissal meta bounded to one
 	 * row, and lets a dismissed user short-circuit before the query runs.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	public const THANKYOU_PROMPT_NOTICE_ID = 'srfm-thankyou-prompt';
 
@@ -785,7 +785,7 @@ JS;
 	 * conditions there would have meant two copies drifting apart. Reading it costs
 	 * nothing extra — get_thankyou_prompt_forms() memoizes its query per request.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return array<string,mixed>|null The form to prompt for, or null when no prompt should render.
 	 */
 	public function get_displayable_thankyou_prompt() {
@@ -3202,7 +3202,7 @@ JS;
 	 * `srfm_options` row, which holds unrelated settings.
 	 *
 	 * @return void
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	public function maybe_track_edit_form_button_click() {
 		// is_string() before sanitize_key(): `?srfm_edit_src[]=x` satisfies isset(),
@@ -3270,7 +3270,7 @@ JS;
 	 * every subresource the editor loads.
 	 *
 	 * @param array<string> $args Query args core already removes.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return array<string> Args with the marker appended.
 	 */
 	public function add_removable_query_args( $args ) {
@@ -3371,7 +3371,7 @@ JS;
 	 * suppress_foreign_admin_notices() strips any callback it cannot attribute to
 	 * a SureForms class -- a closure here would be silently removed.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	public function render_action_item_notices() {
@@ -3429,7 +3429,7 @@ JS;
 	 *
 	 * Hooked - admin_post_srfm_dismiss_action_item_link.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	public function handle_dismiss_action_item_link() {
@@ -3456,7 +3456,7 @@ JS;
 	 * get_action_items(), which records an impression as a side effect and must not
 	 * run from a show_if callback.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool
 	 */
 	public function has_action_item_warnings() {
@@ -3484,7 +3484,7 @@ JS;
 	 * not something to wave away, and clears itself when a submission succeeds. A
 	 * caching plugin being present is information, so it can be dismissed.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return array<int,array<string,mixed>>
 	 */
 	public function get_action_items() {
@@ -3573,7 +3573,7 @@ JS;
 		 * handle_dismiss_action_item()'s allowlist can actually be dismissed, so
 		 * adding a dismissible item here also needs a line there.
 		 *
-		 * @since x.x.x
+		 * @since 2.12.6
 		 *
 		 * @param array<int,array<string,mixed>> $items Action items.
 		 */
@@ -3588,7 +3588,7 @@ JS;
 	 * Only items get_action_items() marks dismissible can be dismissed, so a
 	 * crafted request cannot silence a genuine fault.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	public function handle_dismiss_action_item() {
@@ -3940,7 +3940,7 @@ JS;
 	 *                                                text, url, and optionally
 	 *                                                primary, class, external,
 	 *                                                dismiss and snooze (seconds).
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string
 	 */
 	private static function build_srfm_notice_markup( $title, $text, $actions ) {
@@ -4166,7 +4166,7 @@ JS;
 	 * WordPress's own `is-dismissible` only hides the notice for that pageview.
 	 *
 	 * @param string $item_id Item to dismiss.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string
 	 */
 	private function get_dismiss_action_item_url( $item_id ) {
@@ -4193,7 +4193,7 @@ JS;
 	 * Passing checks are not counted. "Nothing is wrong" is not an impression.
 	 *
 	 * @param array<int,array<string,mixed>> $warnings Warning items only.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	private function track_action_item_impressions( $warnings ) {
@@ -4254,7 +4254,7 @@ JS;
 	 * the body asks for it to be attached.
 	 *
 	 * @param int $count Consecutive failures.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string
 	 */
 	private function get_support_mailto_url( $count ) {
@@ -4306,7 +4306,7 @@ JS;
 	 * Carries what support would otherwise have to ask for, so the first reply can
 	 * be an answer rather than a questionnaire.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string
 	 */
 	private function get_support_message() {
@@ -4350,7 +4350,7 @@ JS;
 	 * otherwise a crafted request could silence the one message that matters.
 	 *
 	 * @param string $item_id Item to dismiss.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool False when the id is not dismissible.
 	 */
 	private function dismiss_action_item( $item_id ) {

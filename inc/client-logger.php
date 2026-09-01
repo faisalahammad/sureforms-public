@@ -12,7 +12,7 @@
  * instead of being talked through DevTools.
  *
  * @package SureForms
- * @since   x.x.x
+ * @since   2.12.6
  */
 
 namespace SRFM\Inc;
@@ -36,48 +36,48 @@ if ( ! defined( 'ABSPATH' ) ) {
  *    rotating. Someone reproducing a bug must not have the tail of their repro
  *    evicted by newer noise from an unrelated visitor.
  *
- * @since x.x.x
+ * @since 2.12.6
  */
 class Client_Logger {
 	/**
 	 * Option holding the random component of the log file name.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	public const FILENAME_OPTION = 'srfm_client_log_file';
 
 	/**
 	 * Option holding the run of consecutive faults with no successful submission.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	public const FAULT_STREAK_OPTION = 'srfm_client_log_fault_streak';
 
 	/**
 	 * Consecutive faults before the site owner is told something is wrong.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	public const FAULT_THRESHOLD = 5;
 
 	/**
 	 * Maximum size of the log file in bytes.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	public const MAX_FILE_SIZE = 1048576;
 
 	/**
 	 * Longest free-text value stored on a single entry, in characters.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	public const MAX_TEXT_LENGTH = 500;
 
 	/**
 	 * Longest single field key stored on an entry, in characters.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	public const MAX_KEY_LENGTH = 100;
 
@@ -96,7 +96,7 @@ class Client_Logger {
 	 * baked into cached HTML and can be a full cache TTL out of date, so every
 	 * write path re-checks here.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool
 	 */
 	public static function is_enabled() {
@@ -123,7 +123,7 @@ class Client_Logger {
 	 * error status, or a notification email could not be sent.
 	 *
 	 * @param array<string,mixed> $entry Entry as returned by sanitize_entry().
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool
 	 */
 	public static function is_fault( array $entry ) {
@@ -150,7 +150,7 @@ class Client_Logger {
 	/**
 	 * How many faults have happened with no successful submission in between.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return int
 	 */
 	public static function get_fault_streak() {
@@ -160,7 +160,7 @@ class Client_Logger {
 	/**
 	 * Whether the form has failed often enough, and recently enough, to say so.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool
 	 */
 	public static function has_persistent_failures() {
@@ -174,7 +174,7 @@ class Client_Logger {
 	 * submission getting through is the most reliable evidence available that the
 	 * form is not broken, so it retires the notice without anyone dismissing it.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	public static function reset_fault_streak() {
@@ -187,7 +187,7 @@ class Client_Logger {
 	 * Absolute path to the log file, creating its directory if needed.
 	 *
 	 * @param bool $create Whether to create the directory when it is absent.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string Absolute path, or '' when the location is unusable.
 	 */
 	public static function get_log_path( $create = true ) {
@@ -214,7 +214,7 @@ class Client_Logger {
 	 * Append one validated entry to the log.
 	 *
 	 * @param array<string,mixed> $entry Entry as returned by sanitize_entry().
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool True when the line was written.
 	 */
 	public static function append( array $entry ) {
@@ -271,7 +271,7 @@ class Client_Logger {
 	 * Whole lines only -- half a JSON object helps nobody.
 	 *
 	 * @param int $max_chars Character budget for the returned text.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return array{text:string,shown:int,total:int}
 	 */
 	public static function get_tail( $max_chars = 1200 ) {
@@ -321,7 +321,7 @@ class Client_Logger {
 	/**
 	 * Whether the log has reached its size cap.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool
 	 */
 	public static function is_full() {
@@ -331,7 +331,7 @@ class Client_Logger {
 	/**
 	 * Current size of the log file in bytes.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return int
 	 */
 	public static function get_file_size() {
@@ -349,7 +349,7 @@ class Client_Logger {
 	/**
 	 * Delete the log file.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool
 	 */
 	public static function clear() {
@@ -371,7 +371,7 @@ class Client_Logger {
 	 * administrator later opens.
 	 *
 	 * @param array<string,mixed> $raw Decoded request payload.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return array<string,mixed> Empty when nothing usable survived.
 	 */
 	public static function sanitize_entry( array $raw ) {
@@ -436,7 +436,7 @@ class Client_Logger {
 	 * inc/ai-form-builder/ai-helper.php.
 	 *
 	 * @param string $text Raw text.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string
 	 */
 	public static function scrub_text( $text ) {
@@ -468,7 +468,7 @@ class Client_Logger {
 	 * salt-only hash would be identical on every site of a multisite network, and
 	 * older subdirectory installs can share one uploads directory.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string
 	 */
 	private static function get_filename_hash() {
@@ -494,7 +494,7 @@ class Client_Logger {
 	 * these files — is what actually protects the log.
 	 *
 	 * @param string $dir Directory to guard.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	private static function protect_directory( $dir ) {

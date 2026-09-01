@@ -108,7 +108,7 @@ class Form_Submit {
 	 * payload schema in Client_Logger::sanitize_entry() and the rate limit below.
 	 *
 	 * @param \WP_REST_Request $request Incoming REST request.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return WP_Error|bool
 	 */
 	public function client_error_log_permissions_check( $request ) {
@@ -143,7 +143,7 @@ class Form_Submit {
 	 * the log is full, and whether the caller is being throttled.
 	 *
 	 * @param \WP_REST_Request $request Incoming REST request.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return \WP_REST_Response
 	 */
 	public function handle_client_error_log( $request ) {
@@ -1617,7 +1617,7 @@ class Form_Submit {
 	 *
 	 * @param string $prefix  Transient key prefix, unique per endpoint.
 	 * @param int    $form_id The form ID the request relates to.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool True if rate-limited (should block), false if allowed.
 	 */
 	private function is_rate_limited( $prefix, $form_id ) {
