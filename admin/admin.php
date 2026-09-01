@@ -9,6 +9,7 @@ namespace SRFM\Admin;
 
 use Astra_Notices;
 use SRFM\Inc\AI_Form_Builder\AI_Helper;
+use SRFM\Inc\Database\Register;
 use SRFM\Inc\Database\Tables\Entries;
 use SRFM\Inc\Generate_Form_Markup;
 use SRFM\Inc\Global_Settings\Global_Settings;
@@ -168,6 +169,13 @@ class Admin {
 		add_action( 'current_screen', [ $this, 'enable_gutenberg_for_sureforms' ], 100 );
 		// Register notices early for React pages (before admin_enqueue_scripts).
 		add_action( 'admin_init', [ $this, 'register_pro_compatibility_notices' ], 5 );
+
+		// Database maintenance notice: the entries table is missing, so submissions
+		// cannot be saved. Registered at admin_init priority 5 so the React notice is
+		// in place before admin_enqueue_scripts localizes it.
+		add_action( 'admin_init', [ $this, 'register_database_repair_notice' ], 5 );
+		add_action( 'admin_notices', [ $this, 'render_database_repair_notice' ] );
+		add_action( 'admin_post_srfm_repair_entries_table', [ $this, 'handle_database_repair' ] );
 		// Display notices on traditional WordPress admin pages.
 		add_action( 'admin_notices', [ $this, 'srfm_pro_version_compatibility' ] );
 
@@ -2280,6 +2288,232 @@ JS;
 	}
 
 	/**
+	 * Register the React notice when the entries table is missing.
+	 *
+	 * Hooked - admin_init, priority 5.
+	 *
+	 * Priority 5 is load-bearing: Notice_Manager hands notices to the front end
+	 * through the `srfm_admin_filter` applied during admin_enqueue_scripts, so
+	 * anything registering later never reaches the page.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public function register_database_repair_notice() {
+		// admin_init also fires on admin-ajax.php. Nothing there renders a notice, so
+		// skip the work rather than reading a transient on every AJAX request.
+		if ( wp_doing_ajax() ) {
+			return;
+		}
+
+		if ( ! Helper::current_user_can() ) {
+			return;
+		}
+
+		if ( ! class_exists( 'SRFM\Admin\Notice_Manager' ) ) {
+			return;
+		}
+
+		// A just-completed repair reports its outcome instead of the warning.
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only display flag; the repair itself is nonce-checked in handle_database_repair().
+		$result = isset( $_GET['srfm_db_repair'] ) ? sanitize_key( wp_unslash( $_GET['srfm_db_repair'] ) ) : '';
+
+		if ( 'done' === $result ) {
+			Notice_Manager::register_notice(
+				[
+					'id'      => 'srfm-database-repaired',
+					'variant' => 'success',
+					'message' => __( 'Your SureForms database is up to date. New form entries will be saved as usual.', 'sureforms' ),
+					'pages'   => [ 'all' ],
+				]
+			);
+			return;
+		}
+
+		if ( 'failed' === $result ) {
+			Notice_Manager::register_notice(
+				[
+					'id'      => 'srfm-database-repair-failed',
+					// Still a warning, not an error: a host that does not allow
+					// SureForms to create tables is not the user's mistake.
+					'variant' => 'warning',
+					'message' => __( 'SureForms could not finish updating the database. Your hosting may not allow SureForms to create database tables — please contact your hosting provider or SureForms support.', 'sureforms' ),
+					'actions' => [
+						[
+							'label' => __( 'Contact support', 'sureforms' ),
+							'url'   => 'https://sureforms.com/contact/',
+						],
+					],
+					'pages'   => [ 'all' ],
+				]
+			);
+			return;
+		}
+
+		if ( ! Register::is_entries_table_missing() ) {
+			return;
+		}
+
+		$this->track_database_notice_impression();
+
+		Notice_Manager::register_notice(
+			[
+				'id'      => 'srfm-database-maintenance',
+				'variant' => 'warning',
+				'title'   => __( 'Database update needed', 'sureforms' ),
+				// Plain text only. AdminNotice.js renders this as a React child, so
+				// any markup here would show up as literal characters.
+				'message' => $this->get_database_notice_message(),
+				'actions' => [
+					[
+						'label'  => __( 'Fix now', 'sureforms' ),
+						// Opaque identifier, resolved to a handler in AdminNotice.js.
+						// Deliberately not a URL or endpoint: the server never tells
+						// the browser which address to call.
+						'action' => 'repair-entries-table',
+						'url'    => $this->get_database_repair_url(),
+					],
+				],
+				'pages'   => [ 'all' ],
+			]
+		);
+	}
+
+	/**
+	 * Render the classic warning on the WordPress dashboard.
+	 *
+	 * Hooked - admin_notices.
+	 *
+	 * Scoped to index.php on purpose. The React notice already covers the SureForms
+	 * screens, so leaving this one admin-wide would stack two warnings on the same
+	 * page and nag on every screen in wp-admin.
+	 *
+	 * Registered as [ $this, 'method' ] rather than a closure because
+	 * suppress_foreign_admin_notices() strips any callback it cannot attribute to a
+	 * SureForms class — a closure here would be silently removed.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public function render_database_repair_notice() {
+		if ( ! Helper::current_user_can() ) {
+			return;
+		}
+
+		$screen = get_current_screen();
+
+		if ( ! $screen || 'dashboard' !== $screen->base ) {
+			return;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only display flag; the repair itself is nonce-checked in handle_database_repair().
+		$result = isset( $_GET['srfm_db_repair'] ) ? sanitize_key( wp_unslash( $_GET['srfm_db_repair'] ) ) : '';
+
+		if ( 'done' === $result ) {
+			?>
+			<div class="notice notice-success is-dismissible">
+				<p><?php esc_html_e( 'Your SureForms database is up to date. New form entries will be saved as usual.', 'sureforms' ); ?></p>
+			</div>
+			<?php
+			return;
+		}
+
+		if ( 'failed' === $result ) {
+			?>
+			<div class="notice notice-warning is-dismissible">
+				<p><?php esc_html_e( 'SureForms could not finish updating the database. Your hosting may not allow SureForms to create database tables — please contact your hosting provider or SureForms support.', 'sureforms' ); ?></p>
+			</div>
+			<?php
+			return;
+		}
+
+		if ( ! Register::is_entries_table_missing() ) {
+			return;
+		}
+
+		$this->track_database_notice_impression();
+		?>
+		<div class="notice notice-warning">
+			<p>
+				<strong><?php esc_html_e( 'SureForms — database update needed', 'sureforms' ); ?></strong>
+			</p>
+			<p><?php echo esc_html( $this->get_database_notice_message() ); ?></p>
+			<p>
+				<a href="<?php echo esc_url( $this->get_database_repair_url() ); ?>" class="button button-primary">
+					<?php esc_html_e( 'Update database', 'sureforms' ); ?>
+				</a>
+			</p>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Repair the entries table, then redirect back with the outcome.
+	 *
+	 * Hooked - admin_post_srfm_repair_entries_table.
+	 *
+	 * A nonce-protected GET that changes state matches how core's own plugin
+	 * activate / deactivate / delete links work.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public function handle_database_repair() {
+		if ( ! Helper::current_user_can() ) {
+			wp_die( esc_html__( 'You do not have permission to update the database.', 'sureforms' ), 403 );
+		}
+
+		check_admin_referer( 'srfm_repair_entries_table' );
+
+		$repaired = $this->do_database_repair();
+		$referer  = wp_get_referer();
+
+		wp_safe_redirect(
+			add_query_arg(
+				'srfm_db_repair',
+				$repaired ? 'done' : 'failed',
+				$referer ? $referer : admin_url()
+			)
+		);
+		exit;
+	}
+
+	/**
+	 * Repair the entries table and record what happened.
+	 *
+	 * The single place the repair is performed and counted, shared by the
+	 * admin-post handler and the REST endpoint. One user action reaches exactly one
+	 * of those, so the click counter cannot double-count across the two surfaces.
+	 *
+	 * @since 2.12.6
+	 * @return bool True when the table exists afterwards.
+	 */
+	public function do_database_repair() {
+		// Cumulative counter, so $force = true: each new count is a new value and is
+		// re-sent, while an identical repeat short-circuits inside track().
+		$attempts = Helper::get_integer_value( Helper::get_srfm_option( 'db_repair_attempts', 0 ) ) + 1;
+		Helper::update_srfm_option( 'db_repair_attempts', $attempts );
+
+		// Event name is the `database_error` => `fix_now` entry in the $valid
+		// allowlist in handle_notice_response(). Kept in sync by hand; that array is
+		// where the team looks notice event names up.
+		Analytics::events()->track( 'database_error_notice_cta', (string) $attempts, [], true );
+
+		$repaired = Register::repair_entries_table();
+
+		// The failure case is the more valuable signal: it means the host refuses to
+		// let SureForms create tables, which no amount of retrying will fix.
+		Analytics::events()->track(
+			'database_repair_result',
+			$repaired ? 'success' : 'failed',
+			[],
+			true
+		);
+
+		return $repaired;
+	}
+
+	/**
 	 * Admin Notice Callback if sureforms pro is out of date.
 	 *
 	 * Hooked - admin_notices
@@ -2533,10 +2767,12 @@ JS;
 	public function handle_notice_response() {
 		if ( ! check_ajax_referer( 'srfm_notice_response', 'nonce', false ) ) {
 			wp_send_json_error( [ 'message' => __( 'Invalid nonce.', 'sureforms' ) ], 403 );
+			return;
 		}
 
 		if ( ! Helper::current_user_can() ) {
 			wp_send_json_error( [ 'message' => __( 'Unauthorized user.', 'sureforms' ) ], 403 );
+			return;
 		}
 
 		$notice_id = isset( $_POST['notice_id'] ) ? sanitize_text_field( wp_unslash( $_POST['notice_id'] ) ) : '';
@@ -2553,6 +2789,14 @@ JS;
 				'maybe_later'    => 'rating_notice_snooze',
 				'dismissed'      => 'rating_notice_dismiss',
 			],
+			// Database maintenance notice. Keyed `database_error` for the warehouse;
+			// the user-facing copy deliberately reads as a routine update, not an
+			// error. `dismissed` is registered but unreachable today — a missing
+			// entries table is not something we let people dismiss.
+			'database_error'              => [
+				'fix_now'   => 'database_error_notice_cta',
+				'dismissed' => 'database_error_notice_dismiss',
+			],
 			// The "Finish setting up" prompt (#3030): three CTAs, plus the ✕.
 			'srfm-thankyou-prompt'        => [
 				'edit_form'     => 'thankyou_notice_edit_form',
@@ -2564,6 +2808,10 @@ JS;
 
 		if ( ! isset( $valid[ $notice_id ][ $button ] ) ) {
 			wp_send_json_error( [ 'message' => __( 'Invalid parameters.', 'sureforms' ) ], 400 );
+			// wp_send_json_error() ends the request in production. The explicit return
+			// keeps the guard a guard rather than something that only works because of
+			// a side effect in a function elsewhere.
+			return;
 		}
 
 		$event_name = $valid[ $notice_id ][ $button ];
@@ -3086,6 +3334,77 @@ JS;
 			?>
 		</div>
 		<?php
+	}
+
+	/**
+	 * Nonce-protected URL that repairs the entries table.
+	 *
+	 * Shared by both notice surfaces so there is one repair route, one nonce and one
+	 * place that counts the click. Private, so it stays off the public API and out of
+	 * the test-coverage gate.
+	 *
+	 * @since 2.12.6
+	 * @return string
+	 */
+	private function get_database_repair_url() {
+		return wp_nonce_url(
+			admin_url( 'admin-post.php?action=srfm_repair_entries_table' ),
+			'srfm_repair_entries_table'
+		);
+	}
+
+	/**
+	 * The database notice body, which differs by what the repair will actually do.
+	 *
+	 * Two outcomes are possible and they are not equivalent to the person clicking:
+	 * when the entries table exists under a different prefix — a changed
+	 * `$table_prefix`, a restored dump, a security plugin that renamed tables and
+	 * skipped ours — the repair renames it back and every stored entry comes with
+	 * it. When there is nothing to adopt, the repair creates an empty table and the
+	 * old submissions are not recoverable from here.
+	 *
+	 * Promising the wrong one is how a maintenance prompt turns into a complaint, so
+	 * the copy states which is about to happen.
+	 *
+	 * @since 2.12.6
+	 * @return string
+	 */
+	private function get_database_notice_message() {
+		if ( '' !== Register::get_adoptable_entries_table() ) {
+			return __( 'SureForms found your form entries stored under a different database table prefix. Reconnecting them takes a moment, and your existing entries will be kept.', 'sureforms' );
+		}
+
+		return __( 'SureForms needs to update your database before it can save new form entries. This only takes a moment and will not change your forms or existing content. Entries submitted before now cannot be recovered from here.', 'sureforms' );
+	}
+
+	/**
+	 * Count one sighting of the database notice, at most once per user per day.
+	 *
+	 * While the table is missing the notice renders on every admin page load, on two
+	 * surfaces. Counting each render would rewrite the autoloaded `srfm_options` blob
+	 * on every pageview of a site that is already broken, and one site left unfixed
+	 * would dominate the aggregate. Throttling to a day per user answers the question
+	 * that matters — how many people are seeing this — for one write.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	private function track_database_notice_impression() {
+		$user_id = get_current_user_id();
+
+		if ( ! $user_id ) {
+			return;
+		}
+
+		$key = 'srfm_db_notice_seen_' . $user_id;
+
+		if ( get_transient( $key ) ) {
+			return;
+		}
+
+		set_transient( $key, 1, DAY_IN_SECONDS );
+
+		Analytics::events()->track( 'database_error_notice_shown', 'entries' );
 	}
 
 	/**

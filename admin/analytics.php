@@ -7,6 +7,7 @@
 
 namespace SRFM\Admin;
 
+use SRFM\Inc\Database\Register;
 use SRFM\Inc\Database\Tables\Entries;
 use SRFM\Inc\Helper;
 use SRFM\Inc\Learn;
@@ -129,13 +130,17 @@ class Analytics {
 	 * @return array
 	 */
 	public function add_srfm_analytics_data( $stats_data ) {
-		$stats_data['plugin_data']['sureforms']                   = [
+		$stats_data['plugin_data']['sureforms'] = [
 			'free_version'          => SRFM_VER,
 			'site_language'         => get_locale(),
 			'most_used_anti_spam'   => $this->most_used_anti_spam(),
 			'user_status'           => $this->user_status(),
 			'pointer_popup_clicked' => $this->pointer_popup_clicked(),
 		];
+		// Every query against the entries table errors when the table is missing, so
+		// resolve that once here rather than letting each caller below trip over it.
+		$entries_table_missing = Register::is_entries_table_missing();
+
 		$stats_data['plugin_data']['sureforms']['numeric_values'] = [
 			'total_forms'                => wp_count_posts( SRFM_FORMS_POST_TYPE )->publish ?? 0,
 			'instant_forms_enabled'      => $this->instant_forms_enabled(),
@@ -143,12 +148,17 @@ class Analytics {
 			'ai_generated_forms'         => $this->ai_generated_forms(),
 			'ai_generated_payment_forms' => $this->ai_generated_forms( 'payments' ),
 			'payment_forms'              => $this->get_payment_forms_count(),
-			'total_entries'              => Entries::get_total_entries_by_status(),
+			'total_entries'              => $entries_table_missing ? 0 : Entries::get_total_entries_by_status(),
 			'restricted_forms'           => $this->get_restricted_forms(),
 			'embed_styling_gb_default'   => self::embed_styling_gutenberg_count( 'default' ),
 			'embed_styling_el_default'   => self::embed_styling_elementor_count( 'default' ),
 			'embed_styling_br_default'   => self::embed_styling_bricks_count( 'default' ),
 		];
+
+		// Whether the entries table is currently missing. An event fires once when a
+		// site first sees the notice; this is what shows the state persisting, and
+		// catches a recurrence that the event's one-time dedup would swallow.
+		$stats_data['plugin_data']['sureforms']['boolean_values']['db_entries_table_missing'] = $entries_table_missing;
 
 		$stats_data['plugin_data']['sureforms'] = array_merge_recursive( $stats_data['plugin_data']['sureforms'], $this->global_settings_data() );
 		// Add KPI tracking data.
@@ -840,6 +850,14 @@ class Analytics {
 	 * @return int Daily submissions count.
 	 */
 	private function get_daily_submissions_count( $date ) {
+		// Guarded here rather than at the call site: this is the function that runs
+		// the query, so a future caller is covered too. Every read against a missing
+		// entries table raises a DB error, and the daily send would raise one per
+		// day counted on exactly the sites whose breakage we most need reported.
+		if ( Register::is_entries_table_missing() ) {
+			return 0;
+		}
+
 		$start_date = $date . ' 00:00:00';
 		$end_date   = $date . ' 23:59:59';
 
