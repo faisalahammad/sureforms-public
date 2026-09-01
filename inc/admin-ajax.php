@@ -38,6 +38,8 @@ class Admin_Ajax {
 		add_action( 'wp_ajax_sureforms_recommended_plugin_install', 'wp_ajax_install_plugin' );
 		add_action( 'wp_ajax_sureforms_integration', [ $this, 'generate_data_for_suretriggers_integration' ] );
 		add_action( 'wp_ajax_srfm_download_export', [ $this, 'download_export_file' ] );
+		add_action( 'wp_ajax_srfm_download_logs', [ $this, 'download_client_log' ] );
+		add_action( 'wp_ajax_srfm_clear_logs', [ $this, 'clear_client_log' ] );
 
 		add_filter( SRFM_SLUG . '_admin_filter', [ $this, 'localize_script_integration' ] );
 	}
@@ -458,4 +460,90 @@ class Admin_Ajax {
 
 		exit;
 	}
+	/**
+	 * Stream the client debug log to an administrator.
+	 *
+	 * Takes no filename parameter. There is exactly one log file and the server
+	 * derives its path, which removes the path-traversal question entirely rather
+	 * than guarding against it -- and keeps the unguessable file name, which is
+	 * what actually protects the log on nginx, out of the page.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function download_client_log() {
+		$this->verify_log_request();
+
+		$path    = Client_Logger::get_log_path( false );
+		$has_log = '' !== $path && file_exists( $path );
+
+		// The buttons are always offered while logging is on, so downloading before
+		// anything has failed is a normal thing to do. Hand back an explanatory file
+		// rather than a wp_die() screen -- an empty log is the good outcome.
+		if ( ! $has_log ) {
+			header( 'Content-Type: text/plain; charset=utf-8' );
+			header( 'X-Content-Type-Options: nosniff' );
+			header( 'Content-Disposition: attachment; filename="sureforms-debug-log.txt"' );
+
+			if ( ob_get_level() ) {
+				ob_end_clean();
+			}
+
+			echo esc_html__( 'No form submission failures have been recorded.', 'sureforms' );
+			exit;
+		}
+
+		$size = filesize( $path );
+
+		header( 'Content-Type: text/plain; charset=utf-8' );
+		header( 'X-Content-Type-Options: nosniff' );
+		header( 'Content-Disposition: attachment; filename="sureforms-debug-log.txt"' );
+
+		if ( is_int( $size ) ) {
+			header( 'Content-Length: ' . $size );
+		}
+
+		header( 'Cache-Control: private, max-age=0, must-revalidate' );
+
+		if ( ob_get_level() ) {
+			ob_end_clean();
+		}
+
+		readfile( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_read_readfile, WordPress.WP.AlternativeFunctions.file_system_operations_readfile -- Direct file output is required to stream the download.
+		exit;
+	}
+
+	/**
+	 * Delete the client debug log.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function clear_client_log() {
+		$this->verify_log_request();
+
+		Client_Logger::clear();
+
+		wp_send_json_success();
+	}
+
+	/**
+	 * Capability and nonce gate shared by both log actions.
+	 *
+	 * Capability first, ahead of the nonce, matching the ordering of the sibling
+	 * handlers in this class.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	private function verify_log_request() {
+		if ( ! Helper::current_user_can() ) {
+			wp_die( esc_html__( 'You do not have permission to access this file.', 'sureforms' ) );
+		}
+
+		if ( ! isset( $_REQUEST['_wpnonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_REQUEST['_wpnonce'] ) ), 'srfm_client_logs' ) ) {
+			wp_die( esc_html__( 'Security check failed.', 'sureforms' ) );
+		}
+	}
+
 }

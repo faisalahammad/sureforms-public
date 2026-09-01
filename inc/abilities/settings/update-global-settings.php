@@ -48,6 +48,7 @@ class Update_Global_Settings extends Abstract_Ability {
 			'srfm_bsf_analytics',
 			'srfm_admin_notification',
 			'srfm_form_views_tracking',
+			'srfm_enable_logs',
 		],
 		'validation-messages' => [
 			'srfm_url_block_required_text',
@@ -284,7 +285,7 @@ class Update_Global_Settings extends Abstract_Ability {
 	 * @return array<string,mixed>
 	 */
 	private function sanitize_general_settings( $settings ) {
-		$boolean_keys = [ 'srfm_ip_log', 'srfm_form_analytics', 'srfm_bsf_analytics', 'srfm_admin_notification', 'srfm_form_views_tracking' ];
+		$boolean_keys = [ 'srfm_ip_log', 'srfm_form_analytics', 'srfm_bsf_analytics', 'srfm_admin_notification', 'srfm_form_views_tracking', 'srfm_enable_logs' ];
 
 		foreach ( $boolean_keys as $key ) {
 			if ( isset( $settings[ $key ] ) ) {
