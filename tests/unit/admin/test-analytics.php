@@ -706,6 +706,88 @@ class Test_Analytics extends TestCase {
 		$this->assertSame( $mcp_count_before, $mcp_count_after, 'MCP events should not be duplicated on second instantiation.' );
 	}
 
+	// ─── plugin_activated referer race (shutdown deferral) ────────
+
+	/**
+	 * Test track_plugin_activated_event is deferred to 'shutdown' rather
+	 * than firing immediately when Analytics boots.
+	 *
+	 * @return void
+	 */
+	public function test_track_plugin_activated_event_defers_to_shutdown() {
+		delete_option( 'bsf_product_referers' );
+
+		new Analytics();
+
+		$this->assertFalse( Analytics::events()->is_tracked( 'plugin_activated' ), 'plugin_activated should not be tracked until shutdown fires.' );
+
+		do_action( 'shutdown' );
+
+		$this->assertTrue( Analytics::events()->is_tracked( 'plugin_activated' ), 'plugin_activated should be tracked once shutdown fires.' );
+	}
+
+	/**
+	 * Regression test: a referrer plugin/theme that writes bsf_product_referers
+	 * AFTER SureForms has already booted (but before the request ends) must
+	 * still be picked up as the source, because the read is deferred to
+	 * 'shutdown' rather than happening synchronously at boot.
+	 *
+	 * @return void
+	 */
+	public function test_track_plugin_activated_event_reads_referer_set_after_boot() {
+		delete_option( 'bsf_product_referers' );
+
+		// SureForms boots — e.g. mid-request, while another plugin is
+		// silently activating it via activate_plugin().
+		new Analytics();
+
+		// The referring plugin writes its stamp only now, after SureForms
+		// has already booted, but still within the same request.
+		update_option( 'bsf_product_referers', [ 'sureforms' => 'astra' ] );
+
+		// End of request.
+		do_action( 'shutdown' );
+
+		$pending = Helper::get_srfm_option( 'usage_events_pending', [] );
+		$event   = current(
+			array_filter(
+				$pending,
+				static function ( $e ) {
+					return 'plugin_activated' === $e['event_name'];
+				}
+			)
+		);
+
+		$this->assertNotFalse( $event, 'plugin_activated event should have been queued.' );
+		$this->assertSame( 'astra', $event['properties']['source'] );
+	}
+
+	/**
+	 * Test track_plugin_activated_event falls back to 'self' when no
+	 * referrer was ever recorded.
+	 *
+	 * @return void
+	 */
+	public function test_track_plugin_activated_event_defaults_to_self_when_no_referer() {
+		delete_option( 'bsf_product_referers' );
+
+		new Analytics();
+		do_action( 'shutdown' );
+
+		$pending = Helper::get_srfm_option( 'usage_events_pending', [] );
+		$event   = current(
+			array_filter(
+				$pending,
+				static function ( $e ) {
+					return 'plugin_activated' === $e['event_name'];
+				}
+			)
+		);
+
+		$this->assertNotFalse( $event, 'plugin_activated event should have been queued.' );
+		$this->assertSame( 'self', $event['properties']['source'] );
+	}
+
 	/**
 	 * Test track_first_form_published tracks event when a form transitions to publish.
 	 *
@@ -1138,5 +1220,77 @@ class Test_Analytics extends TestCase {
 		$post = new \WP_Post( (object) $args );
 
 		return $post;
+	}
+
+	// ---------------------------------------------------------------
+	// Missing entries table
+	// ---------------------------------------------------------------
+
+	/**
+	 * The daily payload must carry the missing-table state. The impression event
+	 * fires once per site, so without this KPI a site that stays broken for months
+	 * looks identical to one that fixed itself the same day.
+	 */
+	public function test_analytics_payload_reports_the_entries_table_state() {
+		$data = Analytics::get_instance()->add_srfm_analytics_data( [] );
+
+		$this->assertArrayHasKey(
+			'db_entries_table_missing',
+			$data['plugin_data']['sureforms']['boolean_values']
+		);
+		$this->assertFalse( $data['plugin_data']['sureforms']['boolean_values']['db_entries_table_missing'] );
+	}
+
+	/**
+	 * Every query against the entries table errors while it is missing. Before this
+	 * guard the daily send tripped over get_total_entries_by_status() on exactly the
+	 * sites whose breakage we most need reported.
+	 */
+	public function test_analytics_does_not_query_a_missing_entries_table() {
+		global $wpdb;
+
+		$table = \SRFM\Inc\Database\Tables\Entries::get_instance()->get_tablename();
+
+		$versions            = (array) get_option( 'srfm_database_table_versions', [] );
+		$versions['entries'] = 2;
+		update_option( 'srfm_database_table_versions', $versions );
+
+		$wpdb->query( "CREATE TABLE `{$table}_srfmbak` LIKE `{$table}`" ); // phpcs:ignore -- Preserving the schema across the drop under test.
+		$wpdb->query( "DROP TABLE `{$table}`" ); // phpcs:ignore -- Reproducing the dropped-table state under test.
+		$this->reset_table_cache();
+
+		// Record every query the payload runs. Asserting on $wpdb->last_error would
+		// pass by accident, because a later successful query clears it.
+		$seen = [];
+		$spy  = static function ( $query ) use ( &$seen, $table ) {
+			if ( false !== strpos( (string) $query, $table ) ) {
+				$seen[] = $query;
+			}
+			return $query;
+		};
+
+		add_filter( 'query', $spy );
+		$data = Analytics::get_instance()->add_srfm_analytics_data( [] );
+		remove_filter( 'query', $spy );
+
+		$wpdb->query( "RENAME TABLE `{$table}_srfmbak` TO `{$table}`" ); // phpcs:ignore -- Restoring the table this test dropped.
+		$this->reset_table_cache();
+
+		$this->assertSame( [], $seen, 'The analytics payload must not query a missing entries table.' );
+		$this->assertSame( 0, $data['plugin_data']['sureforms']['numeric_values']['total_entries'] );
+		$this->assertTrue( $data['plugin_data']['sureforms']['boolean_values']['db_entries_table_missing'] );
+	}
+
+	/**
+	 * Clear the per-request memo and the transient behind is_entries_table_missing().
+	 *
+	 * @return void
+	 */
+	private function reset_table_cache() {
+		delete_transient( \SRFM\Inc\Database\Register::ENTRIES_TABLE_CHECK_TRANSIENT );
+
+		$memo = new ReflectionProperty( \SRFM\Inc\Database\Register::class, 'entries_table_present' );
+		$memo->setAccessible( true );
+		$memo->setValue( null, null );
 	}
 }

@@ -47,6 +47,23 @@
 		);
 	}
 
+	// Action-item notices declare what to record on the element itself, so a new
+	// one needs no entry in the map above. Delegated from the document because
+	// these render on every admin screen, not inside one known container.
+	document.addEventListener( 'click', function ( e ) {
+		const link = e.target.closest( '[data-srfm-notice-id][data-srfm-button]' );
+		if ( ! link ) {
+			return;
+		}
+
+		const noticeId = link.getAttribute( 'data-srfm-notice-id' );
+		const button = link.getAttribute( 'data-srfm-button' );
+
+		if ( noticeId && button ) {
+			sendResponse( noticeId, button );
+		}
+	} );
+
 	Object.keys( notices ).forEach( function ( noticeId ) {
 		const container = document.getElementById( noticeId );
 		if ( ! container ) {
