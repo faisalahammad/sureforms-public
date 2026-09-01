@@ -244,7 +244,7 @@ abstract class Base {
 	 * database needs updating" on a transient connection blip is worse than a
 	 * missed one, because the notice it drives asks the user to alter their schema.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool True when the table exists, or when existence cannot be determined.
 	 */
 	public function table_exists() {
@@ -278,7 +278,7 @@ abstract class Base {
 	 * Anything matching the `{base_prefix}{digits}_` pattern, or the base prefix
 	 * itself, is excluded so a subsite can never adopt another subsite's data.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string Full table name to adopt, or '' when there is nothing safe to adopt.
 	 */
 	public function find_adoptable_table() {
@@ -327,7 +327,7 @@ abstract class Base {
 	 * data, and cannot half-succeed and leave rows in two places.
 	 *
 	 * @param string $from Full name of the table to adopt.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool True when the table is in place afterwards.
 	 */
 	public function adopt_table( $from ) {
@@ -358,6 +358,77 @@ abstract class Base {
 		}
 
 		return $this->table_exists();
+	}
+
+	/**
+	 * The signature this plugin stamps on tables it owns on this site.
+	 *
+	 * A random per-site token, generated once and stored in options. Embedded in
+	 * the table's MySQL comment at creation time; the comment survives RENAME, so a
+	 * table that moved under a different prefix still carries it, while an unrelated
+	 * install sharing the same database carries a different one.
+	 *
+	 * @since 2.12.6
+	 * @return string
+	 */
+	protected function get_owner_signature() {
+		$token = get_option( 'srfm_db_owner_token' );
+
+		if ( ! is_string( $token ) || '' === $token ) {
+			$token = wp_generate_password( 20, false );
+			update_option( 'srfm_db_owner_token', $token, false );
+		}
+
+		return 'srfm-owner:' . $token;
+	}
+
+	/**
+	 * Stamp this site's owner signature onto a table's MySQL comment.
+	 *
+	 * Best-effort: a host that refuses ALTER simply leaves the table unstamped,
+	 * which later reads as "ownership unproven" — the safe direction.
+	 *
+	 * @param string $table Full table name; defaults to this table's own name.
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public function stamp_owner_signature( $table = '' ) {
+		$wpdb  = $this->wpdb;
+		$table = '' === $table ? $this->get_tablename() : $table;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- One-off DDL; nothing to cache.
+		$wpdb->query( $wpdb->prepare( 'ALTER TABLE %1s COMMENT = %s', str_replace( '`', '', $table ), $this->get_owner_signature() ) ); // phpcs:ignore -- Identifier must not be quoted; the comment value is a bound, quoted string.
+	}
+
+	/**
+	 * Whether a table carries this site's owner signature.
+	 *
+	 * Gates adoption: on shared hosting a different install's identically-named,
+	 * same-schema table can be the only candidate, and renaming it in would destroy
+	 * that site's data. Deny by default — anything but an exact signature match
+	 * (including a read error, an empty comment, or a legacy table stamped before
+	 * this plugin wrote signatures) returns false.
+	 *
+	 * @param string $table Full table name to inspect.
+	 * @since 2.12.6
+	 * @return bool
+	 */
+	public function table_belongs_to_site( $table ) {
+		$wpdb = $this->wpdb;
+		$bare = str_replace( '`', '', (string) $table );
+
+		if ( '' === $bare ) {
+			return false;
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Schema lookup; a cached answer would defeat the check.
+		$comment = $wpdb->get_var( $wpdb->prepare( 'SELECT TABLE_COMMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s', DB_NAME, $bare ) );
+
+		if ( ! empty( $wpdb->last_error ) || ! is_string( $comment ) || '' === $comment ) {
+			return false;
+		}
+
+		return hash_equals( $this->get_owner_signature(), $comment );
 	}
 
 	/**
@@ -431,9 +502,15 @@ abstract class Base {
 			 * @param string $last_error The database error.
 			 * @param string $query      The query that failed.
 			 * @param string $table_name The table it was for.
-			 * @since x.x.x
+			 * @since 2.12.6
 			 */
 			do_action( 'srfm_db_upgrade_query_failed', $wpdb->last_error, $query, $this->get_tablename() );
+		}
+
+		if ( false !== $result ) {
+			// Stamp our own table so a future adoption can prove it belongs to this
+			// site before renaming it in. See stamp_owner_signature().
+			$this->stamp_owner_signature();
 		}
 
 		return $result;
@@ -877,7 +954,7 @@ abstract class Base {
 	 * renamed into place just because its name matches.
 	 *
 	 * @param string $table Full table name to inspect.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool
 	 */
 	protected function has_expected_columns( $table ) {

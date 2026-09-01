@@ -30,7 +30,7 @@ class Register {
 	 * time, so the warning disappears the moment the table is back rather than
 	 * lingering for the rest of the TTL.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	public const ENTRIES_TABLE_CHECK_TRANSIENT = 'srfm_entries_table_present';
 
@@ -42,7 +42,7 @@ class Register {
 	 * transient read.
 	 *
 	 * @var bool|null
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	private static $entries_table_present = null;
 
@@ -105,7 +105,7 @@ class Register {
 	 * a "your database needs updating" notice during a perfectly normal install.
 	 *
 	 * @param bool $force Skip both caches and re-query.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool
 	 */
 	public static function is_entries_table_missing( $force = false ) {
@@ -132,6 +132,12 @@ class Register {
 		// Cache only the healthy answer. See the transient's docblock.
 		if ( $present ) {
 			set_transient( self::ENTRIES_TABLE_CHECK_TRANSIENT, 1, DAY_IN_SECONDS );
+			// Backfill the owner signature once, so a table created before this plugin
+			// wrote signatures can still be proven ours if the prefix later changes.
+			if ( ! get_option( 'srfm_entries_owner_stamped' ) ) {
+				Entries::get_instance()->stamp_owner_signature();
+				update_option( 'srfm_entries_owner_stamped', 1, false );
+			}
 		} else {
 			delete_transient( self::ENTRIES_TABLE_CHECK_TRANSIENT );
 		}
@@ -158,7 +164,7 @@ class Register {
 	 * the version again while the table was still missing — which would hide the
 	 * problem permanently and be worse than doing nothing.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool True when the table exists afterwards.
 	 */
 	public static function repair_entries_table() {
@@ -170,10 +176,29 @@ class Register {
 		// a successful repair.
 		$adoptable = $entries->find_adoptable_table();
 
-		if ( '' !== $adoptable && $entries->adopt_table( $adoptable ) ) {
-			// The adopted table already carries its schema, so the stored version
-			// stays as-is; init() would have nothing to do. Just refresh the cache.
-			return ! self::is_entries_table_missing( true );
+		if ( '' !== $adoptable ) {
+			if ( $entries->table_belongs_to_site( $adoptable ) ) {
+				// Provenance confirms this site owns the table: safe to rename it in.
+				if ( $entries->adopt_table( $adoptable ) ) {
+					self::run_entries_schema_catchup();
+					delete_option( 'srfm_entries_unrecovered' );
+					return ! self::is_entries_table_missing( true );
+				}
+
+				// The table is ours but the rename failed — e.g. the DB user lacks the
+				// privilege RENAME needs, or a metadata-lock timeout. Manufacturing an
+				// empty table over recoverable data and reporting success would be worse
+				// than doing nothing, so refuse and leave a durable trail for support.
+				self::record_unrecovered_entries_table( $adoptable, 'adopt_failed' );
+				return false;
+			}
+
+			// A single same-schema candidate exists but its ownership cannot be
+			// proven. On shared hosting it may belong to an unrelated install, and
+			// renaming it in would destroy that site's data. Leave it untouched,
+			// record it so it can be recovered by hand, then fall back to a fresh
+			// table below.
+			self::record_unrecovered_entries_table( $adoptable, 'unverified' );
 		}
 
 		$versions = Helper::get_array_value( get_option( 'srfm_database_table_versions', [] ) );
@@ -187,13 +212,83 @@ class Register {
 	}
 
 	/**
+	 * Re-run the install-time schema steps against a just-adopted table.
+	 *
+	 * An adopted table can carry an older revision of this plugin's schema (a
+	 * superset of column names still passes the adoption guard), so reuse the same
+	 * ordered create/add-column/rename pass the install path runs rather than
+	 * assuming the adopted schema is already current. create() is CREATE TABLE IF
+	 * NOT EXISTS, so it is a no-op on the table that is now in place.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	private static function run_entries_schema_catchup() {
+		$versions = Helper::get_array_value( get_option( 'srfm_database_table_versions', [] ) );
+
+		unset( $versions['entries'] );
+		update_option( 'srfm_database_table_versions', $versions );
+
+		static::init();
+	}
+
+	/**
+	 * Record a table that holds recoverable entries but was not adopted.
+	 *
+	 * Fired when a candidate is found that either cannot be proven to belong to
+	 * this site or could not be renamed in. Persists the name and reason so a
+	 * support engineer can find and reconnect it by hand, rather than letting it
+	 * be discarded silently the moment a fresh empty table exists.
+	 *
+	 * @param string $table  Full name of the table left in place.
+	 * @param string $reason 'unverified' or 'adopt_failed'.
+	 * @since 2.12.6
+	 * @return void
+	 */
+	private static function record_unrecovered_entries_table( $table, $reason ) {
+		update_option(
+			'srfm_entries_unrecovered',
+			[
+				'table'  => $table,
+				'reason' => $reason,
+				'time'   => time(),
+			],
+			false
+		);
+
+		/**
+		 * Fires when entries data was found but not automatically recovered.
+		 *
+		 * @param string $table  Full name of the table left in place.
+		 * @param string $reason 'unverified' or 'adopt_failed'.
+		 * @since 2.12.6
+		 */
+		do_action( 'srfm_entries_table_unrecovered', $table, $reason );
+	}
+
+	/**
+	 * Drop the cached entries-table detection so the next check re-queries.
+	 *
+	 * Called when a live entries write fails: a table cached as present earlier in
+	 * the day may have just been dropped, and trusting the stale healthy answer
+	 * would hide the notice for up to the transient's lifetime.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public static function flush_entries_table_cache() {
+		self::$entries_table_present = null;
+		delete_transient( self::ENTRIES_TABLE_CHECK_TRANSIENT );
+	}
+
+	/**
 	 * The entries table sitting under a different prefix, if there is one.
 	 *
 	 * Exposed so the notice can say whether the repair will bring existing entries
 	 * back with it or start from empty — the difference matters a great deal to
 	 * whoever is about to click the button.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string Full table name, or '' when there is nothing to adopt.
 	 */
 	public static function get_adoptable_entries_table() {
@@ -201,6 +296,16 @@ class Register {
 			return '';
 		}
 
-		return Entries::get_instance()->find_adoptable_table();
+		$entries   = Entries::get_instance();
+		$candidate = $entries->find_adoptable_table();
+
+		// Only report a candidate the repair would actually adopt — one we can prove
+		// belongs to this site. An unverifiable table is left untouched and a fresh
+		// table created instead, so the notice must not promise to keep its entries.
+		if ( '' === $candidate || ! $entries->table_belongs_to_site( $candidate ) ) {
+			return '';
+		}
+
+		return $candidate;
 	}
 }

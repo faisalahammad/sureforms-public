@@ -166,6 +166,10 @@ class Test_Database_Register extends TestCase {
 		$this->record_entries_version( 2 );
 
 		$orphan = $this->clone_entries_table( 'srfmtest1_srfm_entries' );
+		// The orphan carries this site's owner signature, as a table this plugin
+		// created under the old prefix would. CREATE TABLE ... LIKE does not copy the
+		// comment, so stamp it explicitly.
+		Entries::get_instance()->stamp_owner_signature( $orphan );
 		$this->seed_row( $orphan, 'adopt-me' );
 		$this->drop_entries_table();
 
@@ -177,6 +181,115 @@ class Test_Database_Register extends TestCase {
 			$wpdb->get_var( "SELECT notes FROM `{$this->entries_table}` WHERE notes = 'adopt-me'" ) // phpcs:ignore -- Reading back a row this test seeded.
 		);
 		$this->assertFalse( $this->table_is_present( $orphan ) );
+	}
+
+	/**
+	 * Shared-DB safety: a same-schema table with no proof it belongs to this site
+	 * (as an unrelated install's table would be) must never be renamed in. It is
+	 * left untouched, recorded for manual recovery, and a fresh table is created.
+	 */
+	public function test_leaves_an_unverified_table_untouched_and_records_it() {
+		global $wpdb;
+
+		$this->record_entries_version( 2 );
+
+		$orphan = $this->clone_entries_table( 'srfmtest1_srfm_entries' );
+		// Guarantee no owner signature, whatever LIKE may or may not copy.
+		$wpdb->query( "ALTER TABLE `{$orphan}` COMMENT = ''" ); // phpcs:ignore -- Scratch table for this test.
+		$this->seed_row( $orphan, 'not-ours' );
+		$this->drop_entries_table();
+
+		$this->assertTrue( Register::repair_entries_table() );
+
+		// The unverified table survives, and a fresh empty table is created beside it.
+		$this->assertTrue( $this->table_is_present( $orphan ), 'An unverified table must not be renamed away.' );
+		$this->assertTrue( $this->table_is_present( $this->entries_table ), 'A fresh table is created instead.' );
+		$this->assertSame(
+			'not-ours',
+			$wpdb->get_var( "SELECT notes FROM `{$orphan}` WHERE notes = 'not-ours'" ) // phpcs:ignore -- Reading back a row this test seeded.
+		);
+
+		$recorded = get_option( 'srfm_entries_unrecovered' );
+		$this->assertSame( $orphan, $recorded['table'] ?? '' );
+		$this->assertSame( 'unverified', $recorded['reason'] ?? '' );
+
+		delete_option( 'srfm_entries_unrecovered' );
+	}
+
+	/**
+	 * A candidate that is ours but cannot be renamed in (e.g. the DB user lacks the
+	 * privilege RENAME needs) must not fall through to a fresh empty table and
+	 * report success — that would strand recoverable data behind a green result.
+	 * It fails, and records the table for manual recovery.
+	 */
+	public function test_records_and_fails_when_a_verified_table_cannot_be_adopted() {
+		$this->record_entries_version( 2 );
+		$this->drop_entries_table();
+
+		// Stand-in whose table verifies as ours but whose RENAME cannot complete.
+		$double = new class() extends Entries {
+			public function find_adoptable_table() {
+				return $this->wpdb->prefix . 'srfmtest1_srfm_entries';
+			}
+			public function table_belongs_to_site( $table ) {
+				return true;
+			}
+			public function adopt_table( $from ) {
+				return false;
+			}
+		};
+
+		$ref = new ReflectionProperty( Entries::class, 'instance' );
+		$ref->setAccessible( true );
+		$ref->setValue( null, $double );
+
+		$fired = [];
+		add_action(
+			'srfm_entries_table_unrecovered',
+			static function ( $table, $reason ) use ( &$fired ) {
+				$fired = [ 'table' => $table, 'reason' => $reason ];
+			},
+			10,
+			2
+		);
+
+		$result = Register::repair_entries_table();
+
+		Entries::reset_instance();
+		remove_all_actions( 'srfm_entries_table_unrecovered' );
+
+		$this->assertFalse( $result, 'A found-but-unadoptable table must not report success.' );
+		$this->assertFalse( $this->table_is_present( $this->entries_table ), 'No empty table may be manufactured over recoverable data.' );
+		$this->assertSame( 'adopt_failed', $fired['reason'] ?? '' );
+
+		$recorded = get_option( 'srfm_entries_unrecovered' );
+		$this->assertSame( 'adopt_failed', $recorded['reason'] ?? '' );
+
+		delete_option( 'srfm_entries_unrecovered' );
+	}
+
+	/**
+	 * A failed entries write invalidates a stale "present" cache, so a table dropped
+	 * after being cached healthy is noticed on the next check rather than up to a
+	 * day later.
+	 */
+	public function test_failed_entry_write_flushes_the_present_cache() {
+		global $wpdb;
+
+		$this->record_entries_version( 2 );
+
+		// Prime the healthy cache, then drop the table without clearing that cache.
+		Register::is_entries_table_missing( true );
+		set_transient( Register::ENTRIES_TABLE_CHECK_TRANSIENT, 1, DAY_IN_SECONDS );
+		$wpdb->query( "DROP TABLE IF EXISTS `{$this->entries_table}`" ); // phpcs:ignore -- Reproducing a live drop after the cache was primed.
+
+		// A submission tries to save and fails against the missing table.
+		Entries::add( [ 'form_id' => 123 ] );
+
+		$this->assertFalse(
+			get_transient( Register::ENTRIES_TABLE_CHECK_TRANSIENT ),
+			'A failed entries write must invalidate the stale present cache.'
+		);
 	}
 
 	/**
@@ -247,6 +360,37 @@ class Test_Database_Register extends TestCase {
 		$this->clone_entries_table( 'srfmtest1_srfm_entries' );
 
 		$this->assertSame( '', Register::get_adoptable_entries_table() );
+	}
+
+	/**
+	 * The notice must not promise to keep entries from a table it will not adopt.
+	 * An unverified candidate reports empty, so the copy falls back to the
+	 * create-empty wording.
+	 */
+	public function test_get_adoptable_entries_table_ignores_an_unverified_table() {
+		global $wpdb;
+
+		$this->record_entries_version( 2 );
+
+		$orphan = $this->clone_entries_table( 'srfmtest1_srfm_entries' );
+		$wpdb->query( "ALTER TABLE `{$orphan}` COMMENT = ''" ); // phpcs:ignore -- Scratch table for this test.
+		$this->drop_entries_table();
+
+		$this->assertSame( '', Register::get_adoptable_entries_table() );
+	}
+
+	/**
+	 * A candidate proven to belong to this site is reported, so the notice can
+	 * promise recovery.
+	 */
+	public function test_get_adoptable_entries_table_reports_a_verified_table() {
+		$this->record_entries_version( 2 );
+
+		$orphan = $this->clone_entries_table( 'srfmtest1_srfm_entries' );
+		Entries::get_instance()->stamp_owner_signature( $orphan );
+		$this->drop_entries_table();
+
+		$this->assertSame( $orphan, Register::get_adoptable_entries_table() );
 	}
 
 	/**

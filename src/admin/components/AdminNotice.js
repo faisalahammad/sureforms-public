@@ -10,7 +10,7 @@
 
 import { Alert, Button } from '@bsf/force-ui';
 import { TriangleAlert, Info, CheckCircle, CircleAlert } from 'lucide-react';
-import { useState } from '@wordpress/element';
+import { useRef, useState } from '@wordpress/element';
 import { __ } from '@wordpress/i18n';
 import apiFetch from '@wordpress/api-fetch';
 
@@ -86,6 +86,10 @@ const getNoticeClassName = ( variant ) => {
 const SingleNotice = ( { variant = 'info', message, title, actions = [] } ) => {
 	// Only ever set by a server-backed action; a plain link action never touches it.
 	const [ status, setStatus ] = useState( { busy: false, error: '' } );
+	// Synchronous guard: `disabled={status.busy}` only takes effect after the next
+	// render commits, so two clicks dispatched before that commit would both run.
+	// The ref flips immediately, so the second click is dropped.
+	const inFlight = useRef( false );
 
 	const runAction = async ( action ) => {
 		const handler = NOTICE_ACTION_HANDLERS[ action.action ];
@@ -103,9 +107,10 @@ const SingleNotice = ( { variant = 'info', message, title, actions = [] } ) => {
 			return;
 		}
 
-		if ( status.busy ) {
+		if ( inFlight.current ) {
 			return;
 		}
+		inFlight.current = true;
 
 		setStatus( { busy: true, error: '' } );
 
@@ -123,6 +128,7 @@ const SingleNotice = ( { variant = 'info', message, title, actions = [] } ) => {
 			next.searchParams.set( 'srfm_db_repair', 'done' );
 			window.location.assign( next.toString() );
 		} catch ( error ) {
+			inFlight.current = false;
 			setStatus( {
 				busy: false,
 				error:
@@ -144,6 +150,7 @@ const SingleNotice = ( { variant = 'info', message, title, actions = [] } ) => {
 							<Button
 								onClick={ () => runAction( action ) }
 								disabled={ status.busy }
+								aria-busy={ status.busy }
 								variant="link"
 								size="xs"
 								className="inline-flex text-link-primary p-0 [&>span]:p-0"
@@ -155,8 +162,13 @@ const SingleNotice = ( { variant = 'info', message, title, actions = [] } ) => {
 						</span>
 					) ) }
 			</span>
+			<span role="status" aria-live="polite" className="sr-only">
+				{ status.busy ? __( 'Working\u2026', 'sureforms' ) : '' }
+			</span>
 			{ status.error && (
-				<span className="text-text-error">{ status.error }</span>
+				<span role="alert" className="text-text-error">
+					{ status.error }
+				</span>
 			) }
 		</span>
 	);

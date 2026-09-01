@@ -2267,7 +2267,7 @@ JS;
 	 * through the `srfm_admin_filter` applied during admin_enqueue_scripts, so
 	 * anything registering later never reaches the page.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	public function register_database_repair_notice() {
@@ -2363,7 +2363,7 @@ JS;
 	 * suppress_foreign_admin_notices() strips any callback it cannot attribute to a
 	 * SureForms class — a closure here would be silently removed.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	public function render_database_repair_notice() {
@@ -2426,7 +2426,7 @@ JS;
 	 * A nonce-protected GET that changes state matches how core's own plugin
 	 * activate / deactivate / delete links work.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	public function handle_database_repair() {
@@ -2456,7 +2456,7 @@ JS;
 	 * admin-post handler and the REST endpoint. One user action reaches exactly one
 	 * of those, so the click counter cannot double-count across the two surfaces.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool True when the table exists afterwards.
 	 */
 	public function do_database_repair() {
@@ -3158,7 +3158,7 @@ JS;
 	 * place that counts the click. Private, so it stays off the public API and out of
 	 * the test-coverage gate.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string
 	 */
 	private function get_database_repair_url() {
@@ -3181,7 +3181,7 @@ JS;
 	 * Promising the wrong one is how a maintenance prompt turns into a complaint, so
 	 * the copy states which is about to happen.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string
 	 */
 	private function get_database_notice_message() {
@@ -3201,7 +3201,7 @@ JS;
 	 * would dominate the aggregate. Throttling to a day per user answers the question
 	 * that matters — how many people are seeing this — for one write.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	private function track_database_notice_impression() {
