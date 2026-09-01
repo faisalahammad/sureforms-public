@@ -148,7 +148,7 @@ class Get_Global_Settings extends Abstract_Ability {
 				'srfm_ip_log'             => false,
 				'srfm_form_analytics'     => false,
 				'srfm_admin_notification' => true,
-				'srfm_enable_logs'        => false,
+				'srfm_enable_logs'        => true,
 			];
 		}
 
@@ -157,7 +157,7 @@ class Get_Global_Settings extends Abstract_Ability {
 		}
 
 		if ( ! isset( $settings['srfm_enable_logs'] ) ) {
-			$settings['srfm_enable_logs'] = false;
+			$settings['srfm_enable_logs'] = true;
 		}
 
 		$settings['srfm_bsf_analytics'] = 'yes' === get_option( 'sureforms_usage_optin', false );

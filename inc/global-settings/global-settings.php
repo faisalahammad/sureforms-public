@@ -153,7 +153,9 @@ class Global_Settings {
 		$srfm_form_analytics     = $setting_options['srfm_form_analytics'] ?? false;
 		$srfm_bsf_analytics      = $setting_options['srfm_bsf_analytics'] ?? false;
 		$srfm_admin_notification = isset( $setting_options['srfm_admin_notification'] ) ? (bool) $setting_options['srfm_admin_notification'] : true;
-		$srfm_enable_logs        = isset( $setting_options['srfm_enable_logs'] ) ? (bool) $setting_options['srfm_enable_logs'] : false;
+		// Absent means on, matching Client_Logger::is_enabled(). A save that omits
+		// the key must not be read as the site opting out.
+		$srfm_enable_logs = isset( $setting_options['srfm_enable_logs'] ) ? (bool) $setting_options['srfm_enable_logs'] : true;
 
 		$settings = [
 			'srfm_ip_log'             => $srfm_ip_log,
@@ -666,7 +668,7 @@ class Global_Settings {
 					'srfm_ip_log'             => false,
 					'srfm_form_analytics'     => false,
 					'srfm_admin_notification' => true,
-					'srfm_enable_logs'        => false,
+					'srfm_enable_logs'        => true,
 				];
 		}
 
