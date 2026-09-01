@@ -1160,6 +1160,134 @@ class Test_Admin extends TestCase {
 	}
 
 	/**
+	 * The precedence guard. A form that cannot accept submissions must outrank the
+	 * engagement prompts, so this is what the Thank You, rating and getting-started
+	 * notices check before showing.
+	 *
+	 * Re-derives its conditions rather than calling get_action_items(), which
+	 * records an impression and must not run from a show_if callback.
+	 */
+	public function test_has_action_item_warnings() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+
+		$quiet = static function () {
+			return [ 'akismet/akismet.php' ];
+		};
+
+		add_filter( 'pre_option_active_plugins', $quiet );
+		$this->assertFalse( Admin::get_instance()->has_action_item_warnings() );
+		remove_filter( 'pre_option_active_plugins', $quiet );
+
+		update_option( Client_Logger::FAULT_STREAK_OPTION, Client_Logger::FAULT_THRESHOLD );
+
+		add_filter( 'pre_option_active_plugins', $quiet );
+		$this->assertTrue( Admin::get_instance()->has_action_item_warnings() );
+		remove_filter( 'pre_option_active_plugins', $quiet );
+
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+	}
+
+	/**
+	 * Dismissing an advisory must clear the warning state, or the engagement
+	 * notices stay suppressed forever on a site with a caching plugin.
+	 */
+	public function test_has_action_item_warnings_respects_a_dismissal() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+
+		$caching = static function () {
+			return [ 'wp-rocket/wp-rocket.php' ];
+		};
+
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+		add_filter( 'pre_option_active_plugins', $caching );
+		$this->assertTrue( Admin::get_instance()->has_action_item_warnings() );
+
+		Helper::update_srfm_option( 'dismissed_action_items', [ 'caching_plugin' ] );
+		$this->assertFalse( Admin::get_instance()->has_action_item_warnings() );
+		remove_filter( 'pre_option_active_plugins', $caching );
+
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+	}
+
+	/**
+	 * The AJAX dismissal refuses anything not on the allowlist, so a crafted
+	 * request cannot silence a genuine fault.
+	 */
+	public function test_handle_dismiss_action_item() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+
+		$this->assertStringContainsString( '"success":true', $this->post_dismiss( 'caching_plugin' ) );
+		$this->assertStringContainsString( '"success":false', $this->post_dismiss( 'form_submission_error' ) );
+
+		$dismissed = Helper::get_array_value( Helper::get_srfm_option( 'dismissed_action_items', [] ) );
+		$this->assertNotContains( 'form_submission_error', $dismissed );
+
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+	}
+
+	/**
+	 * The no-JS link exists because WordPress's own is-dismissible only hides a
+	 * notice for one pageview. A subscriber must not reach it.
+	 */
+	public function test_handle_dismiss_action_item_link() {
+		wp_set_current_user( $this->make_user( 'subscriber' ) );
+
+		$throw = static function () {
+			return static function ( $m = '' ) {
+				throw new \WPDieException( is_string( $m ) ? $m : 'die' );
+			};
+		};
+		add_filter( 'wp_die_handler', $throw );
+
+		$died = false;
+
+		ob_start();
+		try {
+			Admin::get_instance()->handle_dismiss_action_item_link();
+		} catch ( \WPDieException $e ) {
+			$died = true;
+		} finally {
+			ob_end_clean();
+			remove_filter( 'wp_die_handler', $throw );
+			wp_set_current_user( 0 );
+		}
+
+		$this->assertTrue( $died, 'A subscriber must be stopped before anything is dismissed.' );
+	}
+
+	/**
+	 * Drive the dismissal endpoint and return what it emitted.
+	 *
+	 * @param string $item_id Item to dismiss.
+	 * @return string
+	 */
+	private function post_dismiss( $item_id ) {
+		$_POST['nonce']   = wp_create_nonce( 'srfm_dismiss_action_item' );
+		$_POST['item_id'] = $item_id;
+		$_REQUEST         = $_POST;
+
+		add_filter( 'wp_doing_ajax', '__return_true' );
+		add_filter( 'wp_die_ajax_handler', '_wp_die_handler_filter' );
+		_disable_wp_die();
+
+		ob_start();
+		Admin::get_instance()->handle_dismiss_action_item();
+		$body = (string) ob_get_clean();
+
+		_enable_wp_die();
+		remove_filter( 'wp_die_ajax_handler', '_wp_die_handler_filter' );
+		remove_filter( 'wp_doing_ajax', '__return_true' );
+		$_POST    = [];
+		$_REQUEST = [];
+
+		return $body;
+	}
+
+	/**
 	 * A fault must not be dismissible. Otherwise a crafted request could silence
 	 * the one message that matters while the form is still broken.
 	 */

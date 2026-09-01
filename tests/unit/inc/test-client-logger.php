@@ -357,6 +357,40 @@ class Test_Client_Logger extends TestCase {
 		}
 	}
 
+	/**
+	 * The tail is what goes into a support email, where the transport sets the
+	 * limit. Whole lines only -- half a JSON object helps nobody -- and the newest
+	 * entries, because those describe the failure being reported.
+	 */
+	public function test_get_tail() {
+		for ( $i = 1; $i <= 12; $i++ ) {
+			Client_Logger::append( [ 'type' => 'error', 'message' => 'failure number ' . $i ] );
+		}
+
+		$tail = Client_Logger::get_tail( 400 );
+
+		$this->assertSame( 12, $tail['total'] );
+		$this->assertLessThan( 12, $tail['shown'], 'A budget smaller than the log must truncate.' );
+		$this->assertStringContainsString( 'failure number 12', $tail['text'], 'The newest entry must survive.' );
+		$this->assertStringNotContainsString( 'failure number 1"', $tail['text'], 'The oldest must be dropped first.' );
+
+		foreach ( explode( "\n", $tail['text'] ) as $line ) {
+			$this->assertNotNull( json_decode( $line, true ), 'Every line must be whole JSON.' );
+		}
+	}
+
+	/**
+	 * An empty or absent log must not produce a broken excerpt.
+	 */
+	public function test_get_tail_handles_an_empty_log() {
+		Client_Logger::clear();
+
+		$tail = Client_Logger::get_tail();
+
+		$this->assertSame( '', $tail['text'] );
+		$this->assertSame( 0, $tail['total'] );
+	}
+
 	// ---------------------------------------------------------------
 	// Repeated-failure detection
 	// ---------------------------------------------------------------
