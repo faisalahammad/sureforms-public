@@ -430,7 +430,6 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 * New: Added an Enable Logs option that records form submission failures to a downloadable file, making it easier to diagnose issues on a live site.
 * New: Added Views and Conversion Rate columns to the Forms list, so you can see how each form is performing at a glance.
 * New: SureForms now detects a missing entries database table and offers a one-click repair, so submissions start saving again without manual database work.
-* Fix: SureForms admin notices no longer stack on top of each other.
 * Fix: The Edit Form button no longer overlaps form fields on the front end.
 * Fix: This update addressed a security bug. Props to Patchstack for reporting it responsibly to our team.
 = 2.12.5 - 25th August 2026 =
