@@ -349,10 +349,19 @@ const LogsContent = ( {
 		setConfirmingClear( false );
 		setClearing( true );
 		try {
-			await fetch(
+			const response = await fetch(
 				`${ ajaxUrl }?action=srfm_clear_logs&_wpnonce=${ nonce }`,
 				{ method: 'POST', credentials: 'same-origin' }
 			);
+
+			// fetch only rejects on a network failure, so a 403 from a stale nonce
+			// or a 500 resolves normally. Without this the toast said the log was
+			// cleared and the size was zeroed -- hiding the row -- while the file
+			// was still on disk.
+			if ( ! response.ok ) {
+				throw new Error( `HTTP ${ response.status }` );
+			}
+
 			setLogMeta( { ...logMeta, size: 0 } );
 			toast.success( __( 'Log cleared.', 'sureforms' ) );
 		} catch ( error ) {

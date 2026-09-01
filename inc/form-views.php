@@ -489,7 +489,16 @@ class Form_Views {
 
 		$total = 0;
 		foreach ( $meta_ids as $meta_id ) {
-			$total += Helper::get_integer_value( get_metadata_by_mid( 'post', $meta_id )->meta_value ?? 0 );
+			$meta = get_metadata_by_mid( 'post', $meta_id );
+
+			// Returns false for a row that has gone since the ids were read. `??`
+			// does not cover that: reading a property on false is a warning in its
+			// own right, logged under WP_DEBUG_LOG even though the total stays correct.
+			if ( ! is_object( $meta ) || ! isset( $meta->meta_value ) ) {
+				continue;
+			}
+
+			$total += Helper::get_integer_value( $meta->meta_value );
 		}
 
 		$keep = array_shift( $meta_ids );
