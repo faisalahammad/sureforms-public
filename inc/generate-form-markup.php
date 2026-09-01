@@ -1436,7 +1436,7 @@ class Generate_Form_Markup {
 			return;
 		}
 
-		$edit_link = get_edit_post_link( $form_id, 'url' );
+		$edit_link = get_edit_post_link( $form_id, 'raw' );
 
 		if ( empty( $edit_link ) ) {
 			return;

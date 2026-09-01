@@ -2383,11 +2383,11 @@ JS;
 				'id'                         => $notice_id,
 				'type'                       => '',
 				'message'                    => self::build_srfm_notice_markup(
-					esc_html__( 'Amazing! SureForms is powering your forms and submissions - let\'s keep growing together!', 'sureforms' ),
-					esc_html__( 'If SureForms has been helpful, would you mind taking a moment to leave a 5-star review on WordPress.org?', 'sureforms' ),
+					__( 'Amazing! SureForms is powering your forms and submissions - let\'s keep growing together!', 'sureforms' ),
+					__( 'If SureForms has been helpful, would you mind taking a moment to leave a 5-star review on WordPress.org?', 'sureforms' ),
 					[
 						[
-							'text'     => esc_html__( 'Rate SureForms', 'sureforms' ),
+							'text'     => __( 'Rate SureForms', 'sureforms' ),
 							'url'      => esc_url( 'https://wordpress.org/support/plugin/sureforms/reviews/' ),
 							'primary'  => true,
 							// Leaves wp-admin, so it also dismisses on the way out.
@@ -2395,13 +2395,13 @@ JS;
 							'external' => true,
 						],
 						[
-							'text'    => esc_html__( 'Maybe later', 'sureforms' ),
+							'text'    => __( 'Maybe later', 'sureforms' ),
 							'url'     => '#',
 							'dismiss' => true,
 							'snooze'  => WEEK_IN_SECONDS,
 						],
 						[
-							'text'    => esc_html__( 'I already did', 'sureforms' ),
+							'text'    => __( 'I already did', 'sureforms' ),
 							'url'     => '#',
 							'dismiss' => true,
 						],
@@ -2450,22 +2450,22 @@ JS;
 				'id'                         => $notice_id,
 				'type'                       => '',
 				'message'                    => self::build_srfm_notice_markup(
-					esc_html__( 'SureForms is ready to power your forms — explore what\'s possible!', 'sureforms' ),
-					esc_html__( 'Manage your forms, track submissions, and discover features like AI Form Builder, payment integrations, and more from the SureForms dashboard.', 'sureforms' ),
+					__( 'SureForms is ready to power your forms — explore what\'s possible!', 'sureforms' ),
+					__( 'Manage your forms, track submissions, and discover features like AI Form Builder, payment integrations, and more from the SureForms dashboard.', 'sureforms' ),
 					[
 						[
-							'text'    => esc_html__( 'Go to Dashboard', 'sureforms' ),
+							'text'    => __( 'Go to Dashboard', 'sureforms' ),
 							'url'     => esc_url( admin_url( 'admin.php?page=sureforms_menu' ) ),
 							'primary' => true,
 						],
 						[
-							'text'    => esc_html__( 'Maybe later', 'sureforms' ),
+							'text'    => __( 'Maybe later', 'sureforms' ),
 							'url'     => '#',
 							'dismiss' => true,
 							'snooze'  => WEEK_IN_SECONDS,
 						],
 						[
-							'text'    => esc_html__( 'I already know', 'sureforms' ),
+							'text'    => __( 'I already know', 'sureforms' ),
 							'url'     => '#',
 							'dismiss' => true,
 						],

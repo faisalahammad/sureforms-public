@@ -99,7 +99,7 @@ class Test_Generate_Form_Markup extends TestCase {
 			add_query_arg(
 				Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG,
 				'embed',
-				get_edit_post_link( $form_id, 'url' )
+				get_edit_post_link( $form_id, 'raw' )
 			)
 		);
 		$this->assertStringContainsString( 'href="' . $expected_href . '"', $markup, 'The pill href should be the editor link for this form, carrying the marker.' );

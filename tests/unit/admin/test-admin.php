@@ -806,6 +806,55 @@ class Test_Rating_Notice extends TestCase {
 			'No notice should be registered when srfm_show_rating_notice filter returns false'
 		);
 	}
+
+	/**
+	 * The shared notice builder escapes its text at the sink, so the call sites must
+	 * pass plain __() strings. Passing esc_html__() would escape twice and render a
+	 * literal `&amp;#039;` for every apostrophe. Guards that regression on a message
+	 * that actually contains one ("let's").
+	 */
+	public function test_rating_notice_text_is_escaped_exactly_once() {
+		if ( ! class_exists( '\\Astra_Notices' ) ) {
+			$this->markTestSkipped( 'Astra_Notices not available.' );
+		}
+
+		$admin_user = wp_insert_user(
+			[
+				'user_login' => 'srfm_rating_esc_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_rating_esc_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $admin_user ) ? 0 : (int) $admin_user );
+
+		$prop = new \ReflectionProperty( \Astra_Notices::class, 'notices' );
+		$prop->setAccessible( true );
+		$original = $prop->getValue();
+		$prop->setValue( null, [] );
+
+		try {
+			Admin::get_instance()->display_srfm_rating_notice();
+
+			$notices = $prop->getValue();
+			$this->assertNotEmpty( $notices, 'The rating notice should be registered for an admin.' );
+
+			$message = '';
+			foreach ( (array) $notices as $notice ) {
+				if ( isset( $notice['message'] ) && is_string( $notice['message'] ) ) {
+					$message .= $notice['message'];
+				}
+			}
+
+			$this->assertStringNotContainsString( '&amp;#039;', $message, 'Notice text must not be double-escaped.' );
+			$this->assertStringContainsString( '&#039;', $message, 'The apostrophe should be escaped exactly once at the sink.' );
+		} finally {
+			$prop->setValue( null, $original );
+			if ( ! is_wp_error( $admin_user ) ) {
+				wp_delete_user( (int) $admin_user );
+			}
+		}
+	}
 }
 
 /**
