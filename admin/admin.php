@@ -10,7 +10,9 @@ namespace SRFM\Admin;
 use Astra_Notices;
 use SRFM\Inc\AI_Form_Builder\AI_Helper;
 use SRFM\Inc\Client_Logger;
+use SRFM\Inc\Database\Register;
 use SRFM\Inc\Database\Tables\Entries;
+use SRFM\Inc\Generate_Form_Markup;
 use SRFM\Inc\Global_Settings\Global_Settings;
 use SRFM\Inc\Helper;
 use SRFM\Inc\Onboarding;
@@ -74,6 +76,17 @@ class Admin {
 	 * @since 2.5.2
 	 */
 	public const QUILL_1X_INLINE_CSS = '.ql-editor ul,.ql-editor ol{padding-left:1.5em}.ql-editor ul>li,.ql-editor ol>li{list-style-type:none}.ql-editor ol li:not(.ql-direction-rtl),.ql-editor ul li:not(.ql-direction-rtl){padding-left:1.5em}.ql-editor ol li.ql-direction-rtl,.ql-editor ul li.ql-direction-rtl{padding-right:1.5em}.ql-editor ul>li::before{content:"\2022"}.ql-editor li::before{display:inline-block;white-space:nowrap;width:1.2em}.ql-editor li:not(.ql-direction-rtl)::before{margin-left:-1.5em;margin-right:.3em;text-align:right}.ql-editor li.ql-direction-rtl::before{margin-left:.3em;margin-right:-1.5em}.ql-editor ol li{counter-reset:list-1 list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9;counter-increment:list-0}.ql-editor ol li::before{content:counter(list-0,decimal) ". "}.ql-editor ol li.ql-indent-1{counter-increment:list-1;counter-reset:list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-1::before{content:counter(list-1,lower-alpha) ". "}.ql-editor ol li.ql-indent-2{counter-increment:list-2;counter-reset:list-3 list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-2::before{content:counter(list-2,lower-roman) ". "}.ql-editor ol li.ql-indent-3{counter-increment:list-3;counter-reset:list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-3::before{content:counter(list-3,decimal) ". "}.ql-editor ol li.ql-indent-4{counter-increment:list-4;counter-reset:list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-4::before{content:counter(list-4,lower-alpha) ". "}.ql-editor ol li.ql-indent-5{counter-increment:list-5;counter-reset:list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-5::before{content:counter(list-5,lower-roman) ". "}.ql-editor ol li.ql-indent-6{counter-increment:list-6;counter-reset:list-7 list-8 list-9}.ql-editor ol li.ql-indent-6::before{content:counter(list-6,decimal) ". "}.ql-editor ol li.ql-indent-7{counter-increment:list-7;counter-reset:list-8 list-9}.ql-editor ol li.ql-indent-7::before{content:counter(list-7,lower-alpha) ". "}.ql-editor ol li.ql-indent-8{counter-increment:list-8;counter-reset:list-9}.ql-editor ol li.ql-indent-8::before{content:counter(list-8,lower-roman) ". "}.ql-editor ol li.ql-indent-9{counter-increment:list-9}.ql-editor ol li.ql-indent-9::before{content:counter(list-9,decimal) ". "}';
+
+	/**
+	 * Notice id for the "Finish setting up" Thank You prompt (#3030).
+	 *
+	 * A single stable id (not per-form): keeps both the autoloaded
+	 * `allowed_astra_notices` option and the per-user dismissal meta bounded to one
+	 * row, and lets a dismissed user short-circuit before the query runs.
+	 *
+	 * @since x.x.x
+	 */
+	public const THANKYOU_PROMPT_NOTICE_ID = 'srfm-thankyou-prompt';
 
 	/**
 	 * Dashboard widget entries data.
@@ -157,7 +170,14 @@ class Admin {
 		add_action( 'current_screen', [ $this, 'enable_gutenberg_for_sureforms' ], 100 );
 		// Register notices early for React pages (before admin_enqueue_scripts).
 		add_action( 'admin_init', [ $this, 'register_pro_compatibility_notices' ], 5 );
+
+		// Database maintenance notice: the entries table is missing, so submissions
+		// cannot be saved. Registered at admin_init priority 5 so the React notice is
+		// in place before admin_enqueue_scripts localizes it.
+		add_action( 'admin_init', [ $this, 'register_database_repair_notice' ], 5 );
 		add_action( 'admin_notices', [ $this, 'render_action_item_notices' ] );
+		add_action( 'admin_notices', [ $this, 'render_database_repair_notice' ] );
+		add_action( 'admin_post_srfm_repair_entries_table', [ $this, 'handle_database_repair' ] );
 		// Display notices on traditional WordPress admin pages.
 		add_action( 'admin_notices', [ $this, 'srfm_pro_version_compatibility' ] );
 
@@ -185,6 +205,8 @@ class Admin {
 		add_action( 'wp_ajax_srfm_dismiss_action_item', [ $this, 'handle_dismiss_action_item' ] );
 		add_action( 'admin_post_srfm_dismiss_action_item_link', [ $this, 'handle_dismiss_action_item_link' ] );
 		add_action( 'wp_ajax_srfm_ai_widget_usage', [ $this, 'track_ai_widget_usage' ] );
+		add_action( 'load-post.php', [ $this, 'maybe_track_edit_form_button_click' ] );
+		add_filter( 'removable_query_args', [ $this, 'add_removable_query_args' ] );
 
 		// Register dashboard widget only if there are recent entries.
 		add_action( 'admin_init', [ $this, 'maybe_register_dashboard_widget' ] );
@@ -758,12 +780,17 @@ JS;
 	 * stable notice id so the library's built-in ✕ dismissal is one persistent
 	 * choice ("stop nudging me"), not a per-form row.
 	 *
-	 * @since 2.12.4
-	 * @return void
+	 * Split out from the renderer so the decision has exactly one home. The Getting
+	 * Started notice suppresses itself when this returns a form, and duplicating the
+	 * conditions there would have meant two copies drifting apart. Reading it costs
+	 * nothing extra — get_thankyou_prompt_forms() memoizes its query per request.
+	 *
+	 * @since x.x.x
+	 * @return array<string,mixed>|null The form to prompt for, or null when no prompt should render.
 	 */
-	public function render_thankyou_prompt_notice() {
+	public function get_displayable_thankyou_prompt() {
 		if ( ! Helper::current_user_can() || ! class_exists( 'Astra_Notices' ) ) {
-			return;
+			return null;
 		}
 
 		/**
@@ -774,7 +801,7 @@ JS;
 		 * @since 2.12.4
 		 */
 		if ( ! apply_filters( 'srfm_show_thankyou_prompt', true ) ) {
-			return;
+			return null;
 		}
 
 		// Everywhere in wp-admin except the main dashboard. A null screen fails
@@ -782,19 +809,14 @@ JS;
 		$screen = get_current_screen();
 
 		if ( ! $screen || 'dashboard' === $screen->id ) {
-			return;
+			return null;
 		}
-
-		// A single stable notice id (not per-form): keeps both the autoloaded
-		// `allowed_astra_notices` option and the per-user dismissal meta bounded to
-		// one row, and lets a dismissed user short-circuit before the query runs.
-		$notice_id = 'srfm-thankyou-prompt';
 
 		// The library only checks dismissal at render (priority 30, after this
 		// query would already have run). Check it up front so a user who dismissed
 		// the prompt never pays for the WP_Query on subsequent admin page views.
-		if ( 'notice-dismissed' === get_user_meta( get_current_user_id(), $notice_id, true ) ) {
-			return;
+		if ( 'notice-dismissed' === get_user_meta( get_current_user_id(), self::THANKYOU_PROMPT_NOTICE_ID, true ) ) {
+			return null;
 		}
 
 		// array_values so a filter returning a key-preserving array (e.g. the
@@ -810,17 +832,32 @@ JS;
 			|| empty( $prompts[0]['thankyou_url'] ) || empty( $prompts[0]['replies_url'] )
 			|| ! isset( $prompts[0]['title'] )
 		) {
-			return;
+			return null;
 		}
 
-		$form = $prompts[0];
+		return $prompts[0];
+	}
+
+	/**
+	 * Render the "Finish setting up" Thank You notice (#3030).
+	 *
+	 * @since 2.12.4
+	 * @return void
+	 */
+	public function render_thankyou_prompt_notice() {
+		$notice_id = self::THANKYOU_PROMPT_NOTICE_ID;
+		$form      = $this->get_displayable_thankyou_prompt();
+
+		if ( null === $form ) {
+			return;
+		}
 
 		\Astra_Notices::add_notice(
 			[
 				'id'                         => $notice_id,
 				'type'                       => 'info',
 				'message'                    => self::build_thankyou_notice_markup( $form ),
-				'class'                      => 'srfm-thankyou-notice',
+				'class'                      => 'srfm-notice srfm-thankyou-notice',
 				'is_dismissible'             => true,
 				'display-with-other-notices' => true,
 				// Render late so this nudge never pre-empts higher-priority notices
@@ -832,7 +869,7 @@ JS;
 
 		// The message is wp_kses_post'd by the library, so the brand-orange styling
 		// is printed through the notice's pre-markup hook instead of inline.
-		add_action( 'astra_notice_before_markup_' . $notice_id, [ $this, 'print_thankyou_notice_styles' ] );
+		add_action( 'astra_notice_before_markup_' . $notice_id, [ $this, 'print_srfm_notice_styles' ] );
 
 		// Track clicks on the CTAs and the dismiss ✕ via the shared notice-response
 		// endpoint, enqueued only when the notice actually renders.
@@ -924,7 +961,7 @@ JS;
 	 * @since 2.12.4
 	 * @return void
 	 */
-	public function print_thankyou_notice_styles() {
+	public function print_srfm_notice_styles() {
 		// The library wp_kses_post()'s the message, which strips <svg> and data:
 		// image srcs, so the SureForms mark is painted as a CSS background here
 		// (this hook fires outside that kses call). URL-encoded, not base64, so the
@@ -933,18 +970,18 @@ JS;
 			'<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 32 32"><path fill="#D54407" fill-rule="evenodd" clip-rule="evenodd" d="M32 0H0V32H32V0ZM22.8573 6.85728H9.14304V11.4287V13.7144L11.4288 11.4287H22.8573V6.85728ZM20.5717 13.7146H9.14314V18.286V20.5714V20.5718V25.1428H16.0003V20.5714H9.14351L11.4289 18.286H20.5717V13.7146Z"/></svg>'
 		);
 		?>
-		<style id="srfm-thankyou-notice-styles">
-			.srfm-thankyou-notice.notice { border-left-color: #D54407; }
+		<style id="srfm-notice-styles">
+			.srfm-notice.notice { border-left-color: #D54407; }
 			/* Stack our blocks (the library lays the container out as a flex row) and reserve room on the left for the SureForms mark. */
-			.srfm-thankyou-notice .astra-notice-container { display: block; padding: 4px 0 4px 52px; background: url('<?php echo esc_url( $icon, [ 'data' ] ); ?>') no-repeat 4px 6px; background-size: 32px 32px; }
-			.srfm-thankyou-notice .srfm-thankyou-notice__title { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: #1d2327; }
-			.srfm-thankyou-notice .srfm-thankyou-notice__text { margin: 0 0 10px; color: #50575e; }
-			.srfm-thankyou-notice .srfm-thankyou-notice__actions { margin: 12px 0 2px; display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; }
-			.srfm-thankyou-notice .button-primary { background: #D54407; border-color: #D54407; color: #fff; box-shadow: none; text-shadow: none; }
-			.srfm-thankyou-notice .button-primary:hover, .srfm-thankyou-notice .button-primary:focus { background: #C83B00; border-color: #C83B00; color: #fff; box-shadow: none; }
-			.srfm-thankyou-notice .button:not(.button-primary) { background: transparent; border-color: transparent; color: #D54407; box-shadow: none; padding: 0; }
-			.srfm-thankyou-notice .button:not(.button-primary):hover, .srfm-thankyou-notice .button:not(.button-primary):focus { background: transparent; border-color: transparent; color: #C83B00; box-shadow: none; }
-			.srfm-thankyou-notice .button-primary:focus { outline: 2px solid #D54407; outline-offset: 1px; }
+			.srfm-notice .astra-notice-container { display: block; padding: 4px 0 4px 52px; background: url('<?php echo esc_url( $icon, [ 'data' ] ); ?>') no-repeat 4px 6px; background-size: 32px 32px; }
+			.srfm-notice .srfm-notice__title { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: #1d2327; }
+			.srfm-notice .srfm-notice__text { margin: 0 0 10px; color: #50575e; }
+			.srfm-notice .srfm-notice__actions { margin: 12px 0 2px; display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; }
+			.srfm-notice .button-primary { background: #D54407; border-color: #D54407; color: #fff; box-shadow: none; text-shadow: none; }
+			.srfm-notice .button-primary:hover, .srfm-notice .button-primary:focus { background: #C83B00; border-color: #C83B00; color: #fff; box-shadow: none; }
+			.srfm-notice .button:not(.button-primary) { background: transparent; border-color: transparent; color: #D54407; box-shadow: none; padding: 0; }
+			.srfm-notice .button:not(.button-primary):hover, .srfm-notice .button:not(.button-primary):focus { background: transparent; border-color: transparent; color: #C83B00; box-shadow: none; }
+			.srfm-notice .button-primary:focus { outline: 2px solid #D54407; outline-offset: 1px; }
 		</style>
 		<?php
 	}
@@ -1728,8 +1765,6 @@ JS;
 			'rotating_plugin_banner'       => Helper::get_rotating_plugin_banner(),
 			'ajax_url'                     => admin_url( 'admin-ajax.php' ),
 			'client_logs_nonce'            => Helper::current_user_can() ? wp_create_nonce( 'srfm_client_logs' ) : '',
-			// Rendered as a carousel in the dashboard sidebar rather than banners, so
-			// these are localized instead of going through Notice_Manager.
 			'action_items'                 => $this->get_action_items(),
 			'notice_response_nonce'        => Helper::current_user_can() ? wp_create_nonce( 'srfm_notice_response' ) : '',
 			'dismiss_action_item_nonce'    => Helper::current_user_can() ? wp_create_nonce( 'srfm_dismiss_action_item' ) : '',
@@ -2261,6 +2296,232 @@ JS;
 	}
 
 	/**
+	 * Register the React notice when the entries table is missing.
+	 *
+	 * Hooked - admin_init, priority 5.
+	 *
+	 * Priority 5 is load-bearing: Notice_Manager hands notices to the front end
+	 * through the `srfm_admin_filter` applied during admin_enqueue_scripts, so
+	 * anything registering later never reaches the page.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public function register_database_repair_notice() {
+		// admin_init also fires on admin-ajax.php. Nothing there renders a notice, so
+		// skip the work rather than reading a transient on every AJAX request.
+		if ( wp_doing_ajax() ) {
+			return;
+		}
+
+		if ( ! Helper::current_user_can() ) {
+			return;
+		}
+
+		if ( ! class_exists( 'SRFM\Admin\Notice_Manager' ) ) {
+			return;
+		}
+
+		// A just-completed repair reports its outcome instead of the warning.
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only display flag; the repair itself is nonce-checked in handle_database_repair().
+		$result = isset( $_GET['srfm_db_repair'] ) ? sanitize_key( wp_unslash( $_GET['srfm_db_repair'] ) ) : '';
+
+		if ( 'done' === $result ) {
+			Notice_Manager::register_notice(
+				[
+					'id'      => 'srfm-database-repaired',
+					'variant' => 'success',
+					'message' => __( 'Your SureForms database is up to date. New form entries will be saved as usual.', 'sureforms' ),
+					'pages'   => [ 'all' ],
+				]
+			);
+			return;
+		}
+
+		if ( 'failed' === $result ) {
+			Notice_Manager::register_notice(
+				[
+					'id'      => 'srfm-database-repair-failed',
+					// Still a warning, not an error: a host that does not allow
+					// SureForms to create tables is not the user's mistake.
+					'variant' => 'warning',
+					'message' => __( 'SureForms could not finish updating the database. Your hosting may not allow SureForms to create database tables — please contact your hosting provider or SureForms support.', 'sureforms' ),
+					'actions' => [
+						[
+							'label' => __( 'Contact support', 'sureforms' ),
+							'url'   => 'https://sureforms.com/contact/',
+						],
+					],
+					'pages'   => [ 'all' ],
+				]
+			);
+			return;
+		}
+
+		if ( ! Register::is_entries_table_missing() ) {
+			return;
+		}
+
+		$this->track_database_notice_impression();
+
+		Notice_Manager::register_notice(
+			[
+				'id'      => 'srfm-database-maintenance',
+				'variant' => 'warning',
+				'title'   => __( 'Database update needed', 'sureforms' ),
+				// Plain text only. AdminNotice.js renders this as a React child, so
+				// any markup here would show up as literal characters.
+				'message' => $this->get_database_notice_message(),
+				'actions' => [
+					[
+						'label'  => __( 'Fix now', 'sureforms' ),
+						// Opaque identifier, resolved to a handler in AdminNotice.js.
+						// Deliberately not a URL or endpoint: the server never tells
+						// the browser which address to call.
+						'action' => 'repair-entries-table',
+						'url'    => $this->get_database_repair_url(),
+					],
+				],
+				'pages'   => [ 'all' ],
+			]
+		);
+	}
+
+	/**
+	 * Render the classic warning on the WordPress dashboard.
+	 *
+	 * Hooked - admin_notices.
+	 *
+	 * Scoped to index.php on purpose. The React notice already covers the SureForms
+	 * screens, so leaving this one admin-wide would stack two warnings on the same
+	 * page and nag on every screen in wp-admin.
+	 *
+	 * Registered as [ $this, 'method' ] rather than a closure because
+	 * suppress_foreign_admin_notices() strips any callback it cannot attribute to a
+	 * SureForms class — a closure here would be silently removed.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public function render_database_repair_notice() {
+		if ( ! Helper::current_user_can() ) {
+			return;
+		}
+
+		$screen = get_current_screen();
+
+		if ( ! $screen || 'dashboard' !== $screen->base ) {
+			return;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only display flag; the repair itself is nonce-checked in handle_database_repair().
+		$result = isset( $_GET['srfm_db_repair'] ) ? sanitize_key( wp_unslash( $_GET['srfm_db_repair'] ) ) : '';
+
+		if ( 'done' === $result ) {
+			?>
+			<div class="notice notice-success is-dismissible">
+				<p><?php esc_html_e( 'Your SureForms database is up to date. New form entries will be saved as usual.', 'sureforms' ); ?></p>
+			</div>
+			<?php
+			return;
+		}
+
+		if ( 'failed' === $result ) {
+			?>
+			<div class="notice notice-warning is-dismissible">
+				<p><?php esc_html_e( 'SureForms could not finish updating the database. Your hosting may not allow SureForms to create database tables — please contact your hosting provider or SureForms support.', 'sureforms' ); ?></p>
+			</div>
+			<?php
+			return;
+		}
+
+		if ( ! Register::is_entries_table_missing() ) {
+			return;
+		}
+
+		$this->track_database_notice_impression();
+		?>
+		<div class="notice notice-warning">
+			<p>
+				<strong><?php esc_html_e( 'SureForms — database update needed', 'sureforms' ); ?></strong>
+			</p>
+			<p><?php echo esc_html( $this->get_database_notice_message() ); ?></p>
+			<p>
+				<a href="<?php echo esc_url( $this->get_database_repair_url() ); ?>" class="button button-primary">
+					<?php esc_html_e( 'Update database', 'sureforms' ); ?>
+				</a>
+			</p>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Repair the entries table, then redirect back with the outcome.
+	 *
+	 * Hooked - admin_post_srfm_repair_entries_table.
+	 *
+	 * A nonce-protected GET that changes state matches how core's own plugin
+	 * activate / deactivate / delete links work.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public function handle_database_repair() {
+		if ( ! Helper::current_user_can() ) {
+			wp_die( esc_html__( 'You do not have permission to update the database.', 'sureforms' ), 403 );
+		}
+
+		check_admin_referer( 'srfm_repair_entries_table' );
+
+		$repaired = $this->do_database_repair();
+		$referer  = wp_get_referer();
+
+		wp_safe_redirect(
+			add_query_arg(
+				'srfm_db_repair',
+				$repaired ? 'done' : 'failed',
+				$referer ? $referer : admin_url()
+			)
+		);
+		exit;
+	}
+
+	/**
+	 * Repair the entries table and record what happened.
+	 *
+	 * The single place the repair is performed and counted, shared by the
+	 * admin-post handler and the REST endpoint. One user action reaches exactly one
+	 * of those, so the click counter cannot double-count across the two surfaces.
+	 *
+	 * @since 2.12.6
+	 * @return bool True when the table exists afterwards.
+	 */
+	public function do_database_repair() {
+		// Cumulative counter, so $force = true: each new count is a new value and is
+		// re-sent, while an identical repeat short-circuits inside track().
+		$attempts = Helper::get_integer_value( Helper::get_srfm_option( 'db_repair_attempts', 0 ) ) + 1;
+		Helper::update_srfm_option( 'db_repair_attempts', $attempts );
+
+		// Event name is the `database_error` => `fix_now` entry in the $valid
+		// allowlist in handle_notice_response(). Kept in sync by hand; that array is
+		// where the team looks notice event names up.
+		Analytics::events()->track( 'database_error_notice_cta', (string) $attempts, [], true );
+
+		$repaired = Register::repair_entries_table();
+
+		// The failure case is the more valuable signal: it means the host refuses to
+		// let SureForms create tables, which no amount of retrying will fix.
+		Analytics::events()->track(
+			'database_repair_result',
+			$repaired ? 'success' : 'failed',
+			[],
+			true
+		);
+
+		return $repaired;
+	}
+
+	/**
 	 * Admin Notice Callback if sureforms pro is out of date.
 	 *
 	 * Hooked - admin_notices
@@ -2357,27 +2618,50 @@ JS;
 			return;
 		}
 
+		$notice_id = 'srfm-plugin-review-notice';
+
 		Astra_Notices::add_notice(
 			[
-				'id'                         => 'srfm-plugin-review-notice',
+				'id'                         => $notice_id,
 				'type'                       => '',
-				'message'                    => $this->build_notice_markup(
-					esc_html__( 'Amazing! SureForms is powering your forms and submissions - let\'s keep growing together!', 'sureforms' ),
-					esc_html__( 'If SureForms has been helpful, would you mind taking a moment to leave a 5-star review on WordPress.org?', 'sureforms' ),
-					esc_url( 'https://wordpress.org/support/plugin/sureforms/reviews/' ),
-					esc_html__( 'Rate SureForms', 'sureforms' ),
-					esc_html__( 'Maybe later', 'sureforms' ),
-					esc_html__( 'I already did', 'sureforms' ),
-					WEEK_IN_SECONDS,
-					true
+				'message'                    => self::build_srfm_notice_markup(
+					__( 'Amazing! SureForms is powering your forms and submissions - let\'s keep growing together!', 'sureforms' ),
+					__( 'If SureForms has been helpful, would you mind taking a moment to leave a 5-star review on WordPress.org?', 'sureforms' ),
+					[
+						[
+							'text'     => __( 'Rate SureForms', 'sureforms' ),
+							'url'      => esc_url( 'https://wordpress.org/support/plugin/sureforms/reviews/' ),
+							'primary'  => true,
+							// Leaves wp-admin, so it also dismisses on the way out.
+							'dismiss'  => true,
+							'external' => true,
+						],
+						[
+							'text'    => __( 'Maybe later', 'sureforms' ),
+							'url'     => '#',
+							'dismiss' => true,
+							'snooze'  => WEEK_IN_SECONDS,
+						],
+						[
+							'text'    => __( 'I already did', 'sureforms' ),
+							'url'     => '#',
+							'dismiss' => true,
+						],
+					]
 				),
+				'class'                      => 'srfm-notice srfm-rating-notice',
 				'repeat-notice-after'        => WEEK_IN_SECONDS,
-				'show_if'                    => $this->maybe_display_rating_notice(),
+				// Yields to the Thank You prompt for the same reason the Getting Started
+				// notice does: a specific form to finish beats a recurring review ask,
+				// and a user with three forms who then imports a template would
+				// otherwise see both at once.
+				'show_if'                    => $this->maybe_display_rating_notice() && null === $this->get_displayable_thankyou_prompt(),
 				'display-with-other-notices' => true,
 			]
 		);
 
-		add_action( 'astra_notice_after_markup_srfm-plugin-review-notice', [ $this, 'enqueue_notice_response_script' ] );
+		add_action( 'astra_notice_before_markup_' . $notice_id, [ $this, 'print_srfm_notice_styles' ] );
+		add_action( 'astra_notice_after_markup_' . $notice_id, [ $this, 'enqueue_notice_response_script' ] );
 	}
 
 	/**
@@ -2401,27 +2685,50 @@ JS;
 			return;
 		}
 
+		$notice_id = 'srfm-getting-started-notice';
+
 		Astra_Notices::add_notice(
 			[
-				'id'                         => 'srfm-getting-started-notice',
+				'id'                         => $notice_id,
 				'type'                       => '',
-				'message'                    => $this->build_notice_markup(
-					esc_html__( 'SureForms is ready to power your forms — explore what\'s possible!', 'sureforms' ),
-					esc_html__( 'Manage your forms, track submissions, and discover features like AI Form Builder, payment integrations, and more from the SureForms dashboard.', 'sureforms' ),
-					esc_url( admin_url( 'admin.php?page=sureforms_menu' ) ),
-					esc_html__( 'Go to Dashboard', 'sureforms' ),
-					esc_html__( 'Maybe later', 'sureforms' ),
-					esc_html__( 'I already know', 'sureforms' ),
-					WEEK_IN_SECONDS
+				'message'                    => self::build_srfm_notice_markup(
+					__( 'SureForms is ready to power your forms — explore what\'s possible!', 'sureforms' ),
+					__( 'Manage your forms, track submissions, and discover features like AI Form Builder, payment integrations, and more from the SureForms dashboard.', 'sureforms' ),
+					[
+						[
+							'text'    => __( 'Go to Dashboard', 'sureforms' ),
+							'url'     => esc_url( admin_url( 'admin.php?page=sureforms_menu' ) ),
+							'primary' => true,
+						],
+						[
+							'text'    => __( 'Maybe later', 'sureforms' ),
+							'url'     => '#',
+							'dismiss' => true,
+							'snooze'  => WEEK_IN_SECONDS,
+						],
+						[
+							'text'    => __( 'I already know', 'sureforms' ),
+							'url'     => '#',
+							'dismiss' => true,
+						],
+					]
 				),
+				'class'                      => 'srfm-notice srfm-getting-started-notice',
 				'repeat-notice-after'        => WEEK_IN_SECONDS,
-				'show_if'                    => ! $this->maybe_display_rating_notice(),
+				// Yields to both of the other SureForms notices, so only one of ours is
+				// ever on screen. The rating notice supersedes it once the user has real
+				// usage; the Thank You prompt supersedes it because "finish this specific
+				// form" is a concrete next step and this is a generic tour invitation.
+				'show_if'                    => ! $this->maybe_display_rating_notice() && null === $this->get_displayable_thankyou_prompt(),
 				'display-notice-after'       => WEEK_IN_SECONDS,
 				'display-with-other-notices' => true,
 			]
 		);
 
-		add_action( 'astra_notice_after_markup_srfm-getting-started-notice', [ $this, 'enqueue_notice_response_script' ] );
+		// Same pre-markup hook the Thank You prompt uses, so both notices are painted
+		// by one stylesheet instead of two that drift apart.
+		add_action( 'astra_notice_before_markup_' . $notice_id, [ $this, 'print_srfm_notice_styles' ] );
+		add_action( 'astra_notice_after_markup_' . $notice_id, [ $this, 'enqueue_notice_response_script' ] );
 	}
 
 	/**
@@ -2468,10 +2775,12 @@ JS;
 	public function handle_notice_response() {
 		if ( ! check_ajax_referer( 'srfm_notice_response', 'nonce', false ) ) {
 			wp_send_json_error( [ 'message' => __( 'Invalid nonce.', 'sureforms' ) ], 403 );
+			return;
 		}
 
 		if ( ! Helper::current_user_can() ) {
 			wp_send_json_error( [ 'message' => __( 'Unauthorized user.', 'sureforms' ) ], 403 );
+			return;
 		}
 
 		$notice_id = isset( $_POST['notice_id'] ) ? sanitize_text_field( wp_unslash( $_POST['notice_id'] ) ) : '';
@@ -2488,10 +2797,15 @@ JS;
 				'maybe_later'    => 'rating_notice_snooze',
 				'dismissed'      => 'rating_notice_dismiss',
 			],
+			// Database maintenance notice. Keyed `database_error` for the warehouse;
+			// the user-facing copy deliberately reads as a routine update, not an
+			// error. `dismissed` is registered but unreachable today — a missing
+			// entries table is not something we let people dismiss.
+			'database_error'              => [
+				'fix_now'   => 'database_error_notice_cta',
+				'dismissed' => 'database_error_notice_dismiss',
+			],
 			// The "Finish setting up" prompt (#3030): three CTAs, plus the ✕.
-			// Repeated submission failures. `contact_support` is the CTA; `dismissed`
-			// snoozes the notice for a week rather than retiring it, because the
-			// underlying fault is still there.
 			'form_submission_error'       => [
 				'contact_support' => 'submission_failure_notice_cta',
 				'dismissed'       => 'submission_failure_notice_dismiss',
@@ -2510,6 +2824,10 @@ JS;
 
 		if ( ! isset( $valid[ $notice_id ][ $button ] ) ) {
 			wp_send_json_error( [ 'message' => __( 'Invalid parameters.', 'sureforms' ) ], 400 );
+			// wp_send_json_error() ends the request in production. The explicit return
+			// keeps the guard a guard rather than something that only works because of
+			// a side effect in a function elsewhere.
+			return;
 		}
 
 		$event_name = $valid[ $notice_id ][ $button ];
@@ -2849,6 +3167,116 @@ JS;
 	}
 
 	/**
+	 * Count an editor visit that came from the front-end "Edit Form" pill.
+	 *
+	 * The pill is a plain link, so the click is attributed by the marker query arg
+	 * it carries rather than by a front-end click handler. That keeps the front end
+	 * script-free and adds no AJAX endpoint: the only thing on the page is still an
+	 * anchor. It also measures the outcome that matters — the editor actually
+	 * opening — instead of a click that may never land.
+	 *
+	 * Every decision here comes from server state. The query arg selects the code
+	 * path; what gets counted is derived from the resolved post and the current
+	 * user's capability on it. An absent, empty, misspelled or reused arg, a post
+	 * that is not a SureForms form, and a user without `edit_post` on that form all
+	 * fall through to no-op without an explicit branch.
+	 *
+	 * No nonce, deliberately: the pill is rendered into front-end HTML that may be
+	 * page-cached, so a nonce would either be baked into the cache or be stale on
+	 * arrival. The effect is a private usage counter for a user who can already edit
+	 * the form, and nothing attacker-controlled reaches the analytics payload — the
+	 * value sent is an integer read back from stored state.
+	 *
+	 * Because the marker is just a query arg, the invariant that bounds this is the
+	 * dedup transient below, not the arg: a given editor moves the counter at most
+	 * once per form per hour, no matter how many times the URL is requested. That is
+	 * also what keeps the metric honest — without it a refresh or a back-navigation
+	 * would count again, and each count is a read-modify-write of the whole
+	 * `srfm_options` row, which holds unrelated settings.
+	 *
+	 * @return void
+	 * @since x.x.x
+	 */
+	public function maybe_track_edit_form_button_click() {
+		// is_string() before sanitize_key(): `?srfm_edit_src[]=x` satisfies isset(),
+		// and wp_unslash() hands the array straight through. sanitize_key() only grew
+		// its is_scalar() guard after this plugin's minimum WordPress, so on the older
+		// supported versions that reaches strtolower( array ) — a TypeError on PHP 8,
+		// i.e. the one input shape that ended in a fatal rather than in the no-op the
+		// rest of this method guarantees.
+		$arg = Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG;
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only attribution marker; see docblock for why a nonce is neither possible nor needed.
+		$source = isset( $_GET[ $arg ] ) && is_string( $_GET[ $arg ] ) ? sanitize_key( wp_unslash( $_GET[ $arg ] ) ) : '';
+
+		if ( 'embed' !== $source ) {
+			return;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Same read-only path as above.
+		$post_id = isset( $_GET['post'] ) ? absint( wp_unslash( $_GET['post'] ) ) : 0;
+
+		// Resolve the post type from the stored post, never from the request.
+		//
+		// The capability below reads as per-post but is not: sureforms_form is
+		// registered with an explicit capabilities map and no `map_meta_cap`
+		// (inc/post-types.php), so core short-circuits `edit_post` to the post type's
+		// `edit_post` capability — `manage_options` — without ever consulting $post_id.
+		// The real gate is therefore "site administrator", which is stricter than a
+		// per-form check, not weaker. Written down because a later `map_meta_cap` on
+		// the CPT would silently change what this line means with no diff here.
+		if ( 0 === $post_id || SRFM_FORMS_POST_TYPE !== get_post_type( $post_id ) ) {
+			return;
+		}
+
+		if ( ! current_user_can( 'edit_post', $post_id ) ) {
+			return;
+		}
+
+		// One count per editor per form per hour. Without this the metric measures
+		// "editor loads carrying the marker" rather than pill clicks — a refresh or a
+		// back-navigation re-counts — and a forged page could drive the counter, and
+		// the writes behind it, without bound.
+		$dedup_key = 'srfm_pill_click_' . get_current_user_id() . '_' . $post_id;
+
+		if ( false !== get_transient( $dedup_key ) ) {
+			return;
+		}
+
+		set_transient( $dedup_key, 1, HOUR_IN_SECONDS );
+
+		$count = Helper::get_integer_value( Helper::get_srfm_option( 'edit_form_button_clicks', 0 ) ) + 1;
+		Helper::update_srfm_option( 'edit_form_button_clicks', $count );
+
+		// $force = true because this is a cumulative counter, not a one-time event —
+		// it must re-send the latest count each cycle (bypasses one-time dedup).
+		Analytics::events()->track( 'edit_form_button_clicked', (string) $count, [], true );
+	}
+
+	/**
+	 * Let core strip the edit-attribution marker from the admin URL.
+	 *
+	 * Core's wp_admin_canonical_url() rewrites the address bar via replaceState() on
+	 * admin_head, which runs after load-post.php — so the marker has already been
+	 * counted by the time it is removed and no attribution is lost. Without this it
+	 * lingers in the address bar, in bookmarks, and in the Referer header sent to
+	 * every subresource the editor loads.
+	 *
+	 * @param array<string> $args Query args core already removes.
+	 * @since x.x.x
+	 * @return array<string> Args with the marker appended.
+	 */
+	public function add_removable_query_args( $args ) {
+		if ( ! is_array( $args ) ) {
+			return [ Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG ];
+		}
+
+		$args[] = Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG;
+
+		return $args;
+	}
+
+	/**
 	 * Track AI dashboard widget usage.
 	 *
 	 * @return void
@@ -2925,445 +3353,74 @@ JS;
 	}
 
 	/**
-	 * Classic dashboard notice when submissions keep failing.
+	 * Nonce-protected URL that repairs the entries table.
 	 *
-	 * Hooked - admin_notices.
+	 * Shared by both notice surfaces so there is one repair route, one nonce and one
+	 * place that counts the click. Private, so it stays off the public API and out of
+	 * the test-coverage gate.
 	 *
-	 * Gated to the WP dashboard. The React notice already covers SureForms' own
-	 * screens, so leaving this admin-wide would stack two warnings on one page.
-	 *
-	 * Registered as [ $this, 'method' ] rather than a closure because
-	 * suppress_foreign_admin_notices() strips any callback it cannot attribute to
-	 * a SureForms class -- a closure here would be silently removed.
-	 *
-	 * @since x.x.x
-	 * @return void
-	 */
-	public function render_action_item_notices() {
-		// Shown across wp-admin, because someone whose forms are silently failing
-		// may not open the WP dashboard or SureForms for days.
-		//
-		// The one exclusion is SureForms' own dashboard: the Form Checks panel in
-		// its sidebar already lists these, and a banner above it would say the same
-		// thing twice on one screen.
-		if ( Helper::validate_request_context( 'sureforms_menu', 'page' ) ) {
-			return;
-		}
-
-		$this->enqueue_notice_response_script();
-
-		foreach ( $this->get_action_items() as $item ) {
-			$status = Helper::get_string_value( $item['status'] ?? '' );
-
-			// Passing checks belong in the SureForms panel, not in wp-admin. A
-			// notice that says nothing is wrong is noise on every page load.
-			if ( 'success' === $status || '' === $status ) {
-				continue;
-			}
-
-			// A fault reads as an error; advice reads as a warning. Both are shown,
-			// but they are not the same kind of message and should not look alike.
-			$class = 'error' === $status ? 'notice-error' : 'notice-warning';
-			?>
-			<div class="notice <?php echo esc_attr( $class ); ?>">
-				<p><strong><?php echo esc_html( $item['title'] ); ?></strong></p>
-				<p><?php echo esc_html( $item['message'] ); ?></p>
-				<p>
-					<a
-						href="<?php echo esc_url( Helper::get_string_value( $item['cta_url'] ) ); ?>"
-						class="button button-primary"
-						data-srfm-notice-id="<?php echo esc_attr( Helper::get_string_value( $item['id'] ) ); ?>"
-						data-srfm-button="<?php echo esc_attr( Helper::get_string_value( $item['cta_action'] ?? '' ) ); ?>"
-						<?php echo 0 === strpos( Helper::get_string_value( $item['cta_url'] ), 'mailto:' ) ? '' : 'target="_blank" rel="noopener noreferrer"'; ?>
-					>
-						<?php echo esc_html( $item['cta_label'] ); ?>
-					</a>
-					<?php if ( ! empty( $item['dismissible'] ) ) { ?>
-						<a href="<?php echo esc_url( $this->get_dismiss_action_item_url( Helper::get_string_value( $item['id'] ) ) ); ?>" class="button">
-							<?php esc_html_e( 'Dismiss', 'sureforms' ); ?>
-						</a>
-					<?php } ?>
-				</p>
-			</div>
-			<?php
-		}
-	}
-
-	/**
-	 * Dismiss an action item from the classic notice's link.
-	 *
-	 * Hooked - admin_post_srfm_dismiss_action_item_link.
-	 *
-	 * @since x.x.x
-	 * @return void
-	 */
-	public function handle_dismiss_action_item_link() {
-		if ( ! Helper::current_user_can() ) {
-			wp_die( esc_html__( 'You do not have permission to do this.', 'sureforms' ), 403 );
-		}
-
-		check_admin_referer( 'srfm_dismiss_action_item' );
-
-		$item_id = isset( $_GET['item'] ) ? sanitize_key( wp_unslash( $_GET['item'] ) ) : '';
-
-		$this->dismiss_action_item( $item_id );
-
-		$referer = wp_get_referer();
-
-		wp_safe_redirect( $referer ? $referer : admin_url() );
-		exit;
-	}
-
-	/**
-	 * Things on this site that need the owner's attention, newest concern first.
-	 *
-	 * Fed to the dashboard sidebar carousel. Each entry is self-describing so the
-	 * front end has no rules of its own to keep in sync -- adding a new item here
-	 * makes it appear with no JavaScript change.
-	 *
-	 * `dismissible` separates a fault from advice. A run of failed submissions is
-	 * not something to wave away, and clears itself when a submission succeeds. A
-	 * caching plugin being present is information, so it can be dismissed.
-	 *
-	 * @since x.x.x
-	 * @return array<int,array<string,mixed>>
-	 */
-	public function get_action_items() {
-		if ( ! Helper::current_user_can() ) {
-			return [];
-		}
-
-		$dismissed = Helper::get_array_value( Helper::get_srfm_option( 'dismissed_action_items', [] ) );
-		$warnings  = [];
-		$passing   = [];
-
-		if ( Client_Logger::has_persistent_failures() ) {
-			$count = Client_Logger::get_fault_streak();
-
-			$warnings[] = [
-				'id'          => 'form_submission_error',
-				'status'      => 'error',
-				'title'       => sprintf(
-					/* translators: %d: number of consecutive failed submissions. */
-					_n(
-						'%d form submission in a row could not be completed.',
-						'%d form submissions in a row could not be completed.',
-						$count,
-						'sureforms'
-					),
-					$count
-				),
-				'message'     => __( 'Visitors may be unable to reach you, and those entries were not saved.', 'sureforms' ),
-				'cta_label'   => __( 'Contact Support', 'sureforms' ),
-				'cta_url'     => $this->get_support_mailto_url( $count ),
-				'cta_action'  => 'contact_support',
-				'dismissible' => false,
-			];
-		} else {
-			$passing[] = [
-				'id'          => 'form_submission_error',
-				'status'      => 'success',
-				'title'       => __( 'Form submissions are completing normally.', 'sureforms' ),
-				'message'     => '',
-				'cta_label'   => '',
-				'cta_url'     => '',
-				'dismissible' => false,
-			];
-		}
-
-		$caching_plugin = Helper::get_active_caching_plugin();
-
-		if ( '' === $caching_plugin ) {
-			$passing[] = [
-				'id'          => 'caching_plugin',
-				'status'      => 'success',
-				'title'       => __( 'No caching plugin that needs configuring was found.', 'sureforms' ),
-				'message'     => '',
-				'cta_label'   => '',
-				'cta_url'     => '',
-				'dismissible' => false,
-			];
-		} elseif ( ! in_array( 'caching_plugin', $dismissed, true ) ) {
-			$warnings[] = [
-				'id'          => 'caching_plugin',
-				'status'      => 'warning',
-				'title'       => sprintf(
-					/* translators: %s: caching plugin name. */
-					__( '%s may interfere with your forms.', 'sureforms' ),
-					$caching_plugin
-				),
-				'message'     => __( 'Caching and JavaScript optimisation can serve a stale copy of your form or load its scripts out of order.', 'sureforms' ),
-				'cta_label'   => __( 'Help Me Fix', 'sureforms' ),
-				'cta_url'     => 'https://sureforms.com/docs/how-to-set-up-sureforms-with-caching-plugins/',
-				'cta_action'  => 'help_me_fix',
-				'dismissible' => true,
-			];
-		}
-
-		// Warnings first: the point of the panel is what needs attention, with the
-		// passing checks below as reassurance rather than as the headline.
-		$items = array_merge( $warnings, $passing );
-
-		$this->track_action_item_impressions( $warnings );
-
-		/**
-		 * Filter the dashboard action items.
-		 *
-		 * Each entry needs id, status ('warning' or 'success'), title, message,
-		 * cta_label, cta_url and dismissible. Only ids in
-		 * handle_dismiss_action_item()'s allowlist can actually be dismissed, so
-		 * adding a dismissible item here also needs a line there.
-		 *
-		 * @since x.x.x
-		 *
-		 * @param array<int,array<string,mixed>> $items Action items.
-		 */
-		return Helper::apply_filters_as_array( 'srfm_action_items', $items );
-	}
-
-	/**
-	 * Dismiss one action item.
-	 *
-	 * Hooked - wp_ajax_srfm_dismiss_action_item.
-	 *
-	 * Only items get_action_items() marks dismissible can be dismissed, so a
-	 * crafted request cannot silence a genuine fault.
-	 *
-	 * @since x.x.x
-	 * @return void
-	 */
-	public function handle_dismiss_action_item() {
-		if ( ! Helper::current_user_can() ) {
-			wp_send_json_error( [ 'message' => __( 'Unauthorized user.', 'sureforms' ) ], 403 );
-			return;
-		}
-
-		if ( ! check_ajax_referer( 'srfm_dismiss_action_item', 'nonce', false ) ) {
-			wp_send_json_error( [ 'message' => __( 'Invalid nonce.', 'sureforms' ) ], 403 );
-			return;
-		}
-
-		$item_id = isset( $_POST['item_id'] ) ? sanitize_key( wp_unslash( $_POST['item_id'] ) ) : '';
-
-		if ( ! $this->dismiss_action_item( $item_id ) ) {
-			wp_send_json_error( [ 'message' => __( 'Invalid parameters.', 'sureforms' ) ], 400 );
-			return;
-		}
-
-		wp_send_json_success();
-	}
-
-	/**
-	 * Pre-addressed support email for a run of failed submissions.
-	 *
-	 * Carries the details support would otherwise have to ask for, so the first
-	 * reply can be an answer rather than a questionnaire. The log itself is not
-	 * included: mailto has no attachment parameter -- browsers drop anything
-	 * beyond subject and body -- and a megabyte of JSON would exceed the URL
-	 * length every client enforces. The log is downloaded alongside instead, and
-	 * the body asks for it to be attached.
-	 *
-	 * @param int $count Consecutive failures.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string
 	 */
-	private function get_support_mailto_url( $count ) {
-		unset( $count );
-
-		$subject = sprintf(
-			/* translators: %s: site host. */
-			__( 'SureForms: form submissions are failing on %s', 'sureforms' ),
-			Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) )
-		);
-
-		$log   = Client_Logger::get_tail();
-		$body  = $this->get_support_message();
-		$body .= "\r\n\r\n" . '---' . "\r\n";
-
-		if ( '' === $log['text'] ) {
-			$body .= __( 'Debug log: no entries recorded.', 'sureforms' );
-		} else {
-			$body .= sprintf(
-				/* translators: 1: entries shown, 2: entries recorded. */
-				__( 'Debug log (most recent %1$d of %2$d entries)', 'sureforms' ),
-				$log['shown'],
-				$log['total']
-			) . "\r\n";
-
-			// Fenced so it survives a reply and reads as data rather than prose in
-			// clients that render Markdown.
-			$body .= '```' . "\r\n" . str_replace( "\n", "\r\n", $log['text'] ) . "\r\n" . '```';
-
-			if ( $log['shown'] < $log['total'] ) {
-				$body .= "\r\n\r\n" . __( 'Older entries were left out to keep this email within the length a mail client accepts. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
-			}
-		}
-
-		return 'mailto:support@sureforms.com?' . http_build_query(
-			[
-				'subject' => $subject,
-				'body'    => $body,
-			],
-			'',
-			'&',
-			PHP_QUERY_RFC3986
+	private function get_database_repair_url() {
+		return wp_nonce_url(
+			admin_url( 'admin-post.php?action=srfm_repair_entries_table' ),
+			'srfm_repair_entries_table'
 		);
 	}
 
 	/**
-	 * Count one sighting of each warning, at most once per user per day.
+	 * The database notice body, which differs by what the repair will actually do.
 	 *
-	 * Throttled because the classic notice renders on every admin page: counting
-	 * each render would measure how much wp-admin someone browses, not how many
-	 * sites are affected. A day per user answers the question that matters -- how
-	 * many people are seeing this -- for one option write.
+	 * Two outcomes are possible and they are not equivalent to the person clicking:
+	 * when the entries table exists under a different prefix — a changed
+	 * `$table_prefix`, a restored dump, a security plugin that renamed tables and
+	 * skipped ours — the repair renames it back and every stored entry comes with
+	 * it. When there is nothing to adopt, the repair creates an empty table and the
+	 * old submissions are not recoverable from here.
 	 *
-	 * Passing checks are not counted. "Nothing is wrong" is not an impression.
+	 * Promising the wrong one is how a maintenance prompt turns into a complaint, so
+	 * the copy states which is about to happen.
 	 *
-	 * @param array<int,array<string,mixed>> $warnings Warning items only.
-	 * @since x.x.x
-	 * @return void
+	 * @since 2.12.6
+	 * @return string
 	 */
-	private function track_action_item_impressions( $warnings ) {
-		if ( empty( $warnings ) || wp_doing_ajax() ) {
-			return;
+	private function get_database_notice_message() {
+		if ( '' !== Register::get_adoptable_entries_table() ) {
+			return __( 'SureForms found your form entries stored under a different database table prefix. Reconnecting them takes a moment, and your existing entries will be kept.', 'sureforms' );
 		}
 
+		return __( 'SureForms needs to update your database before it can save new form entries. This only takes a moment and will not change your forms or existing content. Entries submitted before now cannot be recovered from here.', 'sureforms' );
+	}
+
+	/**
+	 * Count one sighting of the database notice, at most once per user per day.
+	 *
+	 * While the table is missing the notice renders on every admin page load, on two
+	 * surfaces. Counting each render would rewrite the autoloaded `srfm_options` blob
+	 * on every pageview of a site that is already broken, and one site left unfixed
+	 * would dominate the aggregate. Throttling to a day per user answers the question
+	 * that matters — how many people are seeing this — for one write.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	private function track_database_notice_impression() {
 		$user_id = get_current_user_id();
 
 		if ( ! $user_id ) {
 			return;
 		}
 
-		$counts  = Helper::get_array_value( Helper::get_srfm_option( 'action_item_impressions', [] ) );
-		$changed = false;
+		$key = 'srfm_db_notice_seen_' . $user_id;
 
-		foreach ( $warnings as $warning ) {
-			$item_id = Helper::get_string_value( $warning['id'] ?? '' );
-
-			if ( '' === $item_id ) {
-				continue;
-			}
-
-			$seen_key = 'srfm_action_item_seen_' . $item_id . '_' . $user_id;
-
-			if ( get_transient( $seen_key ) ) {
-				continue;
-			}
-
-			set_transient( $seen_key, 1, DAY_IN_SECONDS );
-
-			$counts[ $item_id ] = Helper::get_integer_value( $counts[ $item_id ] ?? 0 ) + 1;
-			$changed            = true;
-
-			// Cumulative, so $force = true: each new count is a new value and is
-			// re-sent, while an identical repeat short-circuits inside track().
-			Analytics::events()->track(
-				$item_id . '_notice_shown',
-				(string) $counts[ $item_id ],
-				[],
-				true
-			);
+		if ( get_transient( $key ) ) {
+			return;
 		}
 
-		if ( $changed ) {
-			Helper::update_srfm_option( 'action_item_impressions', $counts );
-		}
-	}
+		set_transient( $key, 1, DAY_IN_SECONDS );
 
-	/**
-	 * Diagnostics block for the support email.
-	 *
-	 * Carries what support would otherwise have to ask for, so the first reply can
-	 * be an answer rather than a questionnaire.
-	 *
-	 * @since x.x.x
-	 * @return string
-	 */
-	private function get_support_message() {
-		global $wp_version;
-
-		$count = Client_Logger::get_fault_streak();
-
-		$lines = [
-			__( 'Hello SureForms support,', 'sureforms' ),
-			'',
-			sprintf(
-				/* translators: %d: number of consecutive failed submissions. */
-				_n(
-					'SureForms has recorded %d form submission in a row that could not be completed.',
-					'SureForms has recorded %d form submissions in a row that could not be completed.',
-					$count,
-					'sureforms'
-				),
-				$count
-			),
-			'',
-			'---',
-			__( 'Site details', 'sureforms' ),
-			'Site: ' . home_url(),
-			'SureForms: ' . SRFM_VER,
-			'SureForms Pro: ' . ( Helper::has_pro() && defined( 'SRFM_PRO_VER' ) ? SRFM_PRO_VER : __( 'not active', 'sureforms' ) ),
-			'WordPress: ' . Helper::get_string_value( $wp_version ),
-			'PHP: ' . PHP_VERSION,
-			'Caching: ' . ( '' !== Helper::get_active_caching_plugin() ? Helper::get_active_caching_plugin() : __( 'none detected', 'sureforms' ) ),
-			'Consecutive failures: ' . $count,
-		];
-
-		return implode( "\r\n", $lines );
-	}
-
-	/**
-	 * Nonced URL that dismisses one action item without JavaScript.
-	 *
-	 * The classic notice cannot use the AJAX dismissal the carousel uses, and
-	 * WordPress's own `is-dismissible` only hides the notice for that pageview.
-	 *
-	 * @param string $item_id Item to dismiss.
-	 * @since x.x.x
-	 * @return string
-	 */
-	private function get_dismiss_action_item_url( $item_id ) {
-		return wp_nonce_url(
-			add_query_arg(
-				[
-					'action' => 'srfm_dismiss_action_item_link',
-					'item'   => $item_id,
-				],
-				admin_url( 'admin-post.php' )
-			),
-			'srfm_dismiss_action_item'
-		);
-	}
-
-	/**
-	 * Record one dismissal, shared by the AJAX and no-JS entry points.
-	 *
-	 * Allowlisted, so only advisory items can be dismissed. A run of failed
-	 * submissions is a fault and must stay put until it actually resolves --
-	 * otherwise a crafted request could silence the one message that matters.
-	 *
-	 * @param string $item_id Item to dismiss.
-	 * @since x.x.x
-	 * @return bool False when the id is not dismissible.
-	 */
-	private function dismiss_action_item( $item_id ) {
-		if ( ! in_array( $item_id, [ 'caching_plugin' ], true ) ) {
-			return false;
-		}
-
-		$dismissed = Helper::get_array_value( Helper::get_srfm_option( 'dismissed_action_items', [] ) );
-
-		if ( ! in_array( $item_id, $dismissed, true ) ) {
-			$dismissed[] = $item_id;
-			Helper::update_srfm_option( 'dismissed_action_items', $dismissed );
-
-			// Recorded here rather than at each caller: both the cross in the
-			// dashboard panel and the no-JS link in the classic notice land here.
-			Analytics::events()->track( $item_id . '_notice_dismiss', 'dismissed' );
-		}
-
-		return true;
+		Analytics::events()->track( 'database_error_notice_shown', 'entries' );
 	}
 
 	/**
@@ -3578,24 +3635,90 @@ JS;
 		// changed, while the action buttons point to the specific things to finish.
 		$sentence = __( 'We’ve already created this form for you. Finish customising it so it’s ready to collect real submissions.', 'sureforms' );
 
+		return self::build_srfm_notice_markup(
+			sprintf(
+				/* translators: %s: form name. */
+				__( 'Finish setting up “%s”', 'sureforms' ),
+				$form['title']
+			),
+			$sentence,
+			[
+				[
+					'text'     => __( 'Edit form', 'sureforms' ),
+					'url'      => $form['edit_url'],
+					'primary'  => true,
+					'class'    => 'srfm-ty-edit-form',
+					'external' => true,
+				],
+				[
+					'text'     => __( 'Edit the Thank You message', 'sureforms' ),
+					'url'      => $form['thankyou_url'],
+					'class'    => 'srfm-ty-edit-thankyou',
+					'external' => true,
+				],
+				[
+					'text'     => __( 'Set where replies go', 'sureforms' ),
+					'url'      => $form['replies_url'],
+					'class'    => 'srfm-ty-set-replies',
+					'external' => true,
+				],
+			]
+		);
+	}
+
+	/**
+	 * Build the shared SureForms admin-notice body: title, sentence, action row.
+	 *
+	 * One builder for every SureForms notice so they cannot drift into looking like
+	 * two different plugins. Everything is escaped here rather than by the caller —
+	 * the notices library runs the result through wp_kses_post(), which would strip
+	 * anything richer anyway.
+	 *
+	 * @param string                         $title   Notice heading.
+	 * @param string                         $text    Supporting sentence.
+	 * @param array<int,array<string,mixed>> $actions Action links. Each accepts
+	 *                                                text, url, and optionally
+	 *                                                primary, class, external,
+	 *                                                dismiss and snooze (seconds).
+	 * @since x.x.x
+	 * @return string
+	 */
+	private static function build_srfm_notice_markup( $title, $text, $actions ) {
 		ob_start();
 		?>
-		<p class="srfm-thankyou-notice__title">
+		<p class="srfm-notice__title"><?php echo esc_html( $title ); ?></p>
+		<p class="srfm-notice__text"><?php echo esc_html( $text ); ?></p>
+		<p class="srfm-notice__actions">
 			<?php
-			echo esc_html(
-				sprintf(
-					/* translators: %s: form name. */
-					__( 'Finish setting up “%s”', 'sureforms' ),
-					$form['title']
-				)
-			);
+			foreach ( $actions as $action ) {
+				if ( empty( $action['text'] ) || ! isset( $action['url'] ) ) {
+					continue;
+				}
+
+				$classes = [ 'button' ];
+
+				if ( ! empty( $action['primary'] ) ) {
+					$classes[] = 'button-primary';
+				}
+
+				// astra-notice-close is what the library binds its dismiss handler to.
+				if ( ! empty( $action['dismiss'] ) ) {
+					$classes[] = 'astra-notice-close';
+				}
+
+				if ( ! empty( $action['class'] ) ) {
+					$classes[] = $action['class'];
+				}
+				?>
+				<a
+					class="<?php echo esc_attr( implode( ' ', $classes ) ); ?>"
+					href="<?php echo esc_url( $action['url'] ); ?>"
+					<?php echo empty( $action['snooze'] ) ? '' : ' data-repeat-notice-after="' . esc_attr( (string) $action['snooze'] ) . '"'; ?>
+					<?php echo empty( $action['external'] ) ? '' : ' target="_blank" rel="noopener noreferrer"'; ?>
+				><?php echo esc_html( $action['text'] ); ?></a>
+				<?php
+			}
 			?>
-		</p>
-		<p class="srfm-thankyou-notice__text"><?php echo esc_html( $sentence ); ?></p>
-		<p class="srfm-thankyou-notice__actions">
-			<a class="button button-primary srfm-ty-edit-form" href="<?php echo esc_url( $form['edit_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Edit form', 'sureforms' ); ?></a>
-			<a class="button srfm-ty-edit-thankyou" href="<?php echo esc_url( $form['thankyou_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Edit the Thank You message', 'sureforms' ); ?></a>
-			<a class="button srfm-ty-set-replies" href="<?php echo esc_url( $form['replies_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Set where replies go', 'sureforms' ); ?></a>
 		</p>
 		<?php
 		return (string) ob_get_clean();
@@ -3656,66 +3779,6 @@ JS;
 		}
 		$page = sanitize_key( wp_unslash( $_GET['page'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only screen detection, no state change.
 		return 0 === strpos( $page, 'sureforms' ) || 0 === strpos( $page, 'srfm' );
-	}
-
-	/**
-	 * Build the shared HTML markup for admin notices.
-	 *
-	 * @since 2.5.2
-	 *
-	 * All text parameters must be pre-escaped by the caller (e.g. via esc_html__()).
-	 * URL parameters must be pre-escaped via esc_url().
-	 *
-	 * @param string $heading      The notice heading text (pre-escaped).
-	 * @param string $message      The notice body text (pre-escaped).
-	 * @param string $cta_url      The primary CTA URL (pre-escaped).
-	 * @param string $cta_text     The primary CTA button text (pre-escaped).
-	 * @param string $snooze_text  The snooze button text (pre-escaped).
-	 * @param string $dismiss_text    The dismiss button text (pre-escaped).
-	 * @param int    $snooze_duration Snooze duration in seconds for the data-repeat-notice-after attribute.
-	 * @param bool   $external_cta   Whether the CTA opens in a new tab and also dismisses the notice
-	 *                               via the astra-notice-close class. Default false.
-	 * @return string The notice HTML markup.
-	 */
-	private function build_notice_markup( $heading, $message, $cta_url, $cta_text, $snooze_text, $dismiss_text, $snooze_duration, $external_cta = false ) {
-		$image_path = esc_url( SRFM_URL . 'admin/assets/sureforms-logo.png' );
-		$cta_class  = $external_cta ? 'astra-notice-close button-primary' : 'button-primary';
-		$cta_attrs  = $external_cta ? ' target="_blank" rel="noopener noreferrer"' : '';
-
-		return sprintf(
-			'<div class="notice-image">
-                <img src="%1$s" class="custom-logo" alt="SureForms" itemprop="logo">
-            </div>
-            <div class="notice-content">
-                <div class="notice-heading">
-                    %2$s
-                </div>
-                %3$s<br />
-                <div class="astra-review-notice-container">
-                    <a href="%4$s" class="%5$s"%6$s>
-                    %7$s
-                    </a>
-                <span class="dashicons dashicons-clock" aria-hidden="true"></span>
-                    <a href="#" data-repeat-notice-after="%8$s" class="astra-notice-close">
-                    %9$s
-                    </a>
-                <span class="dashicons dashicons-smiley" aria-hidden="true"></span>
-                    <a href="#" class="astra-notice-close">
-                    %10$s
-                    </a>
-                </div>
-            </div>',
-			$image_path,
-			$heading,
-			$message,
-			$cta_url,
-			esc_attr( $cta_class ),
-			$cta_attrs,
-			$cta_text,
-			$snooze_duration,
-			$snooze_text,
-			$dismiss_text
-		);
 	}
 
 	/**
@@ -3836,4 +3899,446 @@ JS;
 		return false;
 	}
 
+
+	/**
+	 * Classic dashboard notice when submissions keep failing.
+	 *
+	 * Hooked - admin_notices.
+	 *
+	 * Gated to the WP dashboard. The React notice already covers SureForms' own
+	 * screens, so leaving this admin-wide would stack two warnings on one page.
+	 *
+	 * Registered as [ $this, 'method' ] rather than a closure because
+	 * suppress_foreign_admin_notices() strips any callback it cannot attribute to
+	 * a SureForms class -- a closure here would be silently removed.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function render_action_item_notices() {
+		// Shown across wp-admin, because someone whose forms are silently failing
+		// may not open the WP dashboard or SureForms for days.
+		//
+		// The one exclusion is SureForms' own dashboard: the Form Checks panel in
+		// its sidebar already lists these, and a banner above it would say the same
+		// thing twice on one screen.
+		if ( Helper::validate_request_context( 'sureforms_menu', 'page' ) ) {
+			return;
+		}
+
+		$this->enqueue_notice_response_script();
+
+		foreach ( $this->get_action_items() as $item ) {
+			$status = Helper::get_string_value( $item['status'] ?? '' );
+
+			// Passing checks belong in the SureForms panel, not in wp-admin. A
+			// notice that says nothing is wrong is noise on every page load.
+			if ( 'success' === $status || '' === $status ) {
+				continue;
+			}
+
+			// A fault reads as an error; advice reads as a warning. Both are shown,
+			// but they are not the same kind of message and should not look alike.
+			$class = 'error' === $status ? 'notice-error' : 'notice-warning';
+			?>
+			<div class="notice <?php echo esc_attr( $class ); ?>">
+				<p><strong><?php echo esc_html( $item['title'] ); ?></strong></p>
+				<p><?php echo esc_html( $item['message'] ); ?></p>
+				<p>
+					<a
+						href="<?php echo esc_url( Helper::get_string_value( $item['cta_url'] ) ); ?>"
+						class="button button-primary"
+						data-srfm-notice-id="<?php echo esc_attr( Helper::get_string_value( $item['id'] ) ); ?>"
+						data-srfm-button="<?php echo esc_attr( Helper::get_string_value( $item['cta_action'] ?? '' ) ); ?>"
+						<?php echo 0 === strpos( Helper::get_string_value( $item['cta_url'] ), 'mailto:' ) ? '' : 'target="_blank" rel="noopener noreferrer"'; ?>
+					>
+						<?php echo esc_html( $item['cta_label'] ); ?>
+					</a>
+					<?php if ( ! empty( $item['dismissible'] ) ) { ?>
+						<a href="<?php echo esc_url( $this->get_dismiss_action_item_url( Helper::get_string_value( $item['id'] ) ) ); ?>" class="button">
+							<?php esc_html_e( 'Dismiss', 'sureforms' ); ?>
+						</a>
+					<?php } ?>
+				</p>
+			</div>
+			<?php
+		}
+	}
+
+	/**
+	 * Nonced URL that dismisses one action item without JavaScript.
+	 *
+	 * The classic notice cannot use the AJAX dismissal the carousel uses, and
+	 * WordPress's own `is-dismissible` only hides the notice for that pageview.
+	 *
+	 * @param string $item_id Item to dismiss.
+	 * @since x.x.x
+	 * @return string
+	 */
+	private function get_dismiss_action_item_url( $item_id ) {
+		return wp_nonce_url(
+			add_query_arg(
+				[
+					'action' => 'srfm_dismiss_action_item_link',
+					'item'   => $item_id,
+				],
+				admin_url( 'admin-post.php' )
+			),
+			'srfm_dismiss_action_item'
+		);
+	}
+
+	/**
+	 * Dismiss an action item from the classic notice's link.
+	 *
+	 * Hooked - admin_post_srfm_dismiss_action_item_link.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function handle_dismiss_action_item_link() {
+		if ( ! Helper::current_user_can() ) {
+			wp_die( esc_html__( 'You do not have permission to do this.', 'sureforms' ), 403 );
+		}
+
+		check_admin_referer( 'srfm_dismiss_action_item' );
+
+		$item_id = isset( $_GET['item'] ) ? sanitize_key( wp_unslash( $_GET['item'] ) ) : '';
+
+		$this->dismiss_action_item( $item_id );
+
+		$referer = wp_get_referer();
+
+		wp_safe_redirect( $referer ? $referer : admin_url() );
+		exit;
+	}
+
+	/**
+	 * Things on this site that need the owner's attention, newest concern first.
+	 *
+	 * Fed to the dashboard sidebar carousel. Each entry is self-describing so the
+	 * front end has no rules of its own to keep in sync -- adding a new item here
+	 * makes it appear with no JavaScript change.
+	 *
+	 * `dismissible` separates a fault from advice. A run of failed submissions is
+	 * not something to wave away, and clears itself when a submission succeeds. A
+	 * caching plugin being present is information, so it can be dismissed.
+	 *
+	 * @since x.x.x
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function get_action_items() {
+		if ( ! Helper::current_user_can() ) {
+			return [];
+		}
+
+		$dismissed = Helper::get_array_value( Helper::get_srfm_option( 'dismissed_action_items', [] ) );
+		$warnings  = [];
+		$passing   = [];
+
+		if ( Client_Logger::has_persistent_failures() ) {
+			$count = Client_Logger::get_fault_streak();
+
+			$warnings[] = [
+				'id'          => 'form_submission_error',
+				'status'      => 'error',
+				'title'       => sprintf(
+					/* translators: %d: number of consecutive failed submissions. */
+					_n(
+						'%d form submission in a row could not be completed.',
+						'%d form submissions in a row could not be completed.',
+						$count,
+						'sureforms'
+					),
+					$count
+				),
+				'message'     => __( 'Visitors may be unable to reach you, and those entries were not saved.', 'sureforms' ),
+				'cta_label'   => __( 'Contact Support', 'sureforms' ),
+				'cta_url'     => $this->get_support_mailto_url( $count ),
+				'cta_action'  => 'contact_support',
+				'dismissible' => false,
+			];
+		} else {
+			$passing[] = [
+				'id'          => 'form_submission_error',
+				'status'      => 'success',
+				'title'       => __( 'Form submissions are completing normally.', 'sureforms' ),
+				'message'     => '',
+				'cta_label'   => '',
+				'cta_url'     => '',
+				'dismissible' => false,
+			];
+		}
+
+		$caching_plugin = Helper::get_active_caching_plugin();
+
+		if ( '' === $caching_plugin ) {
+			$passing[] = [
+				'id'          => 'caching_plugin',
+				'status'      => 'success',
+				'title'       => __( 'No caching plugin that needs configuring was found.', 'sureforms' ),
+				'message'     => '',
+				'cta_label'   => '',
+				'cta_url'     => '',
+				'dismissible' => false,
+			];
+		} elseif ( ! in_array( 'caching_plugin', $dismissed, true ) ) {
+			$warnings[] = [
+				'id'          => 'caching_plugin',
+				'status'      => 'warning',
+				'title'       => sprintf(
+					/* translators: %s: caching plugin name. */
+					__( '%s may interfere with your forms.', 'sureforms' ),
+					$caching_plugin
+				),
+				'message'     => __( 'Caching and JavaScript optimisation can serve a stale copy of your form or load its scripts out of order.', 'sureforms' ),
+				'cta_label'   => __( 'Help Me Fix', 'sureforms' ),
+				'cta_url'     => 'https://sureforms.com/docs/how-to-set-up-sureforms-with-caching-plugins/',
+				'cta_action'  => 'help_me_fix',
+				'dismissible' => true,
+			];
+		}
+
+		// Warnings first: the point of the panel is what needs attention, with the
+		// passing checks below as reassurance rather than as the headline.
+		$items = array_merge( $warnings, $passing );
+
+		$this->track_action_item_impressions( $warnings );
+
+		/**
+		 * Filter the dashboard action items.
+		 *
+		 * Each entry needs id, status ('warning' or 'success'), title, message,
+		 * cta_label, cta_url and dismissible. Only ids in
+		 * handle_dismiss_action_item()'s allowlist can actually be dismissed, so
+		 * adding a dismissible item here also needs a line there.
+		 *
+		 * @since x.x.x
+		 *
+		 * @param array<int,array<string,mixed>> $items Action items.
+		 */
+		return Helper::apply_filters_as_array( 'srfm_action_items', $items );
+	}
+
+	/**
+	 * Count one sighting of each warning, at most once per user per day.
+	 *
+	 * Throttled because the classic notice renders on every admin page: counting
+	 * each render would measure how much wp-admin someone browses, not how many
+	 * sites are affected. A day per user answers the question that matters -- how
+	 * many people are seeing this -- for one option write.
+	 *
+	 * Passing checks are not counted. "Nothing is wrong" is not an impression.
+	 *
+	 * @param array<int,array<string,mixed>> $warnings Warning items only.
+	 * @since x.x.x
+	 * @return void
+	 */
+	private function track_action_item_impressions( $warnings ) {
+		if ( empty( $warnings ) || wp_doing_ajax() ) {
+			return;
+		}
+
+		$user_id = get_current_user_id();
+
+		if ( ! $user_id ) {
+			return;
+		}
+
+		$counts  = Helper::get_array_value( Helper::get_srfm_option( 'action_item_impressions', [] ) );
+		$changed = false;
+
+		foreach ( $warnings as $warning ) {
+			$item_id = Helper::get_string_value( $warning['id'] ?? '' );
+
+			if ( '' === $item_id ) {
+				continue;
+			}
+
+			$seen_key = 'srfm_action_item_seen_' . $item_id . '_' . $user_id;
+
+			if ( get_transient( $seen_key ) ) {
+				continue;
+			}
+
+			set_transient( $seen_key, 1, DAY_IN_SECONDS );
+
+			$counts[ $item_id ] = Helper::get_integer_value( $counts[ $item_id ] ?? 0 ) + 1;
+			$changed            = true;
+
+			// Cumulative, so $force = true: each new count is a new value and is
+			// re-sent, while an identical repeat short-circuits inside track().
+			Analytics::events()->track(
+				$item_id . '_notice_shown',
+				(string) $counts[ $item_id ],
+				[],
+				true
+			);
+		}
+
+		if ( $changed ) {
+			Helper::update_srfm_option( 'action_item_impressions', $counts );
+		}
+	}
+
+	/**
+	 * Pre-addressed support email for a run of failed submissions.
+	 *
+	 * Carries the details support would otherwise have to ask for, so the first
+	 * reply can be an answer rather than a questionnaire. The log itself is not
+	 * included: mailto has no attachment parameter -- browsers drop anything
+	 * beyond subject and body -- and a megabyte of JSON would exceed the URL
+	 * length every client enforces. The log is downloaded alongside instead, and
+	 * the body asks for it to be attached.
+	 *
+	 * @param int $count Consecutive failures.
+	 * @since x.x.x
+	 * @return string
+	 */
+	private function get_support_mailto_url( $count ) {
+		unset( $count );
+
+		$subject = sprintf(
+			/* translators: %s: site host. */
+			__( 'SureForms: form submissions are failing on %s', 'sureforms' ),
+			Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) )
+		);
+
+		$log   = Client_Logger::get_tail();
+		$body  = $this->get_support_message();
+		$body .= "\r\n\r\n" . '---' . "\r\n";
+
+		if ( '' === $log['text'] ) {
+			$body .= __( 'Debug log: no entries recorded.', 'sureforms' );
+		} else {
+			$body .= sprintf(
+				/* translators: 1: entries shown, 2: entries recorded. */
+				__( 'Debug log (most recent %1$d of %2$d entries)', 'sureforms' ),
+				$log['shown'],
+				$log['total']
+			) . "\r\n";
+
+			// Fenced so it survives a reply and reads as data rather than prose in
+			// clients that render Markdown.
+			$body .= '```' . "\r\n" . str_replace( "\n", "\r\n", $log['text'] ) . "\r\n" . '```';
+
+			if ( $log['shown'] < $log['total'] ) {
+				$body .= "\r\n\r\n" . __( 'Older entries were left out to keep this email within the length a mail client accepts. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
+			}
+		}
+
+		return 'mailto:support@sureforms.com?' . http_build_query(
+			[
+				'subject' => $subject,
+				'body'    => $body,
+			],
+			'',
+			'&',
+			PHP_QUERY_RFC3986
+		);
+	}
+
+	/**
+	 * Diagnostics block for the support email.
+	 *
+	 * Carries what support would otherwise have to ask for, so the first reply can
+	 * be an answer rather than a questionnaire.
+	 *
+	 * @since x.x.x
+	 * @return string
+	 */
+	private function get_support_message() {
+		global $wp_version;
+
+		$count = Client_Logger::get_fault_streak();
+
+		$lines = [
+			__( 'Hello SureForms support,', 'sureforms' ),
+			'',
+			sprintf(
+				/* translators: %d: number of consecutive failed submissions. */
+				_n(
+					'SureForms has recorded %d form submission in a row that could not be completed.',
+					'SureForms has recorded %d form submissions in a row that could not be completed.',
+					$count,
+					'sureforms'
+				),
+				$count
+			),
+			'',
+			'---',
+			__( 'Site details', 'sureforms' ),
+			'Site: ' . home_url(),
+			'SureForms: ' . SRFM_VER,
+			'SureForms Pro: ' . ( Helper::has_pro() && defined( 'SRFM_PRO_VER' ) ? SRFM_PRO_VER : __( 'not active', 'sureforms' ) ),
+			'WordPress: ' . Helper::get_string_value( $wp_version ),
+			'PHP: ' . PHP_VERSION,
+			'Caching: ' . ( '' !== Helper::get_active_caching_plugin() ? Helper::get_active_caching_plugin() : __( 'none detected', 'sureforms' ) ),
+			'Consecutive failures: ' . $count,
+		];
+
+		return implode( "\r\n", $lines );
+	}
+
+	/**
+	 * Dismiss one action item.
+	 *
+	 * Hooked - wp_ajax_srfm_dismiss_action_item.
+	 *
+	 * Only items get_action_items() marks dismissible can be dismissed, so a
+	 * crafted request cannot silence a genuine fault.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function handle_dismiss_action_item() {
+		if ( ! Helper::current_user_can() ) {
+			wp_send_json_error( [ 'message' => __( 'Unauthorized user.', 'sureforms' ) ], 403 );
+			return;
+		}
+
+		if ( ! check_ajax_referer( 'srfm_dismiss_action_item', 'nonce', false ) ) {
+			wp_send_json_error( [ 'message' => __( 'Invalid nonce.', 'sureforms' ) ], 403 );
+			return;
+		}
+
+		$item_id = isset( $_POST['item_id'] ) ? sanitize_key( wp_unslash( $_POST['item_id'] ) ) : '';
+
+		if ( ! $this->dismiss_action_item( $item_id ) ) {
+			wp_send_json_error( [ 'message' => __( 'Invalid parameters.', 'sureforms' ) ], 400 );
+			return;
+		}
+
+		wp_send_json_success();
+	}
+
+	/**
+	 * Record one dismissal, shared by the AJAX and no-JS entry points.
+	 *
+	 * Allowlisted, so only advisory items can be dismissed. A run of failed
+	 * submissions is a fault and must stay put until it actually resolves --
+	 * otherwise a crafted request could silence the one message that matters.
+	 *
+	 * @param string $item_id Item to dismiss.
+	 * @since x.x.x
+	 * @return bool False when the id is not dismissible.
+	 */
+	private function dismiss_action_item( $item_id ) {
+		if ( ! in_array( $item_id, [ 'caching_plugin' ], true ) ) {
+			return false;
+		}
+
+		$dismissed = Helper::get_array_value( Helper::get_srfm_option( 'dismissed_action_items', [] ) );
+
+		if ( ! in_array( $item_id, $dismissed, true ) ) {
+			$dismissed[] = $item_id;
+			Helper::update_srfm_option( 'dismissed_action_items', $dismissed );
+
+			// Recorded here rather than at each caller: both the cross in the
+			// dashboard panel and the no-JS link in the classic notice land here.
+			Analytics::events()->track( $item_id . '_notice_dismiss', 'dismissed' );
+		}
+
+		return true;
+	}
 }
