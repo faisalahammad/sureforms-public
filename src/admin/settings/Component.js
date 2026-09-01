@@ -40,6 +40,7 @@ const Component = ( { path, subpage } ) => {
 		srfm_form_analytics: false,
 		srfm_bsf_analytics: false,
 		srfm_admin_notification: true,
+		srfm_form_views_tracking: false,
 	} );
 	const [ emailTabOptions, setEmailTabOptions ] = useState( {
 		srfm_email_summary: false,
@@ -268,12 +269,15 @@ const Component = ( { path, subpage } ) => {
 						srfm_form_analytics,
 						srfm_bsf_analytics,
 						srfm_admin_notification,
+						// Opt-in: absent means the feature was never switched on.
+						srfm_form_views_tracking = false,
 					} = data.srfm_general_settings_options;
 					const snap = {
 						srfm_ip_log,
 						srfm_form_analytics,
 						srfm_bsf_analytics,
 						srfm_admin_notification,
+						srfm_form_views_tracking,
 					};
 					setGeneralTabOptions( snap );
 					nextBaselines[ 'general-settings' ] = snap;

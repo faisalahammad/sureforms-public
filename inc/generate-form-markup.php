@@ -855,10 +855,15 @@ class Generate_Form_Markup {
 				return ob_get_clean();
 			}
 			$submit_token = Submit_Token::generate( (int) $id );
+			// Separately namespaced from the submission token: this one is only good
+			// for incrementing a view counter, so scraping it from the page buys an
+			// attacker nothing beyond what the beacon already does, and it cannot be
+			// replayed against the submit endpoint.
+			$view_token = Submit_Token::generate( (int) $id, Submit_Token::NAMESPACE_VIEW );
 
 			?>
 				<form method="post" enctype="multipart/form-data" id="srfm-form-<?php echo esc_attr( Helper::get_string_value( $id ) ); ?>" class="srfm-form <?php echo esc_attr( 'sureforms_form' === $post_type ? 'srfm-single-form ' : '' ); ?>"
-				form-id="<?php echo esc_attr( Helper::get_string_value( $id ) ); ?>" after-submission="<?php echo esc_attr( $submission_action ); ?>" message-type="<?php echo esc_attr( $confirmation_type ? $confirmation_type : 'same page' ); ?>" success-url="<?php echo esc_attr( $success_url ? $success_url : '' ); ?>" ajaxurl="<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>" data-submit-token="<?php echo esc_attr( $submit_token ); ?>"
+				form-id="<?php echo esc_attr( Helper::get_string_value( $id ) ); ?>" after-submission="<?php echo esc_attr( $submission_action ); ?>" message-type="<?php echo esc_attr( $confirmation_type ? $confirmation_type : 'same page' ); ?>" success-url="<?php echo esc_attr( $success_url ? $success_url : '' ); ?>" ajaxurl="<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>" data-submit-token="<?php echo esc_attr( $submit_token ); ?>" data-view-token="<?php echo esc_attr( $view_token ); ?>"
 				>
 				<?php
 					// Submission security is handled via the HMAC token in data-submit-token.

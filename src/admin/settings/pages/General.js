@@ -216,6 +216,41 @@ const AdminNotificationContent = ( {
 };
 
 /**
+ * Form Views & Conversion tracking settings section.
+ *
+ * @param {Object}   props
+ * @param {Object}   props.generalTabOptions    - General settings.
+ * @param {Function} props.updateGlobalSettings - Settings update handler.
+ */
+const FormViewsTrackingContent = ( {
+	generalTabOptions,
+	updateGlobalSettings,
+} ) => {
+	return (
+		<Switch
+			label={ {
+				heading: __(
+					'Show views and conversion rate',
+					'sureforms'
+				),
+				description: __(
+					'Adds the Views and Conversion Rate columns to the Forms list. A view is counted once per page visit when the form appears on screen, and the conversion rate is the share of those views that ended in a submission. Counting starts the first time you turn this on, so submissions received before then are not counted towards the rate. Turning it off afterwards only hides the columns — counting continues, so the figures are up to date if you switch it back on.',
+					'sureforms'
+				),
+			} }
+			value={ generalTabOptions.srfm_form_views_tracking }
+			onChange={ ( value ) =>
+				updateGlobalSettings(
+					'srfm_form_views_tracking',
+					value,
+					'general-settings'
+				)
+			}
+		/>
+	);
+};
+
+/**
  * Usage Tracking / Analytics settings section.
  *
  * @param {Object}   props
@@ -325,6 +360,16 @@ const GeneralPage = ( {
 						generalTabOptions={ generalTabOptions }
 						updateGlobalSettings={ updateGlobalSettings }
 						showLearnTip={ showLearnTip }
+					/>
+				}
+			/>
+			<ContentSection
+				loading={ loading }
+				title={ __( 'Form Views & Conversion', 'sureforms' ) }
+				content={
+					<FormViewsTrackingContent
+						generalTabOptions={ generalTabOptions }
+						updateGlobalSettings={ updateGlobalSettings }
 					/>
 				}
 			/>

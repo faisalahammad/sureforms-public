@@ -1765,7 +1765,7 @@ class Rest_Api {
 						'orderby'   => [
 							'type'    => 'string',
 							'default' => 'date',
-							'enum'    => [ 'date', 'id', 'title', 'modified' ],
+							'enum'    => [ 'date', 'id', 'title', 'modified', 'views', 'conversion_rate' ],
 						],
 						'order'     => [
 							'type'    => 'string',

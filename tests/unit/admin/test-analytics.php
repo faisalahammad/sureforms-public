@@ -887,7 +887,124 @@ class Test_Analytics extends TestCase {
 		$this->assertSame( 0, $analytics->forms_using_custom_css() );
 	}
 
+	// ─── Form views & conversion analytics ───────────────────────
+
+	/**
+	 * `total_form_views` sums the view meta across published forms only.
+	 *
+	 * Trashed and draft forms are excluded deliberately: their views would inflate
+	 * the numerator while `total_entries` and `forms_with_views` no longer count
+	 * them, which is how a warehouse ends up with conversion rates above 100%.
+	 */
+	public function test_total_form_views() {
+		$analytics = Analytics::get_instance();
+
+		$this->assertSame( 0, $analytics->total_form_views(), 'No view meta should sum to zero, not null.' );
+
+		$form_a = $this->create_form_with_views( 7 );
+		$form_b = $this->create_form_with_views( 5 );
+		$draft  = $this->create_form_with_views( 100, 'draft' );
+
+		$this->assertSame( 12, $analytics->total_form_views(), 'Published forms should be summed; the draft must not count.' );
+
+		// Read straight through — no cache to go stale between analytics passes.
+		update_post_meta( $form_a, \SRFM\Inc\Form_Views::META_KEY, 1000 );
+		$this->assertSame( 1005, $analytics->total_form_views(), 'A later change should be visible immediately.' );
+
+		wp_delete_post( $form_a, true );
+		wp_delete_post( $form_b, true );
+		wp_delete_post( $draft, true );
+	}
+
+	/**
+	 * `forms_with_views` counts forms viewed at least once, not forms that exist.
+	 *
+	 * A form sitting at zero views must not count, otherwise the metric cannot
+	 * distinguish "the beacon is firing" from "forms exist but are never embedded",
+	 * which is the whole reason it sits alongside the raw total.
+	 */
+	public function test_forms_with_views() {
+		$analytics = Analytics::get_instance();
+
+		$this->assertSame( 0, $analytics->forms_with_views() );
+
+		$viewed = $this->create_form_with_views( 3 );
+		$zero   = $this->create_form_with_views( 0 );
+		$draft  = $this->create_form_with_views( 9, 'draft' );
+
+		$this->assertSame( 1, $analytics->forms_with_views(), 'Only the published form with a non-zero count should be included.' );
+
+		wp_delete_post( $viewed, true );
+		wp_delete_post( $zero, true );
+		wp_delete_post( $draft, true );
+	}
+
+	/**
+	 * The columns toggle reported to analytics must match what the Forms list does.
+	 *
+	 * The value is delegated to Form_Views rather than read from the option array,
+	 * so the two can never drift — which matters precisely because the default has
+	 * changed once already. This asserts the delegation, not a hardcoded default:
+	 * the absent-key case is compared against `is_tracking_enabled()` itself.
+	 */
+	public function test_global_settings_data() {
+		$analytics = Analytics::get_instance();
+		$original  = get_option( 'srfm_general_settings_options' );
+
+		// Never saved → opt-in, so reported as disabled, matching is_tracking_enabled().
+		delete_option( 'srfm_general_settings_options' );
+		$data = $analytics->global_settings_data();
+		$this->assertFalse( $data['boolean_values']['form_views_columns_enabled'], 'An absent setting must report as disabled.' );
+		$this->assertSame(
+			\SRFM\Inc\Form_Views::get_instance()->is_tracking_enabled(),
+			$data['boolean_values']['form_views_columns_enabled'],
+			'Analytics must not diverge from the Forms list.'
+		);
+
+		// Explicitly off.
+		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => false ] );
+		$data = $analytics->global_settings_data();
+		$this->assertFalse( $data['boolean_values']['form_views_columns_enabled'] );
+
+		// Explicitly on.
+		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => true ] );
+		$data = $analytics->global_settings_data();
+		$this->assertTrue( $data['boolean_values']['form_views_columns_enabled'] );
+
+		// Enabling above fires maybe_start_tracking(), which opens the tracking
+		// window. Left behind, that leaks into any sibling test that depends on the
+		// never-enabled state and makes the failure order-dependent.
+		delete_option( \SRFM\Inc\Form_Views::TRACKING_STARTED_OPTION );
+
+		if ( false === $original ) {
+			delete_option( 'srfm_general_settings_options' );
+		} else {
+			update_option( 'srfm_general_settings_options', $original );
+		}
+	}
+
 	// ─── Helpers ─────────────────────────────────────────────────
+
+	/**
+	 * Create a published form carrying the given view count.
+	 *
+	 * @param int    $views       View count to store.
+	 * @param string $post_status Post status. Default 'publish'.
+	 * @return int Post ID.
+	 */
+	private function create_form_with_views( $views, $post_status = 'publish' ) {
+		$form_id = wp_insert_post(
+			[
+				'post_title'  => 'Views Analytics Form',
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_status' => $post_status,
+			]
+		);
+
+		update_post_meta( $form_id, \SRFM\Inc\Form_Views::META_KEY, $views );
+
+		return (int) $form_id;
+	}
 
 	/**
 	 * Create a test post with the given content.

@@ -196,4 +196,35 @@ class Test_Submit_Token extends TestCase {
 		wp_delete_post( $form_id_2, true );
 		wp_delete_post( $form_id_3, true );
 	}
+
+	/**
+	 * Tokens are bound to the purpose they were minted for.
+	 *
+	 * The payload prefix used to be hardcoded, so one token authorised both form
+	 * submission and the view beacon. That made a token scraped from public markup
+	 * reusable against the submit endpoint, and made the view endpoint a cheap
+	 * oracle for whether a submit token was still inside an accepted window.
+	 *
+	 * The default namespace is deliberately the historical literal, so tokens
+	 * already embedded in cached HTML keep verifying across an upgrade.
+	 */
+	public function test_sign_is_namespaced_per_purpose() {
+		$form_id = 4242;
+
+		$submit = Submit_Token::generate( $form_id );
+		$view   = Submit_Token::generate( $form_id, Submit_Token::NAMESPACE_VIEW );
+
+		$this->assertNotSame( $submit, $view, 'Different purposes must produce different tokens.' );
+
+		// Each verifies only within its own namespace.
+		$this->assertTrue( Submit_Token::verify( $submit, $form_id ) );
+		$this->assertTrue( Submit_Token::verify( $view, $form_id, Submit_Token::NAMESPACE_VIEW ) );
+		$this->assertFalse( Submit_Token::verify( $view, $form_id ), 'A view token must not authorise a submission.' );
+		$this->assertFalse( Submit_Token::verify( $submit, $form_id, Submit_Token::NAMESPACE_VIEW ), 'A submit token must not authorise the beacon.' );
+
+		// Backward compatibility: the default is the original payload prefix, so a
+		// token minted before this change still verifies.
+		$this->assertSame( 'srfm_submit', Submit_Token::NAMESPACE_SUBMIT, 'Changing this rejects every token in cached HTML.' );
+		$this->assertSame( $submit, Submit_Token::generate( $form_id, Submit_Token::NAMESPACE_SUBMIT ) );
+	}
 }
