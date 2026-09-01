@@ -13,7 +13,7 @@
  * under full-page caching).
  *
  * @package sureforms
- * @since x.x.x
+ * @since 2.12.6
  */
 
 namespace SRFM\Inc;
@@ -30,7 +30,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 /**
  * Form Views tracker.
  *
- * @since x.x.x
+ * @since 2.12.6
  */
 class Form_Views {
 	use Get_Instance;
@@ -86,7 +86,7 @@ class Form_Views {
 	/**
 	 * Constructor.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	public function __construct() {
 		add_filter( 'srfm_rest_api_endpoints', [ $this, 'register_route' ] );
@@ -119,7 +119,7 @@ class Form_Views {
 	 * hidden, so the stamp always matches the period the stored view counts cover;
 	 * moving it forward would measure those views against a shorter entry window.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return int Unix timestamp, or 0 when tracking has never been enabled.
 	 */
 	public function get_tracking_started_at() {
@@ -147,7 +147,7 @@ class Form_Views {
 	 *
 	 * @param mixed $unused Previous value on update, option name on add. Unused.
 	 * @param mixed $value  The general settings array being saved.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	public function maybe_start_tracking( $unused, $value ) {
@@ -164,7 +164,7 @@ class Form_Views {
 	 * Register the public `forms/track-view` REST route on the SureForms endpoints array.
 	 *
 	 * @param array<string,mixed> $endpoints Existing endpoint definitions.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return array<string,mixed> Endpoints with the track-view route added.
 	 */
 	public function register_route( $endpoints ) {
@@ -192,7 +192,7 @@ class Form_Views {
 	 * Permission check: proof-of-origin via the HMAC Submit_Token header (cache-safe).
 	 *
 	 * @param WP_REST_Request<array<string,mixed>> $request REST request.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return true|WP_Error
 	 */
 	public function permissions_check( $request ) {
@@ -217,7 +217,7 @@ class Form_Views {
 	 * error to visitors; returns 429 only when the IP + form rate limit is exceeded.
 	 *
 	 * @param WP_REST_Request<array<string,mixed>> $request REST request.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return WP_REST_Response
 	 */
 	public function track_view( $request ) {
@@ -249,7 +249,7 @@ class Form_Views {
 	/**
 	 * Localize the beacon enable flag onto the (already enqueued) form-submit script.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	public function localize_beacon() {
@@ -289,7 +289,7 @@ class Form_Views {
 	 * Read the current view count for a form.
 	 *
 	 * @param int $form_id Form post ID.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return int
 	 */
 	public function get_views( $form_id ) {
@@ -308,7 +308,7 @@ class Form_Views {
 	 * non-array value, and an absent key all return false, so the columns only ever
 	 * appear after a deliberate opt-in.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool
 	 */
 	public function is_tracking_enabled() {
@@ -338,7 +338,7 @@ class Form_Views {
 	 * getter write. Here the write happens in a request that is already administrative
 	 * and the stamp keeps meaning "when an administrator had this switched on".
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	public function maybe_repair_tracking_window() {
@@ -409,7 +409,7 @@ class Form_Views {
 	 * Atomically increment the stored view count for a form.
 	 *
 	 * @param int $form_id Form post ID.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	private function increment_views( $form_id ) {
@@ -468,7 +468,7 @@ class Form_Views {
 	 * The surviving row keeps the SUM, so no counted view is discarded.
 	 *
 	 * @param int $form_id Form post ID.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	private static function collapse_duplicate_view_rows( $form_id ) {
@@ -505,7 +505,7 @@ class Form_Views {
 	 * Per visitor-IP + form rate limit. Fails closed when the IP is undeterminable.
 	 *
 	 * @param int $form_id Form post ID.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool True when the request should be blocked.
 	 */
 	private function is_rate_limited( $form_id ) {
@@ -525,7 +525,7 @@ class Form_Views {
 		 * terminate at a trusted proxy can return the real client address here — only
 		 * do so when the header it comes from is set by infrastructure you control.
 		 *
-		 * @since x.x.x
+		 * @since 2.12.6
 		 * @param string $ip The connection's REMOTE_ADDR.
 		 */
 		$ip = (string) apply_filters( 'srfm_form_views_client_ip', $ip );
@@ -584,7 +584,7 @@ class Form_Views {
 	 * any harder than a shared NAT already does.
 	 *
 	 * @param string $ip Validated IP address.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string Opaque bucket key.
 	 */
 	private static function network_bucket( $ip ) {
@@ -616,7 +616,7 @@ class Form_Views {
 	 * pretending to a guarantee the storage cannot make.
 	 *
 	 * @param string $key Counter key, unique per bucket and form.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return int The counter value after this hit.
 	 */
 	private static function hit_counter( $key ) {
@@ -682,7 +682,7 @@ class Form_Views {
 	 * Seconds left on an open rate-limit window, floored at one second.
 	 *
 	 * @param string $transient_key Transient holding the counter.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return int
 	 */
 	private static function remaining_window( $transient_key ) {

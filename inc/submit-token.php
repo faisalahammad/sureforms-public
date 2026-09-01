@@ -61,7 +61,7 @@ class Submit_Token {
 	 * across an upgrade — changing it would reject every token already embedded in
 	 * cached HTML.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	public const NAMESPACE_SUBMIT = 'srfm_submit';
 
@@ -73,7 +73,7 @@ class Submit_Token {
 	 * view endpoint must not double as an oracle for whether a submit token is
 	 * still inside an accepted window.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	public const NAMESPACE_VIEW = 'srfm_view';
 
@@ -85,7 +85,7 @@ class Submit_Token {
 	 * `verify()` accepts several consecutive past windows.
 	 *
 	 * @since  2.6.0
-	 * @since  x.x.x Added the $namespace parameter.
+	 * @since  2.12.6 Added the $namespace parameter.
 	 * @param  int    $form_id   The form post ID.
 	 * @param  string $namespace Purpose the token is minted for. Defaults to form submission.
 	 * @return string 64-character lowercase hex HMAC-SHA256 token.
@@ -101,7 +101,7 @@ class Submit_Token {
 	 * using constant-time comparison throughout.
 	 *
 	 * @since  2.6.0
-	 * @since  x.x.x Added the $namespace parameter.
+	 * @since  2.12.6 Added the $namespace parameter.
 	 * @param  string $token     Token value received from the client.
 	 * @param  int    $form_id   Form post ID extracted from the request body.
 	 * @param  string $namespace Purpose the token must have been minted for.

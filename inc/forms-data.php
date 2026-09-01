@@ -279,7 +279,7 @@ class Forms_Data {
 	 * @param string              $order    'asc' or 'desc'.
 	 * @param int                 $page     Current page (1-based).
 	 * @param int                 $per_page Items per page.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return array<string,mixed>|null Response payload, or null when the site has more
 	 *                                  forms than this pass will scan and the caller
 	 *                                  should fall back to ordinary ordering.
@@ -303,7 +303,7 @@ class Forms_Data {
 		 * firing thousands of queries to render ten rows.
 		 *
 		 * @param int $limit Maximum forms to sort in PHP. Default 500.
-		 * @since x.x.x
+		 * @since 2.12.6
 		 */
 		$limit = Helper::get_integer_value( apply_filters( 'srfm_forms_metric_sort_limit', 500 ) );
 
@@ -318,7 +318,7 @@ class Forms_Data {
 			 * @param string $orderby Requested metric, 'views' or 'conversion_rate'.
 			 * @param int    $count   Number of forms that would have been sorted.
 			 * @param int    $limit   The ceiling in force.
-			 * @since x.x.x
+			 * @since 2.12.6
 			 */
 			do_action( 'srfm_forms_metric_sort_skipped', $orderby, count( $id_query->posts ), $limit );
 
@@ -423,7 +423,7 @@ class Forms_Data {
 	 *
 	 * @param int $window_start Unix timestamp.
 	 * @return string Datetime string in MySQL's frame of reference.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	private static function window_boundary_sql( $window_start ) {
 		static $offset_seconds = null;
@@ -463,7 +463,7 @@ class Forms_Data {
 	 * @param string $post_date_gmt Form creation date, GMT. Used to skip a redundant count.
 	 * @param int    $entries_all_time All-time entry count, when the caller already has it.
 	 * @return array{views:int,conversion_rate:float|null}
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	private function calculate_form_metrics( $form_id, $post_date_gmt = '', $entries_all_time = null ) {
 		$none = [

@@ -520,7 +520,7 @@ class Analytics {
 	 * Counts only published forms, so views left behind by a trashed or draft form
 	 * do not inflate the total against a denominator that no longer includes them.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return int
 	 */
 	public function total_form_views() {
@@ -557,7 +557,7 @@ class Analytics {
 	 * beacon is firing" — a total alone cannot, because one busy form looks the
 	 * same as many quiet ones.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return int
 	 */
 	public function forms_with_views() {
@@ -808,7 +808,7 @@ class Analytics {
 	 * 'shutdown' (see detect_state_events()) so it reads bsf_product_referers
 	 * after any late-writing referer call has had a chance to run.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	public function track_plugin_activated_event() {
