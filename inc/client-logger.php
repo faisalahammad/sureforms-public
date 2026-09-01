@@ -254,6 +254,64 @@ class Client_Logger {
 	}
 
 	/**
+	 * The most recent whole log lines, up to a character budget.
+	 *
+	 * For pasting into a support email, where the transport imposes the limit: a
+	 * mailto URL has to survive percent-encoding and every mail client's own
+	 * length cap, so only a tail fits. Newest entries are the ones that describe
+	 * the failure being reported, so the tail is the useful end.
+	 *
+	 * Whole lines only -- half a JSON object helps nobody.
+	 *
+	 * @param int $max_chars Character budget for the returned text.
+	 * @since x.x.x
+	 * @return array{text:string,shown:int,total:int}
+	 */
+	public static function get_tail( $max_chars = 1200 ) {
+		$empty = [
+			'text'  => '',
+			'shown' => 0,
+			'total' => 0,
+		];
+
+		$path = self::get_log_path( false );
+
+		if ( '' === $path || ! file_exists( $path ) ) {
+			return $empty;
+		}
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file, WordPress.WP.AlternativeFunctions.file_system_read_file -- Reading a file this class owns; WP_Filesystem would prompt for credentials and is unavailable here.
+		$lines = file( $path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES );
+
+		if ( ! is_array( $lines ) || empty( $lines ) ) {
+			return $empty;
+		}
+
+		$total = count( $lines );
+		$kept  = [];
+		$used  = 0;
+
+		foreach ( array_reverse( $lines ) as $line ) {
+			$length = strlen( $line ) + 1;
+
+			// Always keep one line, even if it alone exceeds the budget: an empty
+			// excerpt is worse than a long one.
+			if ( $used + $length > $max_chars && ! empty( $kept ) ) {
+				break;
+			}
+
+			array_unshift( $kept, $line );
+			$used += $length;
+		}
+
+		return [
+			'text'  => implode( "\n", $kept ),
+			'shown' => count( $kept ),
+			'total' => $total,
+		];
+	}
+
+	/**
 	 * Whether the log has reached its size cap.
 	 *
 	 * @since x.x.x

@@ -517,106 +517,181 @@ class Test_Admin extends TestCase {
 	}
 
 	// ---------------------------------------------------------------
-	// Repeated submission failures
+	// Dashboard action items
 	// ---------------------------------------------------------------
 
 	/**
-	 * Both surfaces must stay silent on a site whose forms are working. Logging is
-	 * on by default, so a false positive here reaches every install.
+	 * A healthy site still reports, but only as passing checks. Nothing may be a
+	 * warning -- logging is on by default, so a false positive reaches every
+	 * install.
 	 */
-	public function test_render_submission_failure_notice_is_absent_when_healthy() {
+	public function test_get_action_items_reports_only_passing_checks_when_healthy() {
 		wp_set_current_user( $this->make_log_user( 'administrator' ) );
 		delete_option( Client_Logger::FAULT_STREAK_OPTION );
 
-		set_current_screen( 'dashboard' );
+		$filter = static function () {
+			return [ 'akismet/akismet.php' ];
+		};
 
-		ob_start();
-		Admin::get_instance()->render_submission_failure_notice();
+		add_filter( 'pre_option_active_plugins', $filter );
+		$items = Admin::get_instance()->get_action_items();
+		remove_filter( 'pre_option_active_plugins', $filter );
 
-		$this->assertSame( '', ob_get_clean() );
+		$this->assertNotEmpty( $items );
+
+		foreach ( $items as $item ) {
+			$this->assertSame( 'success', $item['status'], $item['id'] . ' must pass on a healthy site.' );
+		}
 	}
 
 	/**
-	 * After a run of faults the dashboard says so, and nowhere else does -- the
-	 * React notice already covers SureForms' own screens, so an admin-wide classic
-	 * notice would stack two on one page.
+	 * A run of faults produces a non-dismissible item, because it is a fault and
+	 * clears itself when a submission succeeds.
 	 */
-	public function test_render_submission_failure_notice() {
+	public function test_get_action_items() {
 		wp_set_current_user( $this->make_log_user( 'administrator' ) );
 		update_option( Client_Logger::FAULT_STREAK_OPTION, Client_Logger::FAULT_THRESHOLD );
 
-		set_current_screen( 'edit-post' );
-		ob_start();
-		Admin::get_instance()->render_submission_failure_notice();
-		$elsewhere = ob_get_clean();
-
-		set_current_screen( 'dashboard' );
-		ob_start();
-		Admin::get_instance()->render_submission_failure_notice();
-		$on_dashboard = ob_get_clean();
-
+		$items = Admin::get_instance()->get_action_items();
 		delete_option( Client_Logger::FAULT_STREAK_OPTION );
 
-		$this->assertSame( '', $elsewhere );
-		$this->assertStringContainsString( 'notice-error', $on_dashboard );
-		$this->assertStringContainsString( 'Contact support', $on_dashboard );
+		$ids = wp_list_pluck( $items, 'id' );
+		$this->assertContains( 'form_submission_error', $ids );
+
+		foreach ( $items as $item ) {
+			if ( 'form_submission_error' === $item['id'] ) {
+				$this->assertFalse( $item['dismissible'] );
+			}
+		}
 	}
 
 	/**
-	 * A subscriber must not be told about the site's internals.
+	 * An active caching plugin produces a dismissible advisory item pointing at the
+	 * setup guide.
 	 */
-	public function test_render_submission_failure_notice_is_hidden_without_the_capability() {
-		wp_set_current_user( $this->make_log_user( 'subscriber' ) );
+	public function test_get_action_items_flags_an_active_caching_plugin() {
+		wp_set_current_user( $this->make_log_user( 'administrator' ) );
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+
+		$filter = static function () {
+			return [ 'wp-rocket/wp-rocket.php' ];
+		};
+
+		add_filter( 'pre_option_active_plugins', $filter );
+		$items = Admin::get_instance()->get_action_items();
+		remove_filter( 'pre_option_active_plugins', $filter );
+
+		$caching = null;
+
+		foreach ( $items as $item ) {
+			if ( 'caching_plugin' === $item['id'] ) {
+				$caching = $item;
+			}
+		}
+
+		$this->assertNotNull( $caching, 'An active caching plugin must be reported.' );
+		$this->assertStringContainsString( 'WP Rocket', $caching['title'] );
+		$this->assertTrue( $caching['dismissible'] );
+		$this->assertStringContainsString( 'caching-plugins', $caching['cta_url'] );
+	}
+
+	/**
+	 * A dismissed advisory stays dismissed.
+	 */
+	public function test_get_action_items_respects_a_dismissal() {
+		wp_set_current_user( $this->make_log_user( 'administrator' ) );
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+		Helper::update_srfm_option( 'dismissed_action_items', [ 'caching_plugin' ] );
+
+		$filter = static function () {
+			return [ 'wp-rocket/wp-rocket.php' ];
+		};
+
+		add_filter( 'pre_option_active_plugins', $filter );
+		$ids = wp_list_pluck( Admin::get_instance()->get_action_items(), 'id' );
+		remove_filter( 'pre_option_active_plugins', $filter );
+
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+
+		$this->assertNotContains( 'caching_plugin', $ids );
+	}
+
+	/**
+	 * A fault must not be dismissible. Otherwise a crafted request could silence
+	 * the one message that matters while the form is still broken.
+	 */
+	public function test_dismiss_action_item_refuses_a_fault() {
+		$method = new ReflectionMethod( Admin::class, 'dismiss_action_item' );
+		$method->setAccessible( true );
+
+		$this->assertFalse( $method->invoke( Admin::get_instance(), 'form_submission_error' ) );
+		$this->assertFalse( $method->invoke( Admin::get_instance(), 'anything_else' ) );
+		$this->assertTrue( $method->invoke( Admin::get_instance(), 'caching_plugin' ) );
+
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+	}
+
+	/**
+	 * The notice follows the admin around, because someone whose forms are
+	 * silently failing may not open the WP dashboard or SureForms for days.
+	 */
+	public function test_render_action_item_notices() {
+		wp_set_current_user( $this->make_log_user( 'administrator' ) );
+		update_option( Client_Logger::FAULT_STREAK_OPTION, Client_Logger::FAULT_THRESHOLD );
+
+		foreach ( [ 'dashboard', 'edit-post', 'plugins' ] as $screen ) {
+			set_current_screen( $screen );
+
+			ob_start();
+			Admin::get_instance()->render_action_item_notices();
+			$output = ob_get_clean();
+
+			$this->assertStringContainsString( 'notice-error', $output, $screen . ' must show the notice.' );
+			$this->assertStringContainsString( 'Contact Support', $output );
+		}
+
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+	}
+
+	/**
+	 * Except on SureForms' own dashboard, where the Form Checks panel already
+	 * lists them -- a banner above it would say the same thing twice.
+	 */
+	public function test_render_action_item_notices_defers_to_the_form_checks_panel() {
+		wp_set_current_user( $this->make_log_user( 'administrator' ) );
 		update_option( Client_Logger::FAULT_STREAK_OPTION, Client_Logger::FAULT_THRESHOLD );
 
 		set_current_screen( 'dashboard' );
+		$_GET['page']     = 'sureforms_menu';
+		$_REQUEST['page'] = 'sureforms_menu';
 
 		ob_start();
-		Admin::get_instance()->render_submission_failure_notice();
+		Admin::get_instance()->render_action_item_notices();
 		$output = ob_get_clean();
 
+		unset( $_GET['page'], $_REQUEST['page'] );
 		delete_option( Client_Logger::FAULT_STREAK_OPTION );
 
 		$this->assertSame( '', $output );
 	}
 
 	/**
-	 * The React notice must actually register, and read as an error rather than a
-	 * routine warning -- entries are being lost.
+	 * A subscriber must not be told about the site's internals.
 	 */
-	public function test_register_submission_failure_notice() {
-		wp_set_current_user( $this->make_log_user( 'administrator' ) );
+	public function test_render_action_item_notices_is_hidden_without_the_capability() {
+		wp_set_current_user( $this->make_log_user( 'subscriber' ) );
 		update_option( Client_Logger::FAULT_STREAK_OPTION, Client_Logger::FAULT_THRESHOLD );
 
-		Notice_Manager::clear_notices();
-		Admin::get_instance()->register_submission_failure_notice();
-		$notices = Notice_Manager::get_notices();
-		Notice_Manager::clear_notices();
+		set_current_screen( 'dashboard' );
+
+		ob_start();
+		Admin::get_instance()->render_action_item_notices();
+		$output = ob_get_clean();
+
 		delete_option( Client_Logger::FAULT_STREAK_OPTION );
 
-		$ids = wp_list_pluck( $notices, 'id' );
-		$this->assertContains( 'srfm-submission-failure', $ids );
-
-		foreach ( $notices as $notice ) {
-			if ( 'srfm-submission-failure' === $notice['id'] ) {
-				$this->assertSame( 'error', $notice['variant'] );
-			}
-		}
-	}
-
-	/**
-	 * Nothing may register on a healthy site.
-	 */
-	public function test_register_submission_failure_notice_is_silent_when_healthy() {
-		wp_set_current_user( $this->make_log_user( 'administrator' ) );
-		delete_option( Client_Logger::FAULT_STREAK_OPTION );
-
-		Notice_Manager::clear_notices();
-		Admin::get_instance()->register_submission_failure_notice();
-		$ids = wp_list_pluck( Notice_Manager::get_notices(), 'id' );
-		Notice_Manager::clear_notices();
-
-		$this->assertNotContains( 'srfm-submission-failure', $ids );
+		$this->assertSame( '', $output );
 	}
 
 	/**
