@@ -75,6 +75,13 @@ class Client_Logger {
 	public const MAX_TEXT_LENGTH = 500;
 
 	/**
+	 * Longest single field key stored on an entry, in characters.
+	 *
+	 * @since x.x.x
+	 */
+	public const MAX_KEY_LENGTH = 100;
+
+	/**
 	 * Whether client error logging is currently switched on.
 	 *
 	 * On by default, including on installs whose stored settings predate the
@@ -401,8 +408,13 @@ class Client_Logger {
 		if ( isset( $raw['field_keys'] ) && is_array( $raw['field_keys'] ) ) {
 			$keys = [];
 
+			// Both the count and each key's length. Capping only the count left one
+			// request able to write ~1MB of field keys and fill the log in a single
+			// call -- and because the log stops rather than evicting, that silently
+			// disabled the feature until an admin cleared it. A real key is
+			// `srfm-input-lbl-<base64>`, far inside this bound.
 			foreach ( array_slice( $raw['field_keys'], 0, 100 ) as $field_key ) {
-				$keys[] = sanitize_text_field( Helper::get_string_value( $field_key ) );
+				$keys[] = mb_substr( sanitize_text_field( Helper::get_string_value( $field_key ) ), 0, self::MAX_KEY_LENGTH );
 			}
 
 			$entry['field_keys'] = $keys;
@@ -432,14 +444,17 @@ class Client_Logger {
 			return '';
 		}
 
-		// Drop query strings wholesale rather than allowlisting parameters.
-		$text = (string) preg_replace( '#(https?://[^\s?]+)\?\S*#i', '$1', $text );
+		// Drop query strings and fragments wholesale rather than allowlisting
+		// parameters. A token after # is just as sensitive as one after ?.
+		$text = (string) preg_replace( '#(https?://[^\s?\#]+)[?\#]\S*#i', '$1', $text );
 
 		// Email addresses.
 		$text = (string) preg_replace( '/[\w.+-]+@[\w-]+\.[\w.-]+/', '[email]', $text );
 
-		// Long digit runs: card numbers, phone numbers, ids.
-		$text = (string) preg_replace( '/\d{7,}/', '[number]', $text );
+		// Long digit runs: card numbers, phone numbers, ids. Separators are matched
+		// too, because a real phone number is written 555-123-4567 or (555) 123-4567
+		// and a contiguous-digits rule never sees it.
+		$text = (string) preg_replace( '/\+?\d[\d\s().-]{5,}\d/', '[number]', $text );
 
 		$text = (string) preg_replace( '/\s+/', ' ', $text );
 

@@ -852,6 +852,13 @@ JS;
 			return;
 		}
 
+		// A broken form outranks a setup prompt. This is the top of the existing
+		// precedence chain, so the action-item check goes here rather than the
+		// action items standing down for an engagement notice.
+		if ( $this->has_action_item_warnings() ) {
+			return;
+		}
+
 		\Astra_Notices::add_notice(
 			[
 				'id'                         => $notice_id,
@@ -2655,7 +2662,7 @@ JS;
 				// notice does: a specific form to finish beats a recurring review ask,
 				// and a user with three forms who then imports a template would
 				// otherwise see both at once.
-				'show_if'                    => $this->maybe_display_rating_notice() && null === $this->get_displayable_thankyou_prompt(),
+				'show_if'                    => $this->maybe_display_rating_notice() && null === $this->get_displayable_thankyou_prompt() && ! $this->has_action_item_warnings(),
 				'display-with-other-notices' => true,
 			]
 		);
@@ -2719,7 +2726,7 @@ JS;
 				// ever on screen. The rating notice supersedes it once the user has real
 				// usage; the Thank You prompt supersedes it because "finish this specific
 				// form" is a concrete next step and this is a generic tour invitation.
-				'show_if'                    => ! $this->maybe_display_rating_notice() && null === $this->get_displayable_thankyou_prompt(),
+				'show_if'                    => ! $this->maybe_display_rating_notice() && null === $this->get_displayable_thankyou_prompt() && ! $this->has_action_item_warnings(),
 				'display-notice-after'       => WEEK_IN_SECONDS,
 				'display-with-other-notices' => true,
 			]
@@ -3353,6 +3360,259 @@ JS;
 	}
 
 	/**
+	 * Classic dashboard notice when submissions keep failing.
+	 *
+	 * Hooked - admin_notices.
+	 *
+	 * Gated to the WP dashboard. The React notice already covers SureForms' own
+	 * screens, so leaving this admin-wide would stack two warnings on one page.
+	 *
+	 * Registered as [ $this, 'method' ] rather than a closure because
+	 * suppress_foreign_admin_notices() strips any callback it cannot attribute to
+	 * a SureForms class -- a closure here would be silently removed.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function render_action_item_notices() {
+		// Shown across wp-admin, because someone whose forms are silently failing
+		// may not open the WP dashboard or SureForms for days.
+		//
+		// The one exclusion is SureForms' own dashboard: the Form Checks panel in
+		// its sidebar already lists these, and a banner above it would say the same
+		// thing twice on one screen.
+		if ( Helper::validate_request_context( 'sureforms_menu', 'page' ) ) {
+			return;
+		}
+
+		$this->enqueue_notice_response_script();
+
+		foreach ( $this->get_action_items() as $item ) {
+			$status = Helper::get_string_value( $item['status'] ?? '' );
+
+			// Passing checks belong in the SureForms panel, not in wp-admin. A
+			// notice that says nothing is wrong is noise on every page load.
+			if ( 'success' === $status || '' === $status ) {
+				continue;
+			}
+
+			// A fault reads as an error; advice reads as a warning. Both are shown,
+			// but they are not the same kind of message and should not look alike.
+			$class = 'error' === $status ? 'notice-error' : 'notice-warning';
+			?>
+			<div class="notice <?php echo esc_attr( $class ); ?>">
+				<p><strong><?php echo esc_html( $item['title'] ); ?></strong></p>
+				<p><?php echo esc_html( $item['message'] ); ?></p>
+				<p>
+					<a
+						href="<?php echo esc_url( Helper::get_string_value( $item['cta_url'] ) ); ?>"
+						class="button button-primary"
+						data-srfm-notice-id="<?php echo esc_attr( Helper::get_string_value( $item['id'] ) ); ?>"
+						data-srfm-button="<?php echo esc_attr( Helper::get_string_value( $item['cta_action'] ?? '' ) ); ?>"
+						<?php echo 0 === strpos( Helper::get_string_value( $item['cta_url'] ), 'mailto:' ) ? '' : 'target="_blank" rel="noopener noreferrer"'; ?>
+					>
+						<?php echo esc_html( $item['cta_label'] ); ?>
+					</a>
+					<?php if ( ! empty( $item['dismissible'] ) ) { ?>
+						<a href="<?php echo esc_url( $this->get_dismiss_action_item_url( Helper::get_string_value( $item['id'] ) ) ); ?>" class="button">
+							<?php esc_html_e( 'Dismiss', 'sureforms' ); ?>
+						</a>
+					<?php } ?>
+				</p>
+			</div>
+			<?php
+		}
+	}
+
+	/**
+	 * Dismiss an action item from the classic notice's link.
+	 *
+	 * Hooked - admin_post_srfm_dismiss_action_item_link.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function handle_dismiss_action_item_link() {
+		if ( ! Helper::current_user_can() ) {
+			wp_die( esc_html__( 'You do not have permission to do this.', 'sureforms' ), 403 );
+		}
+
+		check_admin_referer( 'srfm_dismiss_action_item' );
+
+		$item_id = isset( $_GET['item'] ) ? sanitize_key( wp_unslash( $_GET['item'] ) ) : '';
+
+		$this->dismiss_action_item( $item_id );
+
+		$referer = wp_get_referer();
+
+		wp_safe_redirect( $referer ? $referer : admin_url() );
+		exit;
+	}
+
+	/**
+	 * Whether anything is currently wrong enough to warrant a notice.
+	 *
+	 * Deliberately re-derives the two conditions rather than calling
+	 * get_action_items(), which records an impression as a side effect and must not
+	 * run from a show_if callback.
+	 *
+	 * @since x.x.x
+	 * @return bool
+	 */
+	public function has_action_item_warnings() {
+		if ( Client_Logger::has_persistent_failures() ) {
+			return true;
+		}
+
+		if ( '' === Helper::get_active_caching_plugin() ) {
+			return false;
+		}
+
+		$dismissed = Helper::get_array_value( Helper::get_srfm_option( 'dismissed_action_items', [] ) );
+
+		return ! in_array( 'caching_plugin', $dismissed, true );
+	}
+
+	/**
+	 * Things on this site that need the owner's attention, newest concern first.
+	 *
+	 * Fed to the dashboard sidebar carousel. Each entry is self-describing so the
+	 * front end has no rules of its own to keep in sync -- adding a new item here
+	 * makes it appear with no JavaScript change.
+	 *
+	 * `dismissible` separates a fault from advice. A run of failed submissions is
+	 * not something to wave away, and clears itself when a submission succeeds. A
+	 * caching plugin being present is information, so it can be dismissed.
+	 *
+	 * @since x.x.x
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function get_action_items() {
+		if ( ! Helper::current_user_can() ) {
+			return [];
+		}
+
+		$dismissed = Helper::get_array_value( Helper::get_srfm_option( 'dismissed_action_items', [] ) );
+		$warnings  = [];
+		$passing   = [];
+
+		if ( Client_Logger::has_persistent_failures() ) {
+			$count = Client_Logger::get_fault_streak();
+
+			$warnings[] = [
+				'id'          => 'form_submission_error',
+				'status'      => 'error',
+				'title'       => sprintf(
+					/* translators: %d: number of consecutive failed submissions. */
+					_n(
+						'%d form submission in a row could not be completed.',
+						'%d form submissions in a row could not be completed.',
+						$count,
+						'sureforms'
+					),
+					$count
+				),
+				'message'     => __( 'Visitors may be unable to reach you, and those entries were not saved.', 'sureforms' ),
+				'cta_label'   => __( 'Contact Support', 'sureforms' ),
+				'cta_url'     => $this->get_support_mailto_url( $count ),
+				'cta_action'  => 'contact_support',
+				'dismissible' => false,
+			];
+		} else {
+			$passing[] = [
+				'id'          => 'form_submission_error',
+				'status'      => 'success',
+				'title'       => __( 'Form submissions are completing normally.', 'sureforms' ),
+				'message'     => '',
+				'cta_label'   => '',
+				'cta_url'     => '',
+				'dismissible' => false,
+			];
+		}
+
+		$caching_plugin = Helper::get_active_caching_plugin();
+
+		if ( '' === $caching_plugin ) {
+			$passing[] = [
+				'id'          => 'caching_plugin',
+				'status'      => 'success',
+				'title'       => __( 'No caching plugin that needs configuring was found.', 'sureforms' ),
+				'message'     => '',
+				'cta_label'   => '',
+				'cta_url'     => '',
+				'dismissible' => false,
+			];
+		} elseif ( ! in_array( 'caching_plugin', $dismissed, true ) ) {
+			$warnings[] = [
+				'id'          => 'caching_plugin',
+				'status'      => 'warning',
+				'title'       => sprintf(
+					/* translators: %s: caching plugin name. */
+					__( '%s may interfere with your forms.', 'sureforms' ),
+					$caching_plugin
+				),
+				'message'     => __( 'Caching and JavaScript optimisation can serve a stale copy of your form or load its scripts out of order.', 'sureforms' ),
+				'cta_label'   => __( 'Help Me Fix', 'sureforms' ),
+				'cta_url'     => 'https://sureforms.com/docs/how-to-set-up-sureforms-with-caching-plugins/',
+				'cta_action'  => 'help_me_fix',
+				'dismissible' => true,
+			];
+		}
+
+		// Warnings first: the point of the panel is what needs attention, with the
+		// passing checks below as reassurance rather than as the headline.
+		$items = array_merge( $warnings, $passing );
+
+		$this->track_action_item_impressions( $warnings );
+
+		/**
+		 * Filter the dashboard action items.
+		 *
+		 * Each entry needs id, status ('warning' or 'success'), title, message,
+		 * cta_label, cta_url and dismissible. Only ids in
+		 * handle_dismiss_action_item()'s allowlist can actually be dismissed, so
+		 * adding a dismissible item here also needs a line there.
+		 *
+		 * @since x.x.x
+		 *
+		 * @param array<int,array<string,mixed>> $items Action items.
+		 */
+		return Helper::apply_filters_as_array( 'srfm_action_items', $items );
+	}
+
+	/**
+	 * Dismiss one action item.
+	 *
+	 * Hooked - wp_ajax_srfm_dismiss_action_item.
+	 *
+	 * Only items get_action_items() marks dismissible can be dismissed, so a
+	 * crafted request cannot silence a genuine fault.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function handle_dismiss_action_item() {
+		if ( ! Helper::current_user_can() ) {
+			wp_send_json_error( [ 'message' => __( 'Unauthorized user.', 'sureforms' ) ], 403 );
+			return;
+		}
+
+		if ( ! check_ajax_referer( 'srfm_dismiss_action_item', 'nonce', false ) ) {
+			wp_send_json_error( [ 'message' => __( 'Invalid nonce.', 'sureforms' ) ], 403 );
+			return;
+		}
+
+		$item_id = isset( $_POST['item_id'] ) ? sanitize_key( wp_unslash( $_POST['item_id'] ) ) : '';
+
+		if ( ! $this->dismiss_action_item( $item_id ) ) {
+			wp_send_json_error( [ 'message' => __( 'Invalid parameters.', 'sureforms' ) ], 400 );
+			return;
+		}
+
+		wp_send_json_success();
+	}
+
+	/**
 	 * Nonce-protected URL that repairs the entries table.
 	 *
 	 * Shared by both notice surfaces so there is one repair route, one nonce and one
@@ -3899,72 +4159,6 @@ JS;
 		return false;
 	}
 
-
-	/**
-	 * Classic dashboard notice when submissions keep failing.
-	 *
-	 * Hooked - admin_notices.
-	 *
-	 * Gated to the WP dashboard. The React notice already covers SureForms' own
-	 * screens, so leaving this admin-wide would stack two warnings on one page.
-	 *
-	 * Registered as [ $this, 'method' ] rather than a closure because
-	 * suppress_foreign_admin_notices() strips any callback it cannot attribute to
-	 * a SureForms class -- a closure here would be silently removed.
-	 *
-	 * @since x.x.x
-	 * @return void
-	 */
-	public function render_action_item_notices() {
-		// Shown across wp-admin, because someone whose forms are silently failing
-		// may not open the WP dashboard or SureForms for days.
-		//
-		// The one exclusion is SureForms' own dashboard: the Form Checks panel in
-		// its sidebar already lists these, and a banner above it would say the same
-		// thing twice on one screen.
-		if ( Helper::validate_request_context( 'sureforms_menu', 'page' ) ) {
-			return;
-		}
-
-		$this->enqueue_notice_response_script();
-
-		foreach ( $this->get_action_items() as $item ) {
-			$status = Helper::get_string_value( $item['status'] ?? '' );
-
-			// Passing checks belong in the SureForms panel, not in wp-admin. A
-			// notice that says nothing is wrong is noise on every page load.
-			if ( 'success' === $status || '' === $status ) {
-				continue;
-			}
-
-			// A fault reads as an error; advice reads as a warning. Both are shown,
-			// but they are not the same kind of message and should not look alike.
-			$class = 'error' === $status ? 'notice-error' : 'notice-warning';
-			?>
-			<div class="notice <?php echo esc_attr( $class ); ?>">
-				<p><strong><?php echo esc_html( $item['title'] ); ?></strong></p>
-				<p><?php echo esc_html( $item['message'] ); ?></p>
-				<p>
-					<a
-						href="<?php echo esc_url( Helper::get_string_value( $item['cta_url'] ) ); ?>"
-						class="button button-primary"
-						data-srfm-notice-id="<?php echo esc_attr( Helper::get_string_value( $item['id'] ) ); ?>"
-						data-srfm-button="<?php echo esc_attr( Helper::get_string_value( $item['cta_action'] ?? '' ) ); ?>"
-						<?php echo 0 === strpos( Helper::get_string_value( $item['cta_url'] ), 'mailto:' ) ? '' : 'target="_blank" rel="noopener noreferrer"'; ?>
-					>
-						<?php echo esc_html( $item['cta_label'] ); ?>
-					</a>
-					<?php if ( ! empty( $item['dismissible'] ) ) { ?>
-						<a href="<?php echo esc_url( $this->get_dismiss_action_item_url( Helper::get_string_value( $item['id'] ) ) ); ?>" class="button">
-							<?php esc_html_e( 'Dismiss', 'sureforms' ); ?>
-						</a>
-					<?php } ?>
-				</p>
-			</div>
-			<?php
-		}
-	}
-
 	/**
 	 * Nonced URL that dismisses one action item without JavaScript.
 	 *
@@ -3986,138 +4180,6 @@ JS;
 			),
 			'srfm_dismiss_action_item'
 		);
-	}
-
-	/**
-	 * Dismiss an action item from the classic notice's link.
-	 *
-	 * Hooked - admin_post_srfm_dismiss_action_item_link.
-	 *
-	 * @since x.x.x
-	 * @return void
-	 */
-	public function handle_dismiss_action_item_link() {
-		if ( ! Helper::current_user_can() ) {
-			wp_die( esc_html__( 'You do not have permission to do this.', 'sureforms' ), 403 );
-		}
-
-		check_admin_referer( 'srfm_dismiss_action_item' );
-
-		$item_id = isset( $_GET['item'] ) ? sanitize_key( wp_unslash( $_GET['item'] ) ) : '';
-
-		$this->dismiss_action_item( $item_id );
-
-		$referer = wp_get_referer();
-
-		wp_safe_redirect( $referer ? $referer : admin_url() );
-		exit;
-	}
-
-	/**
-	 * Things on this site that need the owner's attention, newest concern first.
-	 *
-	 * Fed to the dashboard sidebar carousel. Each entry is self-describing so the
-	 * front end has no rules of its own to keep in sync -- adding a new item here
-	 * makes it appear with no JavaScript change.
-	 *
-	 * `dismissible` separates a fault from advice. A run of failed submissions is
-	 * not something to wave away, and clears itself when a submission succeeds. A
-	 * caching plugin being present is information, so it can be dismissed.
-	 *
-	 * @since x.x.x
-	 * @return array<int,array<string,mixed>>
-	 */
-	public function get_action_items() {
-		if ( ! Helper::current_user_can() ) {
-			return [];
-		}
-
-		$dismissed = Helper::get_array_value( Helper::get_srfm_option( 'dismissed_action_items', [] ) );
-		$warnings  = [];
-		$passing   = [];
-
-		if ( Client_Logger::has_persistent_failures() ) {
-			$count = Client_Logger::get_fault_streak();
-
-			$warnings[] = [
-				'id'          => 'form_submission_error',
-				'status'      => 'error',
-				'title'       => sprintf(
-					/* translators: %d: number of consecutive failed submissions. */
-					_n(
-						'%d form submission in a row could not be completed.',
-						'%d form submissions in a row could not be completed.',
-						$count,
-						'sureforms'
-					),
-					$count
-				),
-				'message'     => __( 'Visitors may be unable to reach you, and those entries were not saved.', 'sureforms' ),
-				'cta_label'   => __( 'Contact Support', 'sureforms' ),
-				'cta_url'     => $this->get_support_mailto_url( $count ),
-				'cta_action'  => 'contact_support',
-				'dismissible' => false,
-			];
-		} else {
-			$passing[] = [
-				'id'          => 'form_submission_error',
-				'status'      => 'success',
-				'title'       => __( 'Form submissions are completing normally.', 'sureforms' ),
-				'message'     => '',
-				'cta_label'   => '',
-				'cta_url'     => '',
-				'dismissible' => false,
-			];
-		}
-
-		$caching_plugin = Helper::get_active_caching_plugin();
-
-		if ( '' === $caching_plugin ) {
-			$passing[] = [
-				'id'          => 'caching_plugin',
-				'status'      => 'success',
-				'title'       => __( 'No caching plugin that needs configuring was found.', 'sureforms' ),
-				'message'     => '',
-				'cta_label'   => '',
-				'cta_url'     => '',
-				'dismissible' => false,
-			];
-		} elseif ( ! in_array( 'caching_plugin', $dismissed, true ) ) {
-			$warnings[] = [
-				'id'          => 'caching_plugin',
-				'status'      => 'warning',
-				'title'       => sprintf(
-					/* translators: %s: caching plugin name. */
-					__( '%s may interfere with your forms.', 'sureforms' ),
-					$caching_plugin
-				),
-				'message'     => __( 'Caching and JavaScript optimisation can serve a stale copy of your form or load its scripts out of order.', 'sureforms' ),
-				'cta_label'   => __( 'Help Me Fix', 'sureforms' ),
-				'cta_url'     => 'https://sureforms.com/docs/how-to-set-up-sureforms-with-caching-plugins/',
-				'cta_action'  => 'help_me_fix',
-				'dismissible' => true,
-			];
-		}
-
-		// Warnings first: the point of the panel is what needs attention, with the
-		// passing checks below as reassurance rather than as the headline.
-		$items = array_merge( $warnings, $passing );
-
-		$this->track_action_item_impressions( $warnings );
-
-		/**
-		 * Filter the dashboard action items.
-		 *
-		 * Each entry needs id, status ('warning' or 'success'), title, message,
-		 * cta_label, cta_url and dismissible. Only ids in
-		 * handle_dismiss_action_item()'s allowlist can actually be dismissed, so
-		 * adding a dismissible item here also needs a line there.
-		 *
-		 * @since x.x.x
-		 *
-		 * @param array<int,array<string,mixed>> $items Action items.
-		 */
-		return Helper::apply_filters_as_array( 'srfm_action_items', $items );
 	}
 
 	/**
@@ -4278,38 +4340,6 @@ JS;
 		];
 
 		return implode( "\r\n", $lines );
-	}
-
-	/**
-	 * Dismiss one action item.
-	 *
-	 * Hooked - wp_ajax_srfm_dismiss_action_item.
-	 *
-	 * Only items get_action_items() marks dismissible can be dismissed, so a
-	 * crafted request cannot silence a genuine fault.
-	 *
-	 * @since x.x.x
-	 * @return void
-	 */
-	public function handle_dismiss_action_item() {
-		if ( ! Helper::current_user_can() ) {
-			wp_send_json_error( [ 'message' => __( 'Unauthorized user.', 'sureforms' ) ], 403 );
-			return;
-		}
-
-		if ( ! check_ajax_referer( 'srfm_dismiss_action_item', 'nonce', false ) ) {
-			wp_send_json_error( [ 'message' => __( 'Invalid nonce.', 'sureforms' ) ], 403 );
-			return;
-		}
-
-		$item_id = isset( $_POST['item_id'] ) ? sanitize_key( wp_unslash( $_POST['item_id'] ) ) : '';
-
-		if ( ! $this->dismiss_action_item( $item_id ) ) {
-			wp_send_json_error( [ 'message' => __( 'Invalid parameters.', 'sureforms' ) ], 400 );
-			return;
-		}
-
-		wp_send_json_success();
 	}
 
 	/**

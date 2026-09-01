@@ -282,6 +282,7 @@ const LogsContent = ( {
 	setLogMeta,
 } ) => {
 	const [ clearing, setClearing ] = useState( false );
+	const [ confirmingClear, setConfirmingClear ] = useState( false );
 
 	const nonce = window?.srfm_admin?.client_logs_nonce ?? '';
 	const ajaxUrl = window?.srfm_admin?.ajax_url ?? '';
@@ -301,6 +302,16 @@ const LogsContent = ( {
 		if ( clearing ) {
 			return;
 		}
+
+		// Two-step rather than a native confirm(): this deletes the only evidence
+		// anyone has during an active investigation, and a blocking dialog in
+		// wp-admin is worse than an inline second click.
+		if ( ! confirmingClear ) {
+			setConfirmingClear( true );
+			return;
+		}
+
+		setConfirmingClear( false );
 		setClearing( true );
 		try {
 			await fetch(
@@ -350,11 +361,27 @@ const LogsContent = ( {
 						variant="ghost"
 						size="md"
 						onClick={ handleClear }
+						disabled={ clearing }
+						aria-busy={ clearing }
 						icon={ clearing && <Loader /> }
 						iconPosition="left"
+						{ ...( confirmingClear && {
+							destructive: true,
+						} ) }
 					>
-						{ __( 'Clear', 'sureforms' ) }
+						{ confirmingClear
+							? __( 'Confirm delete', 'sureforms' )
+							: __( 'Clear', 'sureforms' ) }
 					</Button>
+					{ confirmingClear && ! clearing && (
+						<Button
+							variant="ghost"
+							size="md"
+							onClick={ () => setConfirmingClear( false ) }
+						>
+							{ __( 'Cancel', 'sureforms' ) }
+						</Button>
+					) }
 					{ logMeta?.size >= MAX_LOG_SIZE && (
 						<span className="text-sm text-support-error">
 							{ __(

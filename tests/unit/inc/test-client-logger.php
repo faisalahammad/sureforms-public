@@ -229,6 +229,64 @@ class Test_Client_Logger extends TestCase {
 	}
 
 	/**
+	 * Capping the count but not each key's length let one request write ~1MB of
+	 * field keys and fill the log in a single call. Because the log stops rather
+	 * than evicting, that silently disabled the feature until an admin cleared it
+	 * -- a no-auth denial of service against the plugin's own diagnostics.
+	 *
+	 * The previous test used short fixed strings and passed throughout.
+	 */
+	public function test_sanitize_entry_clamps_each_field_key_length() {
+		$entry = Client_Logger::sanitize_entry(
+			[
+				'type'       => 'network',
+				'status'     => 400,
+				'field_keys' => array_fill( 0, 100, str_repeat( 'A', 10000 ) ),
+			]
+		);
+
+		foreach ( $entry['field_keys'] as $key ) {
+			$this->assertLessThanOrEqual( Client_Logger::MAX_KEY_LENGTH, mb_strlen( $key ) );
+		}
+
+		Client_Logger::append( $entry );
+
+		// One request must not come close to the cap.
+		$this->assertLessThan( Client_Logger::MAX_FILE_SIZE / 10, Client_Logger::get_file_size() );
+		$this->assertFalse( Client_Logger::is_full() );
+	}
+
+	/**
+	 * A phone number is written 555-123-4567, not 5551234567, so a
+	 * contiguous-digits rule never sees a real one. The earlier test only used an
+	 * unformatted run and passed regardless.
+	 */
+	public function test_scrub_text_redacts_formatted_numbers() {
+		foreach ( [
+			'Phone 555-123-4567 rejected',
+			'Call (555) 123-4567 now',
+			'Intl +44 7700 900123 failed',
+			'Card 4111 1111 1111 1111 declined',
+		] as $sample ) {
+			$scrubbed = Client_Logger::scrub_text( $sample );
+
+			$this->assertStringContainsString( '[number]', $scrubbed, $sample );
+			$this->assertDoesNotMatchRegularExpression( '/\d{3}[\s.-]\d{3}/', $scrubbed, $sample );
+		}
+	}
+
+	/**
+	 * A token after # is as sensitive as one after ?, and the URL rule only
+	 * stripped query strings.
+	 */
+	public function test_scrub_text_strips_url_fragments() {
+		$this->assertStringNotContainsString(
+			's3cr3t',
+			Client_Logger::scrub_text( 'Failed at https://example.com/reset#token=s3cr3t' )
+		);
+	}
+
+	/**
 	 * Redacting submitted values is not enough on its own: error text interpolates
 	 * user input constantly, and page URLs carry addresses and reset keys in their
 	 * query strings.

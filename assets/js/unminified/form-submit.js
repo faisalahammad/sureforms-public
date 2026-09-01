@@ -1069,6 +1069,22 @@ async function handleFormSubmission(
 			enableSubmitButton( form );
 		}
 	} catch ( error ) {
+		// Anything thrown anywhere in the submission path lands here -- including a
+		// throw inside field or captcha validation, before the request is ever made.
+		// That is the case where a third-party script has broken a field's own
+		// validation code, which is invisible to every other capture point.
+		srfmLog.add( {
+			type: 'error',
+			message: `Submission aborted: ${ error?.name ?? 'Error' }: ${
+				typeof error?.message === 'string' ? error.message : ''
+			}`,
+			source: String( error?.stack ?? '' )
+				.split( '\n' )[ 1 ]
+				?.trim()
+				?.slice( 0, 200 ),
+		} );
+		srfmLog.flush( form );
+
 		// Create and dispatch a custom event
 		const event = new CustomEvent(
 			'srfm_on_trigger_form_submission_failure',
