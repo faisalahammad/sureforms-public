@@ -212,6 +212,49 @@ class Register {
 	}
 
 	/**
+	 * Drop the cached entries-table detection so the next check re-queries.
+	 *
+	 * Called when a live entries write fails: a table cached as present earlier in
+	 * the day may have just been dropped, and trusting the stale healthy answer
+	 * would hide the notice for up to the transient's lifetime.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public static function flush_entries_table_cache() {
+		self::$entries_table_present = null;
+		delete_transient( self::ENTRIES_TABLE_CHECK_TRANSIENT );
+	}
+
+	/**
+	 * The entries table sitting under a different prefix, if there is one.
+	 *
+	 * Exposed so the notice can say whether the repair will bring existing entries
+	 * back with it or start from empty — the difference matters a great deal to
+	 * whoever is about to click the button.
+	 *
+	 * @since 2.12.6
+	 * @return string Full table name, or '' when there is nothing to adopt.
+	 */
+	public static function get_adoptable_entries_table() {
+		if ( ! self::is_entries_table_missing() ) {
+			return '';
+		}
+
+		$entries   = Entries::get_instance();
+		$candidate = $entries->find_adoptable_table();
+
+		// Only report a candidate the repair would actually adopt — one we can prove
+		// belongs to this site. An unverifiable table is left untouched and a fresh
+		// table created instead, so the notice must not promise to keep its entries.
+		if ( '' === $candidate || ! $entries->table_belongs_to_site( $candidate ) ) {
+			return '';
+		}
+
+		return $candidate;
+	}
+
+	/**
 	 * Re-run the install-time schema steps against a just-adopted table.
 	 *
 	 * An adopted table can carry an older revision of this plugin's schema (a
@@ -264,48 +307,5 @@ class Register {
 		 * @since 2.12.6
 		 */
 		do_action( 'srfm_entries_table_unrecovered', $table, $reason );
-	}
-
-	/**
-	 * Drop the cached entries-table detection so the next check re-queries.
-	 *
-	 * Called when a live entries write fails: a table cached as present earlier in
-	 * the day may have just been dropped, and trusting the stale healthy answer
-	 * would hide the notice for up to the transient's lifetime.
-	 *
-	 * @since 2.12.6
-	 * @return void
-	 */
-	public static function flush_entries_table_cache() {
-		self::$entries_table_present = null;
-		delete_transient( self::ENTRIES_TABLE_CHECK_TRANSIENT );
-	}
-
-	/**
-	 * The entries table sitting under a different prefix, if there is one.
-	 *
-	 * Exposed so the notice can say whether the repair will bring existing entries
-	 * back with it or start from empty — the difference matters a great deal to
-	 * whoever is about to click the button.
-	 *
-	 * @since 2.12.6
-	 * @return string Full table name, or '' when there is nothing to adopt.
-	 */
-	public static function get_adoptable_entries_table() {
-		if ( ! self::is_entries_table_missing() ) {
-			return '';
-		}
-
-		$entries   = Entries::get_instance();
-		$candidate = $entries->find_adoptable_table();
-
-		// Only report a candidate the repair would actually adopt — one we can prove
-		// belongs to this site. An unverifiable table is left untouched and a fresh
-		// table created instead, so the notice must not promise to keep its entries.
-		if ( '' === $candidate || ! $entries->table_belongs_to_site( $candidate ) ) {
-			return '';
-		}
-
-		return $candidate;
 	}
 }

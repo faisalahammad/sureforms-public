@@ -527,6 +527,68 @@ class Test_Database_Base extends TestCase {
 	}
 
 	/**
+	 * The owner signature is a stable, prefixed, per-site string.
+	 */
+	public function test_get_owner_signature() {
+		$method = new ReflectionMethod( $this->entries_table, 'get_owner_signature' );
+		$method->setAccessible( true );
+
+		$signature = $method->invoke( $this->entries_table );
+
+		$this->assertIsString( $signature );
+		$this->assertStringStartsWith( 'srfm-owner:', $signature );
+		$this->assertSame( $signature, $method->invoke( $this->entries_table ), 'The signature must be stable within a site.' );
+	}
+
+	/**
+	 * Stamping writes this site's signature into the table's MySQL comment, where a
+	 * later adoption can read it back. The comment survives RENAME, unlike an option.
+	 */
+	public function test_stamp_owner_signature() {
+		global $wpdb;
+
+		$method = new ReflectionMethod( $this->entries_table, 'get_owner_signature' );
+		$method->setAccessible( true );
+		$signature = $method->invoke( $this->entries_table );
+
+		$table = $wpdb->prefix . 'srfm_stamp_probe';
+		$wpdb->query( "CREATE TABLE `{$table}` ( id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY )" ); // phpcs:ignore -- Scratch table for this test.
+
+		$this->entries_table->stamp_owner_signature( $table );
+
+		$comment = $wpdb->get_var( $wpdb->prepare( 'SELECT TABLE_COMMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s', $table ) ); // phpcs:ignore -- Reading back the comment this test wrote.
+		$wpdb->query( "DROP TABLE IF EXISTS `{$table}`" ); // phpcs:ignore -- Test teardown on a scratch table this test created.
+
+		$this->assertSame( $signature, $comment );
+	}
+
+	/**
+	 * Ownership is proven only by an exact signature match. A stamped table is ours;
+	 * an unstamped one (as another install's table would be) and an empty name are
+	 * denied.
+	 */
+	public function test_table_belongs_to_site() {
+		global $wpdb;
+
+		$owned   = $wpdb->prefix . 'srfm_owned_probe';
+		$foreign = $wpdb->prefix . 'srfm_foreign_probe';
+		$wpdb->query( "CREATE TABLE `{$owned}` ( id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY )" ); // phpcs:ignore -- Scratch table for this test.
+		$wpdb->query( "CREATE TABLE `{$foreign}` ( id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY )" ); // phpcs:ignore -- Scratch table for this test.
+		$this->entries_table->stamp_owner_signature( $owned );
+
+		$owned_result   = $this->entries_table->table_belongs_to_site( $owned );
+		$foreign_result = $this->entries_table->table_belongs_to_site( $foreign );
+		$empty_result   = $this->entries_table->table_belongs_to_site( '' );
+
+		$wpdb->query( "DROP TABLE IF EXISTS `{$owned}`" ); // phpcs:ignore -- Test teardown on a scratch table this test created.
+		$wpdb->query( "DROP TABLE IF EXISTS `{$foreign}`" ); // phpcs:ignore -- Test teardown on a scratch table this test created.
+
+		$this->assertTrue( $owned_result, 'A table carrying this site signature is ours.' );
+		$this->assertFalse( $foreign_result, 'An unstamped table must be denied.' );
+		$this->assertFalse( $empty_result, 'An empty name must be denied.' );
+	}
+
+	/**
 	 * A dropped table must read as missing — this is the state the whole
 	 * detect-and-repair feature exists to catch.
 	 */

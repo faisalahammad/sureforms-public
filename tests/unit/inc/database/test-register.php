@@ -273,6 +273,17 @@ class Test_Database_Register extends TestCase {
 	 * after being cached healthy is noticed on the next check rather than up to a
 	 * day later.
 	 */
+	/**
+	 * The cache flush removes both the transient and the per-request memo.
+	 */
+	public function test_flush_entries_table_cache() {
+		set_transient( Register::ENTRIES_TABLE_CHECK_TRANSIENT, 1, DAY_IN_SECONDS );
+
+		Register::flush_entries_table_cache();
+
+		$this->assertFalse( get_transient( Register::ENTRIES_TABLE_CHECK_TRANSIENT ) );
+	}
+
 	public function test_failed_entry_write_flushes_the_present_cache() {
 		global $wpdb;
 

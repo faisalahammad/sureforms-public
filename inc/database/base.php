@@ -361,28 +361,6 @@ abstract class Base {
 	}
 
 	/**
-	 * The signature this plugin stamps on tables it owns on this site.
-	 *
-	 * A random per-site token, generated once and stored in options. Embedded in
-	 * the table's MySQL comment at creation time; the comment survives RENAME, so a
-	 * table that moved under a different prefix still carries it, while an unrelated
-	 * install sharing the same database carries a different one.
-	 *
-	 * @since 2.12.6
-	 * @return string
-	 */
-	protected function get_owner_signature() {
-		$token = get_option( 'srfm_db_owner_token' );
-
-		if ( ! is_string( $token ) || '' === $token ) {
-			$token = wp_generate_password( 20, false );
-			update_option( 'srfm_db_owner_token', $token, false );
-		}
-
-		return 'srfm-owner:' . $token;
-	}
-
-	/**
 	 * Stamp this site's owner signature onto a table's MySQL comment.
 	 *
 	 * Best-effort: a host that refuses ALTER simply leaves the table unstamped,
@@ -396,8 +374,13 @@ abstract class Base {
 		$wpdb  = $this->wpdb;
 		$table = '' === $table ? $this->get_tablename() : $table;
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- One-off DDL; nothing to cache.
-		$wpdb->query( $wpdb->prepare( 'ALTER TABLE %1s COMMENT = %s', str_replace( '`', '', $table ), $this->get_owner_signature() ) ); // phpcs:ignore -- Identifier must not be quoted; the comment value is a bound, quoted string.
+		$query = $wpdb->prepare( 'ALTER TABLE %1s COMMENT = %s', str_replace( '`', '', $table ), $this->get_owner_signature() ); // phpcs:ignore -- Identifier must not be quoted; the comment value is a bound, quoted string.
+
+		if ( ! $query ) {
+			return;
+		}
+
+		$wpdb->query( $query ); // phpcs:ignore -- Prepared above; one-off DDL with nothing to cache.
 	}
 
 	/**
@@ -422,7 +405,7 @@ abstract class Base {
 		}
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Schema lookup; a cached answer would defeat the check.
-		$comment = $wpdb->get_var( $wpdb->prepare( 'SELECT TABLE_COMMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s', DB_NAME, $bare ) );
+		$comment = $wpdb->get_var( $wpdb->prepare( 'SELECT TABLE_COMMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s', $bare ) );
 
 		if ( ! empty( $wpdb->last_error ) || ! is_string( $comment ) || '' === $comment ) {
 			return false;
@@ -945,6 +928,28 @@ abstract class Base {
 
 		// Execute the query and return the integer count.
 		return Helper::get_integer_value( $this->cache_set( $query, $results ) );
+	}
+
+	/**
+	 * The signature this plugin stamps on tables it owns on this site.
+	 *
+	 * A random per-site token, generated once and stored in options. Embedded in
+	 * the table's MySQL comment at creation time; the comment survives RENAME, so a
+	 * table that moved under a different prefix still carries it, while an unrelated
+	 * install sharing the same database carries a different one.
+	 *
+	 * @since 2.12.6
+	 * @return string
+	 */
+	protected function get_owner_signature() {
+		$token = get_option( 'srfm_db_owner_token' );
+
+		if ( ! is_string( $token ) || '' === $token ) {
+			$token = wp_generate_password( 20, false );
+			update_option( 'srfm_db_owner_token', $token, false );
+		}
+
+		return 'srfm-owner:' . $token;
 	}
 
 	/**
