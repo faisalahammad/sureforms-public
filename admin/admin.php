@@ -3514,7 +3514,7 @@ JS;
 				),
 				'message'     => __( 'Visitors may be unable to reach you, and those entries were not saved.', 'sureforms' ),
 				'cta_label'   => __( 'Contact Support', 'sureforms' ),
-				'cta_url'     => $this->get_support_mailto_url( $count ),
+				'cta_url'     => $this->get_support_mailto_url(),
 				'cta_action'  => 'contact_support',
 				'dismissible' => false,
 			];
@@ -4247,19 +4247,18 @@ JS;
 	 * Pre-addressed support email for a run of failed submissions.
 	 *
 	 * Carries the details support would otherwise have to ask for, so the first
-	 * reply can be an answer rather than a questionnaire. The log itself is not
-	 * included: mailto has no attachment parameter -- browsers drop anything
-	 * beyond subject and body -- and a megabyte of JSON would exceed the URL
-	 * length every client enforces. The log is downloaded alongside instead, and
-	 * the body asks for it to be attached.
+	 * reply can be an answer rather than a questionnaire, along with the recent log
+	 * entries inline.
 	 *
-	 * @param int $count Consecutive failures.
+	 * The log is pasted into the body rather than attached because mailto has no
+	 * attachment parameter -- browsers drop any attempt to add one -- and it is a
+	 * tail rather than the whole file because a megabyte of JSON would exceed the
+	 * URL length every mail client enforces.
+	 *
 	 * @since 2.12.6
 	 * @return string
 	 */
-	private function get_support_mailto_url( $count ) {
-		unset( $count );
-
+	private function get_support_mailto_url() {
 		$subject = sprintf(
 			/* translators: %s: site host. */
 			__( 'SureForms: form submissions are failing on %s', 'sureforms' ),
