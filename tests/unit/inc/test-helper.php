@@ -3181,4 +3181,71 @@ class Test_Helper extends TestCase {
 		}
 		wp_set_current_user( $original );
 	}
+
+	// ---------------------------------------------------------------
+	// Caching plugin detection
+	// ---------------------------------------------------------------
+
+	/**
+	 * Every plugin in the list must be detected, and its display name returned.
+	 *
+	 * A typo in any path means that plugin's users silently never see the setup
+	 * advice, which is invisible without checking each one.
+	 */
+	public function test_get_active_caching_plugin() {
+		$expected = [
+			'litespeed-cache/litespeed-cache.php'                   => 'LiteSpeed Cache',
+			'wp-rocket/wp-rocket.php'                               => 'WP Rocket',
+			'w3-total-cache/w3-total-cache.php'                     => 'W3 Total Cache',
+			'wp-super-cache/wp-cache.php'                           => 'WP Super Cache',
+			'wp-fastest-cache/wpFastestCache.php'                   => 'WP Fastest Cache',
+			'autoptimize/autoptimize.php'                           => 'Autoptimize',
+			'sg-cachepress/sg-cachepress.php'                       => 'SiteGround Optimizer',
+			'wp-optimize/wp-optimize.php'                           => 'WP-Optimize',
+			'cache-enabler/cache-enabler.php'                       => 'Cache Enabler',
+			'comet-cache/comet-cache.php'                           => 'Comet Cache',
+			'hummingbird-performance/wp-hummingbird.php'            => 'Hummingbird',
+			'breeze/breeze.php'                                     => 'Breeze',
+			'nitropack/main.php'                                    => 'NitroPack',
+			'swift-performance-lite/performance.php'                => 'Swift Performance Lite',
+			'wp-cloudflare-page-cache/wp-cloudflare-page-cache.php' => 'Super Page Cache',
+			'flying-press/flying-press.php'                         => 'FlyingPress',
+			'redis-cache/redis-cache.php'                           => 'Redis Object Cache',
+			'powered-cache/powered-cache.php'                       => 'Powered Cache',
+			'docket-cache/docket-cache.php'                          => 'Docket Cache',
+			'seraphinite-accelerator/plugin_root.php'               => 'Seraphinite Accelerator',
+		];
+
+		$this->assertCount( 20, $expected, 'The list is documented as the top 20.' );
+
+		foreach ( $expected as $path => $name ) {
+			$filter = static function () use ( $path ) {
+				return [ $path ];
+			};
+
+			add_filter( 'pre_option_active_plugins', $filter );
+			$detected = Helper::get_active_caching_plugin();
+			remove_filter( 'pre_option_active_plugins', $filter );
+
+			$this->assertSame( $name, $detected, $path . ' must be detected.' );
+		}
+	}
+
+	/**
+	 * A site with no caching plugin must produce nothing. Caching plugins are
+	 * common but far from universal, and a false positive puts a permanent
+	 * "your forms may be broken" card on a site that is fine.
+	 */
+	public function test_get_active_caching_plugin_returns_empty_without_one() {
+		$filter = static function () {
+			return [ 'akismet/akismet.php', 'hello.php' ];
+		};
+
+		add_filter( 'pre_option_active_plugins', $filter );
+		$detected = Helper::get_active_caching_plugin();
+		remove_filter( 'pre_option_active_plugins', $filter );
+
+		$this->assertSame( '', $detected );
+	}
+
 }

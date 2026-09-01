@@ -54,6 +54,9 @@ class Form_Submit {
 	 */
 	public function __construct() {
 		add_action( 'rest_api_init', [ $this, 'register_custom_endpoint' ] );
+		// One submission getting through retires the failure notice. srfm_form_submit
+		// fires only on the success path.
+		add_action( 'srfm_form_submit', [ Client_Logger::class, 'reset_fault_streak' ] );
 		add_action( 'wp_ajax_validation_ajax_action', [ $this, 'field_unique_validation' ] );
 		add_action( 'wp_ajax_nopriv_validation_ajax_action', [ $this, 'field_unique_validation' ] );
 		// for quick action bar.
@@ -77,6 +80,100 @@ class Form_Submit {
 				'permission_callback' => [ $this, 'submit_form_permissions_check' ],
 			]
 		);
+
+		register_rest_route(
+			$this->namespace,
+			'/log-client-error',
+			[
+				'methods'             => WP_REST_Server::CREATABLE,
+				'callback'            => [ $this, 'handle_client_error_log' ],
+				'permission_callback' => [ $this, 'client_error_log_permissions_check' ],
+			]
+		);
+	}
+
+	/**
+	 * Gate the client error log route.
+	 *
+	 * Order matters. The enabled check runs first and returns 404 rather than 403,
+	 * because it is the only thing that actually stops logging: the frontend flag
+	 * is baked into cached HTML and can be a full cache TTL out of date, so
+	 * switching the setting off does not stop already-cached pages from posting.
+	 *
+	 * The submit token is then required for consistency with /submit-form, but be
+	 * clear about what it buys. It is per-form, not per-visitor, valid for up to
+	 * 48 hours, and readable from one GET of any public page carrying the form. It
+	 * filters undirected scanners and costs nothing; it is not visitor
+	 * authentication. The controls that carry real weight here are the fixed
+	 * payload schema in Client_Logger::sanitize_entry() and the rate limit below.
+	 *
+	 * @param \WP_REST_Request $request Incoming REST request.
+	 * @since x.x.x
+	 * @return WP_Error|bool
+	 */
+	public function client_error_log_permissions_check( $request ) {
+		if ( ! Client_Logger::is_enabled() ) {
+			return new WP_Error(
+				'srfm_rest_no_route',
+				__( 'Not found.', 'sureforms' ),
+				[ 'status' => 404 ]
+			);
+		}
+
+		$token   = Helper::get_string_value( $request->get_header( 'X-WP-Submit-Token' ) );
+		$form_id = absint( $request->get_param( 'form_id' ) );
+
+		if ( ! Submit_Token::verify( $token, $form_id ) ) {
+			return new WP_Error(
+				'srfm_token_invalid',
+				__( 'Security verification failed.', 'sureforms' ),
+				[ 'status' => 403 ]
+			);
+		}
+
+		return true;
+	}
+
+	/**
+	 * Record one client-reported form submission failure.
+	 *
+	 * Always answers 204, whether or not a line was written. The browser has
+	 * nothing useful to do with a failure here, and a response that distinguishes
+	 * "written" from "dropped" would report back whether logging is on, whether
+	 * the log is full, and whether the caller is being throttled.
+	 *
+	 * @param \WP_REST_Request $request Incoming REST request.
+	 * @since x.x.x
+	 * @return \WP_REST_Response
+	 */
+	public function handle_client_error_log( $request ) {
+		$response = new \WP_REST_Response( null, 204 );
+
+		$form_id = absint( $request->get_param( 'form_id' ) );
+
+		if ( $this->is_rate_limited( 'srfm_cl_', $form_id ) ) {
+			return $response;
+		}
+
+		$entries = $request->get_param( 'entries' );
+
+		if ( ! is_array( $entries ) ) {
+			return $response;
+		}
+
+		// Cap the batch as well as each entry: a single request must not be able to
+		// consume the whole file and evict the failure someone is trying to capture.
+		foreach ( array_slice( $entries, 0, 10 ) as $raw ) {
+			if ( ! is_array( $raw ) ) {
+				continue;
+			}
+
+			$raw['form_id'] = $form_id;
+
+			Client_Logger::append( Client_Logger::sanitize_entry( $raw ) );
+		}
+
+		return $response;
 	}
 
 	/**
@@ -990,6 +1087,20 @@ class Form_Submit {
 									]
 								);
 
+								// Also record it in the debug log. The submission itself
+								// succeeded, so the visitor saw nothing wrong and nobody
+								// looks at the entry's own log until a ticket is already
+								// open. The recipient address is not included -- the log
+								// is downloadable and must not carry personal data.
+								Client_Logger::append(
+									Client_Logger::sanitize_entry(
+										[
+											'type'    => 'message',
+											'form_id' => intval( $id ),
+											'message' => 'Email notification failed to send. ' . $reason,
+										]
+									)
+								);
 							}
 						}
 
@@ -1495,13 +1606,28 @@ class Form_Submit {
 	 * @return bool True if rate-limited (should block), false if allowed.
 	 */
 	private function is_unique_validation_rate_limited( $form_id ) {
+		return $this->is_rate_limited( 'srfm_uv_', $form_id );
+	}
+
+	/**
+	 * Throttle a public endpoint to 10 requests per minute per IP per form.
+	 *
+	 * Shared by the uniqueness check and the client log route rather than
+	 * duplicated, so a change to the window applies to both.
+	 *
+	 * @param string $prefix  Transient key prefix, unique per endpoint.
+	 * @param int    $form_id The form ID the request relates to.
+	 * @since x.x.x
+	 * @return bool True if rate-limited (should block), false if allowed.
+	 */
+	private function is_rate_limited( $prefix, $form_id ) {
 		$ip = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
 
 		if ( empty( $ip ) || ! filter_var( $ip, FILTER_VALIDATE_IP ) ) {
 			return true; // Fail closed if IP cannot be determined.
 		}
 
-		$transient_key = 'srfm_uv_' . md5( $ip . '_' . $form_id );
+		$transient_key = $prefix . md5( $ip . '_' . $form_id );
 		$attempts      = get_transient( $transient_key );
 
 		if ( false === $attempts ) {

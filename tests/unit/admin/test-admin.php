@@ -8,6 +8,7 @@
 use Yoast\PHPUnitPolyfills\TestCases\TestCase;
 
 use SRFM\Admin\Admin;
+use SRFM\Inc\Client_Logger;
 use SRFM\Inc\Database\Register;
 use SRFM\Inc\Helper;
 
@@ -1055,6 +1056,312 @@ class Test_Admin extends TestCase {
 				'role'       => $role,
 			]
 		);
+	}
+
+	// ---------------------------------------------------------------
+	// Dashboard action items
+	// ---------------------------------------------------------------
+
+	/**
+	 * A healthy site still reports, but only as passing checks. Nothing may be a
+	 * warning -- logging is on by default, so a false positive reaches every
+	 * install.
+	 */
+	public function test_get_action_items_reports_only_passing_checks_when_healthy() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+
+		$filter = static function () {
+			return [ 'akismet/akismet.php' ];
+		};
+
+		add_filter( 'pre_option_active_plugins', $filter );
+		$items = Admin::get_instance()->get_action_items();
+		remove_filter( 'pre_option_active_plugins', $filter );
+
+		$this->assertNotEmpty( $items );
+
+		foreach ( $items as $item ) {
+			$this->assertSame( 'success', $item['status'], $item['id'] . ' must pass on a healthy site.' );
+		}
+	}
+
+	/**
+	 * A run of faults produces a non-dismissible item, because it is a fault and
+	 * clears itself when a submission succeeds.
+	 */
+	public function test_get_action_items() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		update_option( Client_Logger::FAULT_STREAK_OPTION, Client_Logger::FAULT_THRESHOLD );
+
+		$items = Admin::get_instance()->get_action_items();
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+
+		$ids = wp_list_pluck( $items, 'id' );
+		$this->assertContains( 'form_submission_error', $ids );
+
+		foreach ( $items as $item ) {
+			if ( 'form_submission_error' === $item['id'] ) {
+				$this->assertFalse( $item['dismissible'] );
+			}
+		}
+	}
+
+	/**
+	 * An active caching plugin produces a dismissible advisory item pointing at the
+	 * setup guide.
+	 */
+	public function test_get_action_items_flags_an_active_caching_plugin() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+
+		$filter = static function () {
+			return [ 'wp-rocket/wp-rocket.php' ];
+		};
+
+		add_filter( 'pre_option_active_plugins', $filter );
+		$items = Admin::get_instance()->get_action_items();
+		remove_filter( 'pre_option_active_plugins', $filter );
+
+		$caching = null;
+
+		foreach ( $items as $item ) {
+			if ( 'caching_plugin' === $item['id'] ) {
+				$caching = $item;
+			}
+		}
+
+		$this->assertNotNull( $caching, 'An active caching plugin must be reported.' );
+		$this->assertStringContainsString( 'WP Rocket', $caching['title'] );
+		$this->assertTrue( $caching['dismissible'] );
+		$this->assertStringContainsString( 'caching-plugins', $caching['cta_url'] );
+	}
+
+	/**
+	 * A dismissed advisory stays dismissed.
+	 */
+	public function test_get_action_items_respects_a_dismissal() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+		Helper::update_srfm_option( 'dismissed_action_items', [ 'caching_plugin' ] );
+
+		$filter = static function () {
+			return [ 'wp-rocket/wp-rocket.php' ];
+		};
+
+		add_filter( 'pre_option_active_plugins', $filter );
+		$ids = wp_list_pluck( Admin::get_instance()->get_action_items(), 'id' );
+		remove_filter( 'pre_option_active_plugins', $filter );
+
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+
+		$this->assertNotContains( 'caching_plugin', $ids );
+	}
+
+	/**
+	 * The precedence guard. A form that cannot accept submissions must outrank the
+	 * engagement prompts, so this is what the Thank You, rating and getting-started
+	 * notices check before showing.
+	 *
+	 * Re-derives its conditions rather than calling get_action_items(), which
+	 * records an impression and must not run from a show_if callback.
+	 */
+	public function test_has_action_item_warnings() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+
+		$quiet = static function () {
+			return [ 'akismet/akismet.php' ];
+		};
+
+		add_filter( 'pre_option_active_plugins', $quiet );
+		$this->assertFalse( Admin::get_instance()->has_action_item_warnings() );
+		remove_filter( 'pre_option_active_plugins', $quiet );
+
+		update_option( Client_Logger::FAULT_STREAK_OPTION, Client_Logger::FAULT_THRESHOLD );
+
+		add_filter( 'pre_option_active_plugins', $quiet );
+		$this->assertTrue( Admin::get_instance()->has_action_item_warnings() );
+		remove_filter( 'pre_option_active_plugins', $quiet );
+
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+	}
+
+	/**
+	 * Dismissing an advisory must clear the warning state, or the engagement
+	 * notices stay suppressed forever on a site with a caching plugin.
+	 */
+	public function test_has_action_item_warnings_respects_a_dismissal() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+
+		$caching = static function () {
+			return [ 'wp-rocket/wp-rocket.php' ];
+		};
+
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+		add_filter( 'pre_option_active_plugins', $caching );
+		$this->assertTrue( Admin::get_instance()->has_action_item_warnings() );
+
+		Helper::update_srfm_option( 'dismissed_action_items', [ 'caching_plugin' ] );
+		$this->assertFalse( Admin::get_instance()->has_action_item_warnings() );
+		remove_filter( 'pre_option_active_plugins', $caching );
+
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+	}
+
+	/**
+	 * The AJAX dismissal refuses anything not on the allowlist, so a crafted
+	 * request cannot silence a genuine fault.
+	 */
+	public function test_handle_dismiss_action_item() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+
+		$this->assertStringContainsString( '"success":true', $this->post_dismiss( 'caching_plugin' ) );
+		$this->assertStringContainsString( '"success":false', $this->post_dismiss( 'form_submission_error' ) );
+
+		$dismissed = Helper::get_array_value( Helper::get_srfm_option( 'dismissed_action_items', [] ) );
+		$this->assertNotContains( 'form_submission_error', $dismissed );
+
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+	}
+
+	/**
+	 * The no-JS link exists because WordPress's own is-dismissible only hides a
+	 * notice for one pageview. A subscriber must not reach it.
+	 */
+	public function test_handle_dismiss_action_item_link() {
+		wp_set_current_user( $this->make_user( 'subscriber' ) );
+
+		$throw = static function () {
+			return static function ( $m = '' ) {
+				throw new \WPDieException( is_string( $m ) ? $m : 'die' );
+			};
+		};
+		add_filter( 'wp_die_handler', $throw );
+
+		$died = false;
+
+		ob_start();
+		try {
+			Admin::get_instance()->handle_dismiss_action_item_link();
+		} catch ( \WPDieException $e ) {
+			$died = true;
+		} finally {
+			ob_end_clean();
+			remove_filter( 'wp_die_handler', $throw );
+			wp_set_current_user( 0 );
+		}
+
+		$this->assertTrue( $died, 'A subscriber must be stopped before anything is dismissed.' );
+	}
+
+	/**
+	 * Drive the dismissal endpoint and return what it emitted.
+	 *
+	 * @param string $item_id Item to dismiss.
+	 * @return string
+	 */
+	private function post_dismiss( $item_id ) {
+		$_POST['nonce']   = wp_create_nonce( 'srfm_dismiss_action_item' );
+		$_POST['item_id'] = $item_id;
+		$_REQUEST         = $_POST;
+
+		add_filter( 'wp_doing_ajax', '__return_true' );
+		add_filter( 'wp_die_ajax_handler', '_wp_die_handler_filter' );
+		_disable_wp_die();
+
+		ob_start();
+		Admin::get_instance()->handle_dismiss_action_item();
+		$body = (string) ob_get_clean();
+
+		_enable_wp_die();
+		remove_filter( 'wp_die_ajax_handler', '_wp_die_handler_filter' );
+		remove_filter( 'wp_doing_ajax', '__return_true' );
+		$_POST    = [];
+		$_REQUEST = [];
+
+		return $body;
+	}
+
+	/**
+	 * A fault must not be dismissible. Otherwise a crafted request could silence
+	 * the one message that matters while the form is still broken.
+	 */
+	public function test_dismiss_action_item_refuses_a_fault() {
+		$method = new ReflectionMethod( Admin::class, 'dismiss_action_item' );
+		$method->setAccessible( true );
+
+		$this->assertFalse( $method->invoke( Admin::get_instance(), 'form_submission_error' ) );
+		$this->assertFalse( $method->invoke( Admin::get_instance(), 'anything_else' ) );
+		$this->assertTrue( $method->invoke( Admin::get_instance(), 'caching_plugin' ) );
+
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+	}
+
+	/**
+	 * The notice follows the admin around, because someone whose forms are
+	 * silently failing may not open the WP dashboard or SureForms for days.
+	 */
+	public function test_render_action_item_notices() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		update_option( Client_Logger::FAULT_STREAK_OPTION, Client_Logger::FAULT_THRESHOLD );
+
+		foreach ( [ 'dashboard', 'edit-post', 'plugins' ] as $screen ) {
+			set_current_screen( $screen );
+
+			ob_start();
+			Admin::get_instance()->render_action_item_notices();
+			$output = ob_get_clean();
+
+			$this->assertStringContainsString( 'notice-error', $output, $screen . ' must show the notice.' );
+			$this->assertStringContainsString( 'Contact Support', $output );
+		}
+
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+	}
+
+	/**
+	 * Except on SureForms' own dashboard, where the Form Checks panel already
+	 * lists them -- a banner above it would say the same thing twice.
+	 */
+	public function test_render_action_item_notices_defers_to_the_form_checks_panel() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		update_option( Client_Logger::FAULT_STREAK_OPTION, Client_Logger::FAULT_THRESHOLD );
+
+		set_current_screen( 'dashboard' );
+		$_GET['page']     = 'sureforms_menu';
+		$_REQUEST['page'] = 'sureforms_menu';
+
+		ob_start();
+		Admin::get_instance()->render_action_item_notices();
+		$output = ob_get_clean();
+
+		unset( $_GET['page'], $_REQUEST['page'] );
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+
+		$this->assertSame( '', $output );
+	}
+
+	/**
+	 * A subscriber must not be told about the site's internals.
+	 */
+	public function test_render_action_item_notices_is_hidden_without_the_capability() {
+		wp_set_current_user( $this->make_user( 'subscriber' ) );
+		update_option( Client_Logger::FAULT_STREAK_OPTION, Client_Logger::FAULT_THRESHOLD );
+
+		set_current_screen( 'dashboard' );
+
+		ob_start();
+		Admin::get_instance()->render_action_item_notices();
+		$output = ob_get_clean();
+
+		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+
+		$this->assertSame( '', $output );
 	}
 }
 

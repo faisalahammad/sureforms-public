@@ -2,6 +2,7 @@ import GetStarted from './GetStarted';
 
 import { Container } from '@bsf/force-ui';
 import ExtendTab from './ExtendTab';
+import ActionItems from './ActionItems';
 
 import Header from '../components/Header';
 import QuickAccessTab from './QuickAccessTab';
@@ -26,6 +27,8 @@ export default () => {
 
 	const rightSidebar = (
 		<>
+			{ /* Above the rest: anything needing attention outranks the promos. */ }
+			<ActionItems />
 			{ isProActive || ! isFirstFormCreated ? <ExtendTab /> : null }
 			{ ! isProActive && isFirstFormCreated && <UpgradeToPro /> }
 			<QuickAccessTab />

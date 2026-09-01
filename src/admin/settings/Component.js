@@ -40,7 +40,11 @@ const Component = ( { path, subpage } ) => {
 		srfm_form_analytics: false,
 		srfm_bsf_analytics: false,
 		srfm_admin_notification: true,
+		srfm_enable_logs: false,
 	} );
+	// Server-reported log status. Deliberately outside generalTabOptions: it is
+	// read-only, so including it would make the tab permanently dirty.
+	const [ logMeta, setLogMeta ] = useState( { size: 0 } );
 	const [ emailTabOptions, setEmailTabOptions ] = useState( {
 		srfm_email_summary: false,
 		srfm_email_sent_to: srfm_admin.admin_email,
@@ -268,15 +272,20 @@ const Component = ( { path, subpage } ) => {
 						srfm_form_analytics,
 						srfm_bsf_analytics,
 						srfm_admin_notification,
+						srfm_enable_logs,
 					} = data.srfm_general_settings_options;
 					const snap = {
 						srfm_ip_log,
 						srfm_form_analytics,
 						srfm_bsf_analytics,
 						srfm_admin_notification,
+						srfm_enable_logs,
 					};
 					setGeneralTabOptions( snap );
 					nextBaselines[ 'general-settings' ] = snap;
+					setLogMeta( {
+						size: Number( data.srfm_log_file_size ) || 0,
+					} );
 				}
 
 				if ( data.srfm_email_summary_settings_options ) {
@@ -724,6 +733,8 @@ const Component = ( { path, subpage } ) => {
 						emailTabOptions={ emailTabOptions }
 						generalTabOptions={ generalTabOptions }
 						updateGlobalSettings={ updateGlobalSettings }
+						logMeta={ logMeta }
+						setLogMeta={ setLogMeta }
 					/>
 				) }
 				{ 'global-defaults' === path && (

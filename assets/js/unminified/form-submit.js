@@ -298,10 +298,103 @@ function prepareAddressesData( form ) {
  * @throws {Object|Error} The parsed error body on a non-2xx response, or the
  *                         original Error if the body wasn't valid JSON.
  */
+/**
+ * Client-side debug log for form submission failures.
+ *
+ * Ships to the server only while the "Enable Logs" setting is on, and only on a
+ * failure. The server re-checks that setting on every request, so the flag here
+ * is a hint that keeps us from posting needlessly -- it is baked into cached
+ * HTML and can be a full cache TTL out of date.
+ *
+ * Deliberately not a window.fetch wrapper: patching a global is uninstallable
+ * once another script patches on top, and captures every request on the page.
+ * These are five explicit call sites instead.
+ */
+const srfmLog = {
+	entries: [],
+
+	isOn() {
+		return !! window.srfm_submit?.logging_enabled;
+	},
+
+	add( entry ) {
+		if ( ! this.isOn() ) {
+			return;
+		}
+		// Bound the buffer. A page that fails repeatedly must not grow without limit.
+		if ( this.entries.length < 10 ) {
+			this.entries.push( entry );
+		}
+	},
+
+	/**
+	 * Send whatever has been buffered, then forget it.
+	 *
+	 * Uses fetch rather than navigator.sendBeacon: the token travels in a header
+	 * and sendBeacon cannot set one. Beacon semantics are not needed anyway --
+	 * the page is still alive after a failed submit.
+	 *
+	 * @param {HTMLFormElement} form Form the failure belongs to.
+	 */
+	flush( form ) {
+		if ( ! this.isOn() || ! this.entries.length ) {
+			return;
+		}
+
+		const url = window.srfm_submit?.log_error_url;
+		// Read both off the form rather than stashing them in submitFormData: the
+		// failures caught before the request goes out never run that function.
+		const token = form?.getAttribute( 'data-submit-token' ) ?? '';
+		const formId = Number( form?.getAttribute( 'form-id' ) ) || 0;
+
+		if ( ! url ) {
+			this.entries = [];
+			return;
+		}
+
+		const body = JSON.stringify( {
+			form_id: formId,
+			entries: this.entries,
+		} );
+
+		this.entries = [];
+
+		// Fire and forget. A logging failure must never affect the submission.
+		fetch( url, {
+			method: 'POST',
+			keepalive: true,
+			headers: {
+				'Content-Type': 'application/json',
+				'X-WP-Submit-Token': token || '',
+			},
+			body,
+		} ).catch( () => {} );
+	},
+};
+
 async function parseRestResponse( response ) {
 	let body = null;
 	try {
-		body = await response.json();
+		// Clone before reading: a Response body can only be consumed once, and on a
+		// parse failure the raw text is the whole diagnosis -- a WAF block page, a
+		// PHP fatal, or a stray warning printed ahead of the JSON. Without this the
+		// log says "submission failed", which the admin already knew.
+		const rawForLog = srfmLog.isOn() ? response.clone() : null;
+
+		try {
+			body = await response.json();
+		} catch ( parseError ) {
+			if ( rawForLog ) {
+				const text = await rawForLog.text().catch( () => '' );
+				srfmLog.add( {
+					type: 'response',
+					status: response.status,
+					message: `Response was not JSON: ${ parseError?.message ?? '' }`,
+					body: String( text ).slice( 0, 500 ),
+				} );
+			}
+			throw parseError;
+		}
 	} catch ( parseError ) {
 		if ( response.ok ) {
 			return null;
@@ -431,6 +524,8 @@ async function submitFormData( form ) {
 		}
 	} );
 
+	const startedAt = performance.now();
+
 	try {
 		const response = await fetch( submitFormUrl, {
 			method: 'POST',
@@ -439,10 +534,73 @@ async function submitFormData( form ) {
 				'X-WP-Submit-Token': submitToken,
 			},
 		} );
-		return await parseRestResponse( response );
+
+		// Read status here, before parseRestResponse consumes the body. Once it
+		// throws, the Response is gone and this is the only place the status,
+		// content type and round-trip time still exist.
+		const status = response.status;
+		const contentType = response.headers.get( 'content-type' ) ?? '';
+		const durationMs = Math.round( performance.now() - startedAt );
+
+		const parsed = await parseRestResponse( response );
+
+		if ( ! response.ok || parsed?.success === false ) {
+			// Which fields the server rejected, not just that something was
+			// rejected. Keys only, never values -- the log must not become a data
+			// export.
+			const rejected = Object.keys( parsed?.data?.field_errors ?? {} );
+
+			// What the endpoint actually said. Without this the entry reads
+			// "responded 200" and tells you nothing -- every server-side rejection
+			// returns 200 with success:false, so the status alone never explains a
+			// failure.
+			//
+			// log_message first: it is the detailed variant the server builds for
+			// exactly this purpose. `parsed.message` is checked because the
+			// entry-insert failure returns its message at the top level rather than
+			// inside `data`, unlike every other branch.
+			const reason =
+				parsed?.data?.log_message ??
+				parsed?.data?.message ??
+				parsed?.message ??
+				'';
+
+			// CAPTCHA rejections carry the provider's own codes, which is the
+			// difference between "verification failed" and a bad secret key,
+			// a duplicated token, or a domain mismatch.
+			const codes = parsed?.data?.api_response?.[ 'error-codes' ];
+			const codeText = Array.isArray( codes ) ? ` [${ codes.join( ', ' ) }]` : '';
+
+			const errorCode = parsed?.data?.code ? ` (${ parsed.data.code })` : '';
+
+			srfmLog.add( {
+				// A rejection naming specific fields is the server asking the
+				// visitor to correct something. Recorded, but never counted toward
+				// the "this form is broken" signal.
+				type: rejected.length ? 'blocked' : 'network',
+				status,
+				duration_ms: durationMs,
+				message: `Submission responded ${ status } (${ contentType })${ errorCode }: ${ reason }${ codeText }`,
+				field_keys: rejected.length
+					? rejected
+					: [ ...filteredFormData.keys() ],
+			} );
+		}
+
+		return parsed;
 	} catch ( e ) {
 		// Intentional: Log form submission errors to aid debugging in production.
 		console.error( e );
+
+		// "TypeError: Failed to fetch" with a short duration is itself the
+		// diagnosis: the request never reached PHP -- blocked, offline or CORS.
+		srfmLog.add( {
+			type: 'error',
+			duration_ms: Math.round( performance.now() - startedAt ),
+			message: `${ e?.name ?? 'Error' }: ${
+				typeof e?.message === 'string' ? e.message : ''
+			}${ e?.code ? ` (${ e.code })` : '' }`,
+		} );
 
 		/**
 		 * Surface the server's own message (e.g. an expired submission token, a
@@ -463,7 +621,7 @@ async function submitFormData( form ) {
 	}
 }
 
-async function afterSubmit( formStatus ) {
+async function afterSubmit( formStatus, form ) {
 	// Supplied by the server, already carrying the submission id and nonce.
 	// Assembling it here meant reimplementing two things WordPress already does:
 	// rest_url() knows whether the route is a path or a `?rest_route=` query arg,
@@ -475,11 +633,38 @@ async function afterSubmit( formStatus ) {
 		return;
 	}
 
+	const startedAt = performance.now();
+
 	try {
 		const response = await fetch( afterSubmitUrl, { method: 'GET' } );
+
+		const status = response.status;
+		const durationMs = Math.round( performance.now() - startedAt );
+
 		await parseRestResponse( response );
+
+		if ( ! response.ok ) {
+			srfmLog.add( {
+				type: 'network',
+				status,
+				duration_ms: durationMs,
+				message: `After-submission step responded ${ status }`,
+			} );
+			srfmLog.flush( form );
+		}
 	} catch ( error ) {
 		console.error( error );
+
+		// The submission itself succeeded, so nothing is shown to the visitor and
+		// this would otherwise be invisible outside the console.
+		srfmLog.add( {
+			type: 'error',
+			duration_ms: Math.round( performance.now() - startedAt ),
+			message: `After-submission step failed: ${
+				error?.name ?? 'Error'
+			}: ${ typeof error?.message === 'string' ? error.message : '' }`,
+		} );
+		srfmLog.flush( form );
 	}
 }
 
@@ -726,6 +911,21 @@ async function handleFormSubmission(
 		if ( isValidate?.validateResult || ! isCaptchaValid ) {
 			loader.classList.remove( 'srfm-active' );
 
+			// Logged here because this path returns before submitFormData ever
+			// runs, so nothing downstream can see it. This is the class of failure
+			// where a third-party script breaks a field's own validation -- the
+			// visitor is stopped and the server never hears about it.
+			srfmLog.add( {
+				type: 'blocked',
+				message: isValidate?.validateResult
+					? 'Blocked before submit: field validation failed.'
+					: 'Blocked before submit: captcha validation failed.',
+				field_keys: isValidate?.firstErrorInput?.name
+					? [ isValidate.firstErrorInput.name ]
+					: [],
+			} );
+			srfmLog.flush( form );
+
 			// Re-enable submit button after validation fails.
 			enableSubmitButton( form );
 
@@ -768,6 +968,17 @@ async function handleFormSubmission(
 		const paymentResult = await handleFormPayment( form );
 
 		if ( ! paymentResult?.valid ) {
+			// The payment leg runs on its own endpoint before the submission, so a
+			// failure here stops the submission without the submit route ever
+			// being called.
+			srfmLog.add( {
+				type: 'blocked',
+				message: `Blocked before submit: payment. ${
+					paymentResult?.message ?? ''
+				}`,
+			} );
+			srfmLog.flush( form );
+
 			showErrorMessage( { form, message: paymentResult?.message } );
 			// Remove loading.
 			loader.classList.remove( 'srfm-active' );
@@ -837,17 +1048,43 @@ async function handleFormSubmission(
 			}
 			// Moving afterSubmit action out of specific method so it should work for all submission mode
 			if ( formStatus?.data?.after_submit ) {
-				afterSubmit( formStatus );
+				afterSubmit( formStatus, form );
 			}
 		} else {
 			const errorData = formStatus?.data || {};
 			showErrorMessage( { form, ...errorData } );
 			loader.classList.remove( 'srfm-active' );
 
+			// Record the message the visitor actually saw, then ship everything
+			// buffered for this attempt.
+			srfmLog.add( {
+				type: 'blocked',
+				message: String(
+					errorData.log_message || errorData.message || ''
+				).slice( 0, 500 ),
+			} );
+			srfmLog.flush( form );
+
 			// Re-enable submit button after error.
 			enableSubmitButton( form );
 		}
 	} catch ( error ) {
+		// Anything thrown anywhere in the submission path lands here -- including a
+		// throw inside field or captcha validation, before the request is ever made.
+		// That is the case where a third-party script has broken a field's own
+		// validation code, which is invisible to every other capture point.
+		srfmLog.add( {
+			type: 'error',
+			message: `Submission aborted: ${ error?.name ?? 'Error' }: ${
+				typeof error?.message === 'string' ? error.message : ''
+			}`,
+			source: String( error?.stack ?? '' )
+				.split( '\n' )[ 1 ]
+				?.trim()
+				?.slice( 0, 200 ),
+		} );
+		srfmLog.flush( form );
+
 		// Create and dispatch a custom event
 		const event = new CustomEvent(
 			'srfm_on_trigger_form_submission_failure',

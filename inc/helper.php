@@ -2210,6 +2210,62 @@ class Helper {
 	}
 
 	/**
+	 * The active caching plugin, if there is one.
+	 *
+	 * Caching matters to SureForms because a cached page serves the same HTML to
+	 * everyone: the submission token is embedded at render time, and an
+	 * aggressively cached or JS-combining setup can serve a stale token or reorder
+	 * the scripts a form depends on. This is what surfaces that to the site owner
+	 * before it turns into "my form stopped working".
+	 *
+	 * Detection is by plugin path, mirroring is_any_smtp_plugin_active(), including
+	 * the multisite network-active merge.
+	 *
+	 * @since x.x.x
+	 * @return string Human-readable plugin name, or '' when none is active.
+	 */
+	public static function get_active_caching_plugin() {
+		$caching_plugins = [
+			'litespeed-cache/litespeed-cache.php'        => 'LiteSpeed Cache',
+			'wp-rocket/wp-rocket.php'                    => 'WP Rocket',
+			'w3-total-cache/w3-total-cache.php'          => 'W3 Total Cache',
+			'wp-super-cache/wp-cache.php'                => 'WP Super Cache',
+			'wp-fastest-cache/wpFastestCache.php'        => 'WP Fastest Cache',
+			'autoptimize/autoptimize.php'                => 'Autoptimize',
+			'sg-cachepress/sg-cachepress.php'            => 'SiteGround Optimizer',
+			'wp-optimize/wp-optimize.php'                => 'WP-Optimize',
+			'cache-enabler/cache-enabler.php'            => 'Cache Enabler',
+			'comet-cache/comet-cache.php'                => 'Comet Cache',
+			'hummingbird-performance/wp-hummingbird.php' => 'Hummingbird',
+			'breeze/breeze.php'                          => 'Breeze',
+			'nitropack/main.php'                         => 'NitroPack',
+			'swift-performance-lite/performance.php'     => 'Swift Performance Lite',
+			'wp-cloudflare-page-cache/wp-cloudflare-page-cache.php' => 'Super Page Cache',
+			'flying-press/flying-press.php'              => 'FlyingPress',
+			'redis-cache/redis-cache.php'                => 'Redis Object Cache',
+			'powered-cache/powered-cache.php'            => 'Powered Cache',
+			'docket-cache/docket-cache.php'              => 'Docket Cache',
+			'seraphinite-accelerator/plugin_root.php'    => 'Seraphinite Accelerator',
+		];
+
+		$active_plugins = (array) get_option( 'active_plugins', [] );
+
+		// For multisite, merge sitewide active plugins.
+		if ( is_multisite() ) {
+			$network_plugins = (array) get_site_option( 'active_sitewide_plugins', [] );
+			$active_plugins  = array_merge( $active_plugins, array_keys( $network_plugins ) );
+		}
+
+		foreach ( $caching_plugins as $path => $name ) {
+			if ( in_array( $path, $active_plugins, true ) ) {
+				return $name;
+			}
+		}
+
+		return '';
+	}
+
+	/**
 	 * Check if any of the top 10 popular WordPress SMTP plugins is active using array_intersect.
 	 *
 	 * @since 1.9.1

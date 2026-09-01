@@ -8,6 +8,7 @@
 
 namespace SRFM\Inc\Global_Settings;
 
+use SRFM\Inc\Client_Logger;
 use SRFM\Inc\Events_Scheduler;
 use SRFM\Inc\Helper;
 use SRFM\Inc\Payments\Payment_Helper;
@@ -152,11 +153,15 @@ class Global_Settings {
 		$srfm_form_analytics     = $setting_options['srfm_form_analytics'] ?? false;
 		$srfm_bsf_analytics      = $setting_options['srfm_bsf_analytics'] ?? false;
 		$srfm_admin_notification = isset( $setting_options['srfm_admin_notification'] ) ? (bool) $setting_options['srfm_admin_notification'] : true;
+		// Absent means on, matching Client_Logger::is_enabled(). A save that omits
+		// the key must not be read as the site opting out.
+		$srfm_enable_logs = isset( $setting_options['srfm_enable_logs'] ) ? (bool) $setting_options['srfm_enable_logs'] : true;
 
 		$settings = [
 			'srfm_ip_log'             => $srfm_ip_log,
 			'srfm_form_analytics'     => $srfm_form_analytics,
 			'srfm_admin_notification' => $srfm_admin_notification,
+			'srfm_enable_logs'        => $srfm_enable_logs,
 		];
 
 		/**
@@ -663,12 +668,21 @@ class Global_Settings {
 					'srfm_ip_log'             => false,
 					'srfm_form_analytics'     => false,
 					'srfm_admin_notification' => true,
+					'srfm_enable_logs'        => true,
 				];
 		}
 
 		if ( ! isset( $global_setting_options['srfm_general_settings_options']['srfm_admin_notification'] ) ) {
 				$global_setting_options['srfm_general_settings_options']['srfm_admin_notification'] = true;
 		}
+
+		// Back-fill for installs whose option predates the setting. Logging is on by
+		// default, so an absent key means on, not off.
+		if ( ! isset( $global_setting_options['srfm_general_settings_options']['srfm_enable_logs'] ) ) {
+				$global_setting_options['srfm_general_settings_options']['srfm_enable_logs'] = true;
+		}
+
+		$global_setting_options['srfm_log_file_size'] = Client_Logger::get_file_size();
 
 		/**
 		 * We have introduced toggle for analytics optin in the general settings.
