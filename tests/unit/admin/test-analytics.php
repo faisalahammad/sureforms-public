@@ -706,6 +706,88 @@ class Test_Analytics extends TestCase {
 		$this->assertSame( $mcp_count_before, $mcp_count_after, 'MCP events should not be duplicated on second instantiation.' );
 	}
 
+	// ─── plugin_activated referer race (shutdown deferral) ────────
+
+	/**
+	 * Test track_plugin_activated_event is deferred to 'shutdown' rather
+	 * than firing immediately when Analytics boots.
+	 *
+	 * @return void
+	 */
+	public function test_track_plugin_activated_event_defers_to_shutdown() {
+		delete_option( 'bsf_product_referers' );
+
+		new Analytics();
+
+		$this->assertFalse( Analytics::events()->is_tracked( 'plugin_activated' ), 'plugin_activated should not be tracked until shutdown fires.' );
+
+		do_action( 'shutdown' );
+
+		$this->assertTrue( Analytics::events()->is_tracked( 'plugin_activated' ), 'plugin_activated should be tracked once shutdown fires.' );
+	}
+
+	/**
+	 * Regression test: a referrer plugin/theme that writes bsf_product_referers
+	 * AFTER SureForms has already booted (but before the request ends) must
+	 * still be picked up as the source, because the read is deferred to
+	 * 'shutdown' rather than happening synchronously at boot.
+	 *
+	 * @return void
+	 */
+	public function test_track_plugin_activated_event_reads_referer_set_after_boot() {
+		delete_option( 'bsf_product_referers' );
+
+		// SureForms boots — e.g. mid-request, while another plugin is
+		// silently activating it via activate_plugin().
+		new Analytics();
+
+		// The referring plugin writes its stamp only now, after SureForms
+		// has already booted, but still within the same request.
+		update_option( 'bsf_product_referers', [ 'sureforms' => 'astra' ] );
+
+		// End of request.
+		do_action( 'shutdown' );
+
+		$pending = Helper::get_srfm_option( 'usage_events_pending', [] );
+		$event   = current(
+			array_filter(
+				$pending,
+				static function ( $e ) {
+					return 'plugin_activated' === $e['event_name'];
+				}
+			)
+		);
+
+		$this->assertNotFalse( $event, 'plugin_activated event should have been queued.' );
+		$this->assertSame( 'astra', $event['properties']['source'] );
+	}
+
+	/**
+	 * Test track_plugin_activated_event falls back to 'self' when no
+	 * referrer was ever recorded.
+	 *
+	 * @return void
+	 */
+	public function test_track_plugin_activated_event_defaults_to_self_when_no_referer() {
+		delete_option( 'bsf_product_referers' );
+
+		new Analytics();
+		do_action( 'shutdown' );
+
+		$pending = Helper::get_srfm_option( 'usage_events_pending', [] );
+		$event   = current(
+			array_filter(
+				$pending,
+				static function ( $e ) {
+					return 'plugin_activated' === $e['event_name'];
+				}
+			)
+		);
+
+		$this->assertNotFalse( $event, 'plugin_activated event should have been queued.' );
+		$this->assertSame( 'self', $event['properties']['source'] );
+	}
+
 	/**
 	 * Test track_first_form_published tracks event when a form transitions to publish.
 	 *

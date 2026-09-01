@@ -18,6 +18,15 @@ require_once __DIR__ . '/trait-astra-notices-helper.php';
  */
 class Test_Admin extends TestCase {
 
+    protected function tearDown(): void {
+        // Without this, an assertion failure anywhere in this class leaves $_GET and
+        // the current user set for every test that runs after it, turning one real
+        // failure into a wall of unrelated ones.
+        $_GET = [];
+        wp_set_current_user( 0 );
+        parent::tearDown();
+    }
+
     protected function setUp(): void {
         parent::setUp();
 
@@ -515,6 +524,184 @@ class Test_Admin extends TestCase {
 		$this->assertSame( $before + 1, $after, 'Usage tracking must increment the ai_dashboard_widget_uses counter.' );
 	}
 
+	/**
+	 * The attribution marker must be handed to core's removable-query-args list.
+	 *
+	 * wp_admin_canonical_url() strips those from the address bar on admin_head, which
+	 * runs after load-post.php — so the marker is already counted by the time it is
+	 * removed. Without it the arg lingers in the URL, in bookmarks, and in the Referer
+	 * sent to every subresource the editor loads, and a refresh re-requests it.
+	 *
+	 * The non-array branch is covered because this is a public filter callback: any
+	 * plugin can hand it something else, and returning a bare value there would break
+	 * every other consumer on the filter.
+	 */
+	public function test_add_removable_query_args() {
+		$admin = Admin::get_instance();
+		$arg   = \SRFM\Inc\Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG;
+
+		$result = $admin->add_removable_query_args( [ 'message', 'settings-updated' ] );
+		$this->assertContains( $arg, $result, 'The marker should be appended to the removable list.' );
+		$this->assertContains( 'message', $result, 'Existing removable args must be preserved.' );
+		$this->assertContains( 'settings-updated', $result, 'Existing removable args must be preserved.' );
+
+		// A filter that hands us a non-array must still yield a usable list.
+		$this->assertSame( [ $arg ], $admin->add_removable_query_args( 'not-an-array' ) );
+
+		// And the callback is actually wired to the filter.
+		$this->assertContains( $arg, apply_filters( 'removable_query_args', [] ), 'The filter should carry the marker.' );
+	}
+
+	/**
+	 * The front-end "Edit Form" pill is attributed by a marker query arg rather
+	 * than a click handler, so the counter must only move when the editor is
+	 * genuinely opened from that pill, by someone allowed to edit that form.
+	 *
+	 * Every rejection path is asserted, because each one is a way the counter could
+	 * be moved by a crafted URL: no marker, a marker with the wrong value, an empty
+	 * marker, a non-scalar marker, a marker pointed at a post that is not a SureForms
+	 * form, a deleted post, and a user without the capability. The repeat visit is
+	 * asserted too, since the dedup window is what makes this a click count rather
+	 * than a page-load count. The counter is read back from the stored option, so a
+	 * guard that silently stops incrementing also fails here.
+	 */
+	public function test_maybe_track_edit_form_button_click() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+
+		$admin = Admin::get_instance();
+		$arg   = \SRFM\Inc\Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG;
+
+		$form_id = wp_insert_post(
+			[
+				'post_title'  => 'Pill Analytics Form',
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_status' => 'publish',
+			]
+		);
+		$page_id = wp_insert_post(
+			[
+				'post_title'  => 'Not A Form',
+				'post_type'   => 'post',
+				'post_status' => 'publish',
+			]
+		);
+
+		$administrator = wp_insert_user(
+			[
+				'user_login' => 'srfm_pill_admin_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_pill_admin_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		$subscriber    = wp_insert_user(
+			[
+				'user_login' => 'srfm_pill_sub_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_pill_sub_' . wp_rand() . '@example.com',
+				'role'       => 'subscriber',
+			]
+		);
+
+		$count = static function () {
+			return Helper::get_integer_value( Helper::get_srfm_option( 'edit_form_button_clicks', 0 ) );
+		};
+
+		Helper::update_srfm_option( 'edit_form_button_clicks', 0 );
+		wp_set_current_user( is_wp_error( $administrator ) ? 0 : (int) $administrator );
+
+		// No marker at all — an ordinary editor visit must not be counted.
+		$_GET = [ 'post' => $form_id ];
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 0, $count(), 'An editor visit without the marker must not be counted.' );
+
+		// Marker present but not the value we emit.
+		$_GET = [ 'post' => $form_id, $arg => 'somewhere-else' ];
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 0, $count(), 'An unrecognised marker value must not be counted.' );
+
+		// Marker reused against a post that is not a SureForms form.
+		$_GET = [ 'post' => $page_id, $arg => 'embed' ];
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 0, $count(), 'A non-form post must not be counted.' );
+
+		// Marker with no post at all.
+		$_GET = [ $arg => 'embed' ];
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 0, $count(), 'A missing post ID must not be counted.' );
+
+		// The real path: administrator opening this form from the pill.
+		$_GET = [ 'post' => $form_id, $arg => 'embed' ];
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 1, $count(), 'A genuine pill click should be counted.' );
+
+		// Deduped: the same editor reopening the same form inside the window does not
+		// count again. Without this the metric would measure editor loads carrying the
+		// marker — a refresh or a back-navigation re-counts — rather than pill clicks.
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 1, $count(), 'A repeat visit inside the window must not count again.' );
+
+		// The counter is still cumulative across distinct forms.
+		$other_form = wp_insert_post(
+			[
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_title'  => 'Second pill form',
+				'post_status' => 'publish',
+			]
+		);
+		$_GET       = [ 'post' => $other_form, $arg => 'embed' ];
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 2, $count(), 'A different form is a separate count.' );
+
+		// A user who cannot edit the form gets nothing, marker or not.
+		$_GET = [ 'post' => $form_id, $arg => 'embed' ];
+		wp_set_current_user( is_wp_error( $subscriber ) ? 0 : (int) $subscriber );
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 2, $count(), 'A user without edit_post must not be counted.' );
+
+		// Rejection paths that previously went unasserted.
+		wp_set_current_user( is_wp_error( $administrator ) ? 0 : (int) $administrator );
+
+		$_GET = [ 'post' => $form_id, $arg => '' ];
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 2, $count(), 'An empty marker must not be counted.' );
+
+		// Wrong type. isset() is satisfied, so this reaches sanitize_key() unless the
+		// handler rejects non-strings first — on older supported WordPress versions
+		// that is a fatal rather than a no-op.
+		$_GET = [ 'post' => $form_id, $arg => [ 'embed' ] ];
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 2, $count(), 'A non-scalar marker must no-op, not fatal.' );
+
+		$deleted = wp_insert_post(
+			[
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_title'  => 'Deleted pill form',
+				'post_status' => 'publish',
+			]
+		);
+		wp_delete_post( $deleted, true );
+		$_GET = [ 'post' => $deleted, $arg => 'embed' ];
+		$admin->maybe_track_edit_form_button_click();
+		$this->assertSame( 2, $count(), 'A deleted form must not be counted.' );
+
+		wp_delete_post( $other_form, true );
+
+		$_GET = [];
+		wp_set_current_user( 0 );
+		Helper::update_srfm_option( 'edit_form_button_clicks', 0 );
+		wp_delete_post( $form_id, true );
+		wp_delete_post( $page_id, true );
+		if ( ! is_wp_error( $administrator ) ) {
+			wp_delete_user( (int) $administrator );
+		}
+		if ( ! is_wp_error( $subscriber ) ) {
+			wp_delete_user( (int) $subscriber );
+		}
+	}
+
 	// ---------------------------------------------------------------
 	// Missing entries table — notice and repair
 	// ---------------------------------------------------------------
@@ -974,6 +1161,55 @@ class Test_Rating_Notice extends TestCase {
 			$after_count,
 			'No notice should be registered when srfm_show_rating_notice filter returns false'
 		);
+	}
+
+	/**
+	 * The shared notice builder escapes its text at the sink, so the call sites must
+	 * pass plain __() strings. Passing esc_html__() would escape twice and render a
+	 * literal `&amp;#039;` for every apostrophe. Guards that regression on a message
+	 * that actually contains one ("let's").
+	 */
+	public function test_rating_notice_text_is_escaped_exactly_once() {
+		if ( ! class_exists( '\\Astra_Notices' ) ) {
+			$this->markTestSkipped( 'Astra_Notices not available.' );
+		}
+
+		$admin_user = wp_insert_user(
+			[
+				'user_login' => 'srfm_rating_esc_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_rating_esc_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $admin_user ) ? 0 : (int) $admin_user );
+
+		$prop = new \ReflectionProperty( \Astra_Notices::class, 'notices' );
+		$prop->setAccessible( true );
+		$original = $prop->getValue();
+		$prop->setValue( null, [] );
+
+		try {
+			Admin::get_instance()->display_srfm_rating_notice();
+
+			$notices = $prop->getValue();
+			$this->assertNotEmpty( $notices, 'The rating notice should be registered for an admin.' );
+
+			$message = '';
+			foreach ( (array) $notices as $notice ) {
+				if ( isset( $notice['message'] ) && is_string( $notice['message'] ) ) {
+					$message .= $notice['message'];
+				}
+			}
+
+			$this->assertStringNotContainsString( '&amp;#039;', $message, 'Notice text must not be double-escaped.' );
+			$this->assertStringContainsString( '&#039;', $message, 'The apostrophe should be escaped exactly once at the sink.' );
+		} finally {
+			$prop->setValue( null, $original );
+			if ( ! is_wp_error( $admin_user ) ) {
+				wp_delete_user( (int) $admin_user );
+			}
+		}
 	}
 }
 
@@ -1880,16 +2116,193 @@ class Test_Thankyou_Prompt_Notice extends TestCase {
 	}
 
 	/**
-	 * The Thank You notice styling prints the brand accent colour (#3030).
+	 * The extracted predicate is the single source of truth for "should the prompt show".
+	 *
+	 * Both the renderer and the two suppressing notices read it, so each guard it owns
+	 * is asserted here rather than only through the notices that consume it: the
+	 * dashboard screen is excluded, a dismissal short-circuits before the query, and
+	 * the disabling filter wins over everything.
 	 */
-	public function test_print_thankyou_notice_styles() {
+	public function test_get_displayable_thankyou_prompt() {
+		$admin = Admin::get_instance();
+
+		if ( ! class_exists( '\Astra_Notices' ) || ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'Astra_Notices / CPT not available.' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$admin_user = wp_insert_user(
+			[
+				'user_login' => 'srfm_ty_pred_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_ty_pred_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		$user_id = is_wp_error( $admin_user ) ? 0 : (int) $admin_user;
+		wp_set_current_user( $user_id );
+		set_current_screen( 'plugins' );
+		delete_user_meta( $user_id, Admin::THANKYOU_PROMPT_NOTICE_ID );
+
+		try {
+			// No qualifying form yet.
+			Admin::reset_thankyou_prompt_cache();
+			$this->assertNull( $admin->get_displayable_thankyou_prompt(), 'No qualifying form means no prompt.' );
+
+			$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Predicate TY' ] );
+			update_post_meta( $form_id, Admin::ASTRA_SITES_IMPORT_META, 1 );
+			delete_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT );
+			update_post_meta(
+				$form_id,
+				'_srfm_form_confirmation',
+				[ [ 'confirmation_type' => 'same page', 'message' => \SRFM\Inc\Global_Settings\Global_Settings::get_default_confirmation_message() ] ]
+			);
+
+			Admin::reset_thankyou_prompt_cache();
+			$form = $admin->get_displayable_thankyou_prompt();
+			$this->assertIsArray( $form, 'A qualifying import should produce a prompt payload.' );
+			$this->assertSame( $form_id, (int) $form['id'], 'The payload should describe the qualifying form.' );
+
+			// The main dashboard is excluded — the prompt would compete with core's
+			// own welcome panel there.
+			set_current_screen( 'dashboard' );
+			Admin::reset_thankyou_prompt_cache();
+			$this->assertNull( $admin->get_displayable_thankyou_prompt(), 'The dashboard screen must be excluded.' );
+			set_current_screen( 'plugins' );
+
+			// A dismissal short-circuits before the query runs.
+			update_user_meta( $user_id, Admin::THANKYOU_PROMPT_NOTICE_ID, 'notice-dismissed' );
+			Admin::reset_thankyou_prompt_cache();
+			$this->assertNull( $admin->get_displayable_thankyou_prompt(), 'A dismissed prompt must stay dismissed.' );
+			delete_user_meta( $user_id, Admin::THANKYOU_PROMPT_NOTICE_ID );
+
+			// The disabling filter wins over a qualifying form.
+			add_filter( 'srfm_show_thankyou_prompt', '__return_false' );
+			Admin::reset_thankyou_prompt_cache();
+			$this->assertNull( $admin->get_displayable_thankyou_prompt(), 'The filter must be able to turn it off.' );
+			remove_all_filters( 'srfm_show_thankyou_prompt' );
+
+			wp_delete_post( $form_id, true );
+		} finally {
+			remove_all_filters( 'srfm_show_thankyou_prompt' );
+			Admin::reset_thankyou_prompt_cache();
+			wp_set_current_user( 0 );
+			if ( ! is_wp_error( $admin_user ) ) {
+				wp_delete_user( (int) $admin_user );
+			}
+		}
+	}
+
+	/**
+	 * Only one SureForms notice may be on screen at a time.
+	 *
+	 * The Getting Started nudge and the "Finish setting up" prompt were registered
+	 * independently, so a user with a freshly imported starter template saw both
+	 * stacked. They compete for the same next action, and the specific one wins:
+	 * "finish this form" is a concrete step, "explore the dashboard" is a tour.
+	 *
+	 * Asserted through the registered-notice list rather than rendered HTML, because
+	 * suppression happens via `show_if` at registration time.
+	 */
+	public function test_getting_started_notice_yields_to_thankyou_prompt() {
+		$admin = Admin::get_instance();
+
+		if ( ! class_exists( '\Astra_Notices' ) || ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'Astra_Notices / CPT not available.' );
+		}
+		remove_all_actions( 'wp_insert_post_data' );
+
+		$prop = new \ReflectionProperty( \Astra_Notices::class, 'notices' );
+		$prop->setAccessible( true );
+		$original = $prop->getValue();
+
+		$admin_user = wp_insert_user(
+			[
+				'user_login' => 'srfm_notice_clash_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_notice_clash_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $admin_user ) ? 0 : (int) $admin_user );
+		set_current_screen( 'plugins' );
+		delete_user_meta( is_wp_error( $admin_user ) ? 0 : (int) $admin_user, Admin::THANKYOU_PROMPT_NOTICE_ID );
+
+		try {
+			// No qualifying form: the Getting Started notice is free to register.
+			Admin::reset_thankyou_prompt_cache();
+			$prop->setValue( null, [] );
+			$admin->display_srfm_getting_started_notice();
+			$this->assertTrue(
+				$this->notice_will_show( $prop->getValue(), 'srfm-getting-started-notice' ),
+				'With no prompt to show, the Getting Started notice should display.'
+			);
+
+			// A qualifying starter-template import now exists.
+			$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Clash TY' ] );
+			update_post_meta( $form_id, Admin::ASTRA_SITES_IMPORT_META, 1 );
+			delete_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT );
+			update_post_meta(
+				$form_id,
+				'_srfm_form_confirmation',
+				[ [ 'confirmation_type' => 'same page', 'message' => \SRFM\Inc\Global_Settings\Global_Settings::get_default_confirmation_message() ] ]
+			);
+
+			Admin::reset_thankyou_prompt_cache();
+			$this->assertNotNull( $admin->get_displayable_thankyou_prompt(), 'Sanity: the prompt should now be displayable.' );
+
+			$prop->setValue( null, [] );
+			$admin->display_srfm_getting_started_notice();
+			$this->assertFalse(
+				$this->notice_will_show( $prop->getValue(), 'srfm-getting-started-notice' ),
+				'The Getting Started notice must stand down while the prompt is showing.'
+			);
+
+			wp_delete_post( $form_id, true );
+		} finally {
+			$prop->setValue( null, is_array( $original ) ? $original : [] );
+			Admin::reset_thankyou_prompt_cache();
+			wp_set_current_user( 0 );
+			if ( ! is_wp_error( $admin_user ) ) {
+				wp_delete_user( (int) $admin_user );
+			}
+		}
+	}
+
+	/**
+	 * Whether a registered notice would actually display.
+	 *
+	 * Registration alone is not display: the library evaluates `show_if` at render.
+	 *
+	 * @param mixed  $notices Registered notices.
+	 * @param string $id      Notice id to look for.
+	 * @return bool
+	 */
+	private function notice_will_show( $notices, $id ) {
+		foreach ( (array) $notices as $notice ) {
+			if ( ! is_array( $notice ) || ( $notice['id'] ?? '' ) !== $id ) {
+				continue;
+			}
+
+			return ! isset( $notice['show_if'] ) || true === $notice['show_if'];
+		}
+
+		return false;
+	}
+
+	/**
+	 * The shared notice stylesheet prints the brand accent colour (#3030).
+	 */
+	public function test_print_srfm_notice_styles() {
 		$admin = Admin::get_instance();
 
 		ob_start();
-		$admin->print_thankyou_notice_styles();
+		$admin->print_srfm_notice_styles();
 		$output = (string) ob_get_clean();
 
-		$this->assertStringContainsString( 'srfm-thankyou-notice', $output );
+		// Scoped to the shared class, so every SureForms notice is painted by one
+		// stylesheet rather than each growing its own copy.
+		$this->assertStringContainsString( '.srfm-notice', $output );
 		$this->assertStringContainsString( '#D54407', $output );
 		// The SureForms mark is a data-URI background; assert the URI itself so a
 		// dropped esc_url() protocol allowlist (which blanks it) is caught.
@@ -1936,4 +2349,5 @@ class Test_Thankyou_Prompt_Notice extends TestCase {
 		wp_dequeue_script( 'srfm-thankyou-notice-track' );
 		wp_deregister_script( 'srfm-thankyou-notice-track' );
 	}
+
 }
