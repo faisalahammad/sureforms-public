@@ -267,6 +267,17 @@ function srfmSendViewBeacon( formId, viewToken ) {
 
 	srfmCountedFormIds.add( formId );
 
+	// Forward the previewed page's own live_mode so the server can exclude form-
+	// builder / Instant Form live previews. should_track() runs on this separate
+	// beacon request and cannot see the original page's query string, so the signal
+	// has to travel on the beacon itself. A visitor spoofing this only under-counts
+	// their own view, so it needs no stronger guard.
+	const srfmLivePreview = new URLSearchParams( window.location.search ).has(
+		'live_mode'
+	)
+		? '1'
+		: '0';
+
 	// Plain fetch(), not wp.apiFetch(): `srfm-form-submit` does not declare
 	// `wp-api-fetch` as a dependency, so `window.wp.apiFetch` is undefined and calling
 	// it throws a synchronous TypeError that no `.catch()` can intercept. The endpoint
@@ -283,7 +294,7 @@ function srfmSendViewBeacon( formId, viewToken ) {
 			'Content-Type': 'application/json',
 			'X-WP-Submit-Token': viewToken,
 		},
-		body: JSON.stringify( { form_id: formId } ),
+		body: JSON.stringify( { form_id: formId, live_preview: srfmLivePreview } ),
 	} ).catch( () => {
 		// Beacon is best-effort; never disrupt the page on failure.
 	} );

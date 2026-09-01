@@ -233,7 +233,7 @@ class Form_Views {
 		}
 
 		// Exclude previews and logged-in privileged users (author/editor/admin).
-		if ( ! $this->should_track() ) {
+		if ( ! $this->should_track( $request ) ) {
 			return new WP_REST_Response( [ 'counted' => false ], 200 );
 		}
 
@@ -369,10 +369,11 @@ class Form_Views {
 	 *   them, so switching back on reveals the period rather than a gap, and the
 	 *   stored counts always cover exactly the period the stamp claims.
 	 *
-	 * @since x.x.x
+	 * @param WP_REST_Request<array<string,mixed>>|null $request The beacon request, when called from track_view().
+	 * @since 2.12.6
 	 * @return bool
 	 */
-	private function should_track() {
+	private function should_track( ?WP_REST_Request $request = null ) {
 		if ( $this->get_tracking_started_at() <= 0 ) {
 			return false;
 		}
@@ -389,8 +390,16 @@ class Form_Views {
 			return false;
 		}
 
-		if ( ! empty( Helper::get_instant_form_live_data() ) ) {
-			return false;
+		// Live previews cannot be detected from $_GET here: should_track() runs on the
+		// separate beacon POST, whose request carries none of the previewed page's
+		// query string. The client derives the signal from the previewed page's own
+		// live_mode and forwards it on the beacon, so read it off this request. Absent
+		// or '0' means a normal front-end view.
+		if ( $request instanceof WP_REST_Request ) {
+			$live_preview = Helper::get_string_value( $request->get_param( 'live_preview' ) );
+			if ( '' !== $live_preview && '0' !== $live_preview ) {
+				return false;
+			}
 		}
 
 		return true;
@@ -536,13 +545,35 @@ class Form_Views {
 		// then keep spending it: every rejected request still incremented it, so from
 		// request 201 onward every genuine visitor was refused for the rest of the
 		// window, and each refusal still cost two wp_options writes.
-		if ( self::hit_counter( $bucket . '_' . $form_id ) > self::RATE_LIMIT_MAX ) {
+		/**
+		 * Filters the per-network counted-view ceiling (per form, per minute).
+		 *
+		 * A high-traffic form behind a single NAT or CDN edge can organically exceed
+		 * the default; raise it only when the extra writes are acceptable.
+		 *
+		 * @since 2.12.6
+		 * @param int $max The default ceiling.
+		 */
+		$network_max = Helper::get_integer_value( apply_filters( 'srfm_form_views_rate_limit_max', self::RATE_LIMIT_MAX ) );
+
+		if ( self::hit_counter( $bucket . '_' . $form_id ) > $network_max ) {
 			return true;
 		}
 
+		/**
+		 * Filters the per-form counted-view ceiling (summed across visitors, per minute).
+		 *
+		 * A genuinely popular landing-page form can organically pass the default and
+		 * silently drop real views past it; raise it for such forms.
+		 *
+		 * @since 2.12.6
+		 * @param int $max The default ceiling.
+		 */
+		$form_max = Helper::get_integer_value( apply_filters( 'srfm_form_views_rate_limit_form_max', self::RATE_LIMIT_FORM_MAX ) );
+
 		// The per-form ceiling still bounds a distributed flood, where rotating
 		// networks defeats the per-network counter above.
-		return self::hit_counter( 'form_' . $form_id ) > self::RATE_LIMIT_FORM_MAX;
+		return self::hit_counter( 'form_' . $form_id ) > $form_max;
 	}
 
 	/**
@@ -607,15 +638,41 @@ class Form_Views {
 			return Helper::get_integer_value( $count );
 		}
 
-		$transient_key = 'srfm_view_' . md5( $key );
-		$count         = Helper::get_integer_value( get_transient( $transient_key ) ) + 1;
+		global $wpdb;
 
-		// Only extend the window when opening it, so a steady stream just under the
-		// limit cannot hold a bucket open indefinitely by refreshing its own TTL.
-		if ( 1 === $count ) {
-			set_transient( $transient_key, $count, MINUTE_IN_SECONDS );
-		} else {
-			set_transient( $transient_key, $count, self::remaining_window( $transient_key ) );
+		$transient_key = 'srfm_view_' . md5( $key );
+
+		// The get-then-set below is not atomic on its own, so a burst of concurrent
+		// beacons could each read the same pre-increment value and all admit, lifting
+		// the ceiling this limiter exists to enforce. Serialize the critical section on
+		// a MySQL advisory lock. timeout 0 so a lone visitor never waits.
+		$lock   = substr( 'srfm_view_' . md5( $key ), 0, 64 );
+		$locked = $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, 0)', $lock ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Advisory lock; nothing to cache.
+
+		// '0' means another request holds the lock right now — active contention, i.e.
+		// the burst this guards against — so deny, the safe direction for a limiter.
+		// NULL/anything else means the host does not support GET_LOCK; fall through to
+		// the best-effort non-atomic path rather than deny every view on such a host.
+		if ( '0' === (string) $locked ) {
+			return self::RATE_LIMIT_FORM_MAX + 1;
+		}
+
+		$got_lock = '1' === (string) $locked;
+
+		try {
+			$count = Helper::get_integer_value( get_transient( $transient_key ) ) + 1;
+
+			// Only extend the window when opening it, so a steady stream just under the
+			// limit cannot hold a bucket open indefinitely by refreshing its own TTL.
+			if ( 1 === $count ) {
+				set_transient( $transient_key, $count, MINUTE_IN_SECONDS );
+			} else {
+				set_transient( $transient_key, $count, self::remaining_window( $transient_key ) );
+			}
+		} finally {
+			if ( $got_lock ) {
+				$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock ) ); // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Releasing the advisory lock; nothing to cache.
+			}
 		}
 
 		return $count;

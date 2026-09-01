@@ -214,6 +214,12 @@ class Forms_Data {
 				$response_data = $this->get_forms_sorted_by_metric( $args, $orderby, $order, $page, Helper::get_integer_value( $per_page ) );
 			}
 
+			// True only when the metric sort actually ran. It returns null and falls back
+			// to date order when the feature is off or the site is past the sort ceiling;
+			// the table needs to know so it does not leave an active sort arrow on a
+			// column whose order was silently ignored.
+			$metric_sort_applied = $is_metric_sort && null !== $response_data;
+
 			if ( null === $response_data ) {
 				if ( $is_metric_sort ) {
 					// WP_Query would silently discard 'views'/'conversion_rate' and fall
@@ -252,6 +258,10 @@ class Forms_Data {
 		// snapshot: toggle the setting in another tab and the open list would keep
 		// rendering columns while every row came back empty, which reads as data loss.
 		$response_data['views_enabled'] = Form_Views::get_instance()->is_tracking_enabled();
+
+		// Lets the table reset a stale metric sort arrow when the order silently fell
+		// back to date (feature off, or past the metric-sort ceiling).
+		$response_data['metric_sort_applied'] = $metric_sort_applied;
 
 		return new WP_REST_Response( $response_data, 200 );
 	}

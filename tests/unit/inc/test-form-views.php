@@ -89,6 +89,41 @@ class Test_Form_Views extends TestCase {
 		$this->assertTrue( $this->call_private_method( $this->views, 'should_track' ) );
 	}
 
+	/**
+	 * The live-preview exclusion must work for a session WITHOUT edit_posts — a
+	 * shared preview link or a lower-privileged collaborator — which the capability
+	 * check does not catch. The signal travels on the beacon request itself, because
+	 * should_track() runs on that separate POST and cannot see the previewed page's
+	 * $_GET. Regression guard for the previously dead exclusion.
+	 */
+	public function test_should_track_excludes_live_preview_beacon_for_anonymous_session() {
+		wp_set_current_user( 0 );
+
+		$request = new \WP_REST_Request( 'POST', '/sureforms/v1/forms/track-view' );
+		$request->set_param( 'live_preview', '1' );
+
+		$this->assertFalse(
+			$this->call_private_method( $this->views, 'should_track', [ $request ] ),
+			'A beacon carrying the live-preview signal must not be counted, even with no privileged user.'
+		);
+	}
+
+	/**
+	 * A normal front-end beacon (no live_mode on the previewed page, so live_preview
+	 * arrives as '0') is still counted.
+	 */
+	public function test_should_track_counts_normal_beacon_without_live_preview() {
+		wp_set_current_user( 0 );
+
+		$request = new \WP_REST_Request( 'POST', '/sureforms/v1/forms/track-view' );
+		$request->set_param( 'live_preview', '0' );
+
+		$this->assertTrue(
+			$this->call_private_method( $this->views, 'should_track', [ $request ] ),
+			'A normal front-end beacon must still be counted.'
+		);
+	}
+
 	public function test_should_track_excludes_privileged_user() {
 		$editor = wp_insert_user(
 			[
