@@ -2840,6 +2840,13 @@ JS;
 		$event_name = $valid[ $notice_id ][ $button ];
 		Analytics::events()->track( $event_name, $button );
 
+		// Reporting the failures retires the notice until something new fails.
+		// Handled here rather than in the browser so it holds for the classic
+		// wp-admin notice too, which is a plain link with no JavaScript.
+		if ( 'form_submission_error' === $notice_id && 'contact_support' === $button ) {
+			Client_Logger::acknowledge_failures();
+		}
+
 		wp_send_json_success();
 	}
 

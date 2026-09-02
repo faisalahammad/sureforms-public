@@ -24,6 +24,8 @@ class Test_Client_Logger extends TestCase {
 		$this->set_logging( true );
 		Client_Logger::clear();
 		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+		delete_option( Client_Logger::LAST_FAULT_OPTION );
+		delete_option( Client_Logger::ACKNOWLEDGED_OPTION );
 	}
 
 	protected function tearDown(): void {
@@ -464,6 +466,89 @@ class Test_Client_Logger extends TestCase {
 
 		$this->assertSame( 0, Client_Logger::get_fault_streak() );
 		$this->assertFalse( Client_Logger::has_persistent_failures() );
+	}
+
+	/**
+	 * Reporting the failures retires the notice, and a fault the site owner has
+	 * not reported brings it straight back.
+	 */
+	public function test_acknowledge_failures() {
+		for ( $i = 0; $i < Client_Logger::FAULT_THRESHOLD; $i++ ) {
+			Client_Logger::append( [ 'type' => 'error', 'message' => 'TypeError: Failed to fetch' ] );
+		}
+
+		$this->assertTrue( Client_Logger::has_persistent_failures() );
+
+		Client_Logger::acknowledge_failures();
+
+		$this->assertFalse( Client_Logger::has_persistent_failures(), 'Reported failures must go quiet.' );
+		$this->assertFalse( Client_Logger::has_persistent_failures(), 'And stay quiet with nothing new.' );
+
+		Client_Logger::append( [ 'type' => 'response', 'status' => 500, 'body' => 'a new fatal' ] );
+
+		$this->assertTrue( Client_Logger::has_persistent_failures(), 'An unreported fault must bring it back.' );
+	}
+
+	/**
+	 * Decided on the fault counter, not the clock.
+	 *
+	 * Both the acknowledgement and the fault are written to the second, so a fault
+	 * landing in the same second as the click would compare as not-newer and stay
+	 * hidden -- suppressing a failure nobody has reported. The counter is
+	 * monotonic, so the comparison is exact regardless of timing.
+	 */
+	public function test_acknowledge_failures_is_not_decided_by_the_clock() {
+		for ( $i = 0; $i < Client_Logger::FAULT_THRESHOLD; $i++ ) {
+			Client_Logger::append( [ 'type' => 'error', 'message' => 'failure' ] );
+		}
+
+		Client_Logger::acknowledge_failures();
+		$acknowledged = Client_Logger::get_acknowledgement();
+
+		// Same-second: a timestamp comparison cannot separate these two.
+		Client_Logger::append( [ 'type' => 'error', 'message' => 'same second failure' ] );
+
+		$this->assertSame(
+			$acknowledged['at'],
+			Client_Logger::get_acknowledgement()['at'],
+			'Fixture must exercise the same-second case.'
+		);
+		$this->assertTrue(
+			Client_Logger::has_persistent_failures(),
+			'A fault in the same second as the acknowledgement must still show.'
+		);
+	}
+
+	/**
+	 * The stored record carries the timestamp as well as the count -- the count
+	 * decides, but the timestamp is what tells support when it was reported.
+	 */
+	public function test_get_acknowledgement() {
+		$this->assertSame( [], Client_Logger::get_acknowledgement() );
+
+		Client_Logger::append( [ 'type' => 'error', 'message' => 'failure' ] );
+		Client_Logger::acknowledge_failures();
+
+		$stored = Client_Logger::get_acknowledgement();
+
+		$this->assertArrayHasKey( 'at', $stored );
+		$this->assertArrayHasKey( 'streak', $stored );
+		$this->assertGreaterThan( 0, $stored['at'] );
+	}
+
+	/**
+	 * A working form clears the acknowledgement with the streak, so the next run
+	 * of failures is judged on its own rather than against a stale report.
+	 */
+	public function test_reset_fault_streak_clears_the_acknowledgement() {
+		Client_Logger::append( [ 'type' => 'error', 'message' => 'failure' ] );
+		Client_Logger::acknowledge_failures();
+
+		$this->assertNotSame( [], Client_Logger::get_acknowledgement() );
+
+		Client_Logger::reset_fault_streak();
+
+		$this->assertSame( [], Client_Logger::get_acknowledgement() );
 	}
 
 	/**
