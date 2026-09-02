@@ -469,6 +469,25 @@ class Test_Client_Logger extends TestCase {
 	}
 
 	/**
+	 * When the newest fault happened. Not what the notice decides on -- the fault
+	 * counter is, because both are written to the second -- but it is what tells
+	 * support how recent the trouble is, so it has to actually advance.
+	 */
+	public function test_get_last_fault_time() {
+		$this->assertSame( 0, Client_Logger::get_last_fault_time() );
+
+		Client_Logger::append( [ 'type' => 'error', 'message' => 'failure' ] );
+
+		$this->assertGreaterThan( 0, Client_Logger::get_last_fault_time() );
+
+		// A visitor-correctable stop is not a fault and must not move it.
+		$before = Client_Logger::get_last_fault_time();
+		Client_Logger::append( [ 'type' => 'blocked', 'message' => 'field validation failed' ] );
+
+		$this->assertSame( $before, Client_Logger::get_last_fault_time() );
+	}
+
+	/**
 	 * Reporting the failures retires the notice, and a fault the site owner has
 	 * not reported brings it straight back.
 	 */
