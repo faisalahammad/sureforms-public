@@ -1157,4 +1157,46 @@ class Test_Form_Submit extends TestCase {
 
 	}
 
+
+	/**
+	 * The bridge for pro's integrations.
+	 *
+	 * Pro writes webhook and native-integration outcomes to the entry's own log,
+	 * which nobody reads until a ticket is already open. This records the failure
+	 * against its own category so it surfaces on the dashboard instead, naming the
+	 * form it happened on.
+	 */
+	public function test_record_integration_failure() {
+		$this->set_client_logging( true );
+		Client_Logger::clear();
+		delete_option( Client_Logger::FAILURES_OPTION );
+
+		$form_id = wp_insert_post(
+			[
+				'post_type'   => 'sureforms_form',
+				'post_title'  => 'Integration Test Form',
+				'post_status' => 'publish',
+			]
+		);
+
+		// Through the action, so the wiring is covered and not just the method.
+		do_action( 'srfm_integration_failed', $form_id, 'Webhook returned 500.' );
+
+		$open = Client_Logger::get_open_failures();
+
+		$this->assertArrayHasKey( 'integration', $open );
+		$this->assertSame( 'Integration Test Form', $open['integration']['form_title'] );
+		$this->assertArrayNotHasKey( 'submission', $open, 'An integration failure is not a submission failure.' );
+
+		$path  = Client_Logger::get_log_path( false );
+		$lines = file_exists( $path ) ? (string) file_get_contents( $path ) : '';
+
+		$this->assertStringContainsString( 'Integration failed. Webhook returned 500.', $lines );
+
+		wp_delete_post( $form_id, true );
+		Client_Logger::clear();
+		delete_option( Client_Logger::FAILURES_OPTION );
+		$this->set_client_logging( false );
+	}
+
 }
