@@ -54,6 +54,33 @@ class Client_Logger {
 	public const FAULT_STREAK_OPTION = 'srfm_client_log_fault_streak';
 
 	/**
+	 * Option holding the Unix timestamp of the most recent fault.
+	 *
+	 * Compared against ACKNOWLEDGED_OPTION so the notice can stay hidden after the
+	 * site owner has contacted support, and come back the moment something fails
+	 * that they have not already reported.
+	 *
+	 * @since 2.12.6
+	 */
+	public const LAST_FAULT_OPTION = 'srfm_client_log_last_fault';
+
+	/**
+	 * Option recording when the failures were reported, and at what fault count.
+	 *
+	 * Shape: [ 'at' => int timestamp, 'streak' => int fault count at that moment ].
+	 *
+	 * The count is what "has anything failed since" is actually decided on. A
+	 * timestamp cannot answer it reliably: both are written to the second, so a
+	 * fault landing in the same second as the click compares as not-newer and the
+	 * notice stays hidden for a failure nobody has reported. The streak is a
+	 * monotonic counter, so the comparison is exact. The timestamp is kept
+	 * because it is genuinely useful to support.
+	 *
+	 * @since 2.12.6
+	 */
+	public const ACKNOWLEDGED_OPTION = 'srfm_client_log_acknowledged';
+
+	/**
 	 * Consecutive faults before the site owner is told something is wrong.
 	 *
 	 * @since 2.12.6
@@ -164,7 +191,62 @@ class Client_Logger {
 	 * @return bool
 	 */
 	public static function has_persistent_failures() {
-		return self::get_fault_streak() >= self::FAULT_THRESHOLD;
+		if ( self::get_fault_streak() < self::FAULT_THRESHOLD ) {
+			return false;
+		}
+
+		$acknowledged = self::get_acknowledgement();
+
+		if ( empty( $acknowledged ) ) {
+			return true;
+		}
+
+		// Already reported. Stay quiet until something fails that the site owner
+		// has not already told support about -- repeating a warning they have
+		// acted on teaches them to ignore it, and the next real failure with it.
+		return self::get_fault_streak() > Helper::get_integer_value( $acknowledged['streak'] ?? 0 );
+	}
+
+	/**
+	 * The recorded acknowledgement, if the failures have been reported.
+	 *
+	 * @since 2.12.6
+	 * @return array<string,mixed> Empty when nothing has been acknowledged.
+	 */
+	public static function get_acknowledgement() {
+		$stored = Helper::get_array_value( get_option( self::ACKNOWLEDGED_OPTION, [] ) );
+
+		return isset( $stored['streak'] ) ? $stored : [];
+	}
+
+	/**
+	 * When the most recent fault happened.
+	 *
+	 * @since 2.12.6
+	 * @return int Unix timestamp, or 0 when nothing has failed.
+	 */
+	public static function get_last_fault_time() {
+		return Helper::get_integer_value( get_option( self::LAST_FAULT_OPTION, 0 ) );
+	}
+
+	/**
+	 * Record that the site owner has reported the current failures.
+	 *
+	 * Hides the notice without dismissing it: a fault logged after this point
+	 * brings it straight back, because that is something they have not reported.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public static function acknowledge_failures() {
+		update_option(
+			self::ACKNOWLEDGED_OPTION,
+			[
+				'at'     => time(),
+				'streak' => self::get_fault_streak(),
+			],
+			false
+		);
 	}
 
 	/**
@@ -180,6 +262,12 @@ class Client_Logger {
 	public static function reset_fault_streak() {
 		if ( self::get_fault_streak() > 0 ) {
 			update_option( self::FAULT_STREAK_OPTION, 0, false );
+		}
+
+		// Clear the acknowledgement with it. The reported problem is over, so the
+		// next run of failures is a new one and must be judged on its own.
+		if ( ! empty( self::get_acknowledgement() ) ) {
+			delete_option( self::ACKNOWLEDGED_OPTION );
 		}
 	}
 
@@ -234,6 +322,7 @@ class Client_Logger {
 		// on a badly broken site those are exactly the conditions that occur.
 		if ( self::is_fault( $entry ) ) {
 			update_option( self::FAULT_STREAK_OPTION, self::get_fault_streak() + 1, false );
+			update_option( self::LAST_FAULT_OPTION, time(), false );
 		}
 
 		$path = self::get_log_path();

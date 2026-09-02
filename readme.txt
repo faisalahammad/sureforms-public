@@ -426,7 +426,7 @@ Visit the [SureForms features page](https://sureforms.com/features/?utm_source=w
 You can report security issues through our [Bug Bounty Program](https://brainstormforce.com/bug-bounty-program/). We collaborate with Patchstack to validate, triage, and handle security reports.
 
 == Changelog ==
-= 2.12.6 - 1st September 2026 =
+= 2.12.6 - 2nd September 2026 =
 * New: Added an Enable Logs option that records form submission failures to a downloadable file, making it easier to diagnose issues on a live site.
 * New: Added Views and Conversion Rate columns to the Forms list, so you can see how each form is performing at a glance.
 * New: SureForms now detects a missing entries database table and offers a one-click repair, so submissions start saving again without manual database work.
