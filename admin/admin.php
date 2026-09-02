@@ -2817,6 +2817,14 @@ JS;
 				'contact_support' => 'submission_failure_notice_cta',
 				'dismissed'       => 'submission_failure_notice_dismiss',
 			],
+			'notification_error'          => [
+				'contact_support' => 'notification_failure_notice_cta',
+				'dismissed'       => 'notification_failure_notice_dismiss',
+			],
+			'integration_error'           => [
+				'contact_support' => 'integration_failure_notice_cta',
+				'dismissed'       => 'integration_failure_notice_dismiss',
+			],
 			'caching_plugin'              => [
 				'help_me_fix' => 'caching_plugin_notice_cta',
 				'dismissed'   => 'caching_plugin_notice_dismiss',
@@ -2843,8 +2851,18 @@ JS;
 		// Reporting the failures retires the notice until something new fails.
 		// Handled here rather than in the browser so it holds for the classic
 		// wp-admin notice too, which is a plain link with no JavaScript.
-		if ( 'form_submission_error' === $notice_id && 'contact_support' === $button ) {
-			Client_Logger::acknowledge_failures();
+		$categories = [
+			'form_submission_error' => 'submission',
+			'notification_error'    => 'notification',
+			'integration_error'     => 'integration',
+		];
+
+		if ( 'contact_support' === $button && isset( $categories[ $notice_id ] ) ) {
+			Client_Logger::acknowledge_category( $categories[ $notice_id ] );
+
+			if ( 'form_submission_error' === $notice_id ) {
+				Client_Logger::acknowledge_failures();
+			}
 		}
 
 		wp_send_json_success();
@@ -3503,36 +3521,67 @@ JS;
 		$warnings  = [];
 		$passing   = [];
 
-		if ( Client_Logger::has_persistent_failures() ) {
-			$count = Client_Logger::get_fault_streak();
+		$open = Client_Logger::get_open_failures();
+
+		// One item per category. They read differently to a site owner and must not
+		// be collapsed: submissions failing means visitors cannot reach you, a
+		// notification failing means you are not hearing about entries that did
+		// save, an integration failing means a third party is not receiving them.
+		$categories = [
+			'submission'   => [
+				'id'      => 'form_submission_error',
+				/* translators: %s: form title. */
+				'title'   => __( 'We noticed a form submission failure on %s.', 'sureforms' ),
+				'generic' => __( 'We noticed a form submission failure.', 'sureforms' ),
+				'message' => __( 'Visitors may be unable to reach you, and those entries were not saved.', 'sureforms' ),
+				'passing' => __( 'Form submissions are completing normally.', 'sureforms' ),
+			],
+			'notification' => [
+				'id'      => 'notification_error',
+				/* translators: %s: form title. */
+				'title'   => __( 'We noticed a notification failure on %s.', 'sureforms' ),
+				'generic' => __( 'We noticed a notification failure.', 'sureforms' ),
+				'message' => __( 'The entry was saved, but the email telling you about it could not be sent — so new entries may be arriving without you hearing about them.', 'sureforms' ),
+				'passing' => __( 'Notification emails are sending normally.', 'sureforms' ),
+			],
+			'integration'  => [
+				'id'      => 'integration_error',
+				/* translators: %s: form title. */
+				'title'   => __( 'We noticed an integration failure on %s.', 'sureforms' ),
+				'generic' => __( 'We noticed an integration failure.', 'sureforms' ),
+				'message' => __( 'The entry was saved, but it could not be passed on to a connected service.', 'sureforms' ),
+				'passing' => __( 'Integrations are running normally.', 'sureforms' ),
+			],
+		];
+
+		foreach ( $categories as $category => $copy ) {
+			if ( ! isset( $open[ $category ] ) ) {
+				$passing[] = [
+					'id'          => $copy['id'],
+					'status'      => 'success',
+					'title'       => $copy['passing'],
+					'message'     => '',
+					'cta_label'   => '',
+					'cta_url'     => '',
+					'dismissible' => false,
+				];
+				continue;
+			}
+
+			// Name the form. "A form is failing" is not actionable on a site with
+			// twenty of them, and the title is the first thing anyone asks for.
+			$form_title = Helper::get_string_value( $open[ $category ]['form_title'] ?? '' );
 
 			$warnings[] = [
-				'id'          => 'form_submission_error',
+				'id'          => $copy['id'],
 				'status'      => 'error',
-				'title'       => sprintf(
-					/* translators: %d: number of consecutive failed submissions. */
-					_n(
-						'%d form submission in a row could not be completed.',
-						'%d form submissions in a row could not be completed.',
-						$count,
-						'sureforms'
-					),
-					$count
-				),
-				'message'     => __( 'Visitors may be unable to reach you, and those entries were not saved.', 'sureforms' ),
+				'title'       => '' !== $form_title
+					? sprintf( $copy['title'], $form_title )
+					: $copy['generic'],
+				'message'     => $copy['message'],
 				'cta_label'   => __( 'Contact Support', 'sureforms' ),
 				'cta_url'     => $this->get_support_mailto_url(),
 				'cta_action'  => 'contact_support',
-				'dismissible' => false,
-			];
-		} else {
-			$passing[] = [
-				'id'          => 'form_submission_error',
-				'status'      => 'success',
-				'title'       => __( 'Form submissions are completing normally.', 'sureforms' ),
-				'message'     => '',
-				'cta_label'   => '',
-				'cta_url'     => '',
 				'dismissible' => false,
 			];
 		}

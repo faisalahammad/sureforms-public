@@ -57,6 +57,20 @@ class Form_Submit {
 		// One submission getting through retires the failure notice. srfm_form_submit
 		// fires only on the success path.
 		add_action( 'srfm_form_submit', [ Client_Logger::class, 'reset_fault_streak' ] );
+
+		/**
+		 * Fired when an integration fails to receive a submission.
+		 *
+		 * Pro's webhooks and native integrations write their outcome to the entry's
+		 * own log, which nobody reads until a ticket is already open. Firing this
+		 * as well surfaces it on the dashboard.
+		 *
+		 * @since 2.12.6
+		 *
+		 * @param int    $form_id Form the submission belongs to.
+		 * @param string $reason  Short description of what failed.
+		 */
+		add_action( 'srfm_integration_failed', [ $this, 'record_integration_failure' ], 10, 2 );
 		add_action( 'wp_ajax_validation_ajax_action', [ $this, 'field_unique_validation' ] );
 		add_action( 'wp_ajax_nopriv_validation_ajax_action', [ $this, 'field_unique_validation' ] );
 		// for quick action bar.
@@ -89,6 +103,37 @@ class Form_Submit {
 				'callback'            => [ $this, 'handle_client_error_log' ],
 				'permission_callback' => [ $this, 'client_error_log_permissions_check' ],
 			]
+		);
+	}
+
+	/**
+	 * Record an integration failure against the form it happened on.
+	 *
+	 * Hooked - srfm_integration_failed.
+	 *
+	 * @param int    $form_id Form the submission belongs to.
+	 * @param string $reason  Short description of what failed.
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public function record_integration_failure( $form_id = 0, $reason = '' ) {
+		$form_id = absint( $form_id );
+
+		Client_Logger::append(
+			Client_Logger::sanitize_entry(
+				[
+					'type'       => 'message',
+					'form_id'    => $form_id,
+					'form_title' => $form_id ? Helper::get_string_value( get_the_title( $form_id ) ) : '',
+					'message'    => 'Integration failed. ' . Helper::get_string_value( $reason ),
+				]
+			)
+		);
+
+		Client_Logger::record_failure(
+			'integration',
+			$form_id,
+			$form_id ? Helper::get_string_value( get_the_title( $form_id ) ) : ''
 		);
 	}
 
@@ -169,6 +214,11 @@ class Form_Submit {
 			}
 
 			$raw['form_id'] = $form_id;
+
+			// Resolved here rather than sent by the browser: the title is what makes
+			// a log line identifiable at a glance, and taking it from the request
+			// would let a caller label an entry as any form it liked.
+			$raw['form_title'] = $form_id ? Helper::get_string_value( get_the_title( $form_id ) ) : '';
 
 			Client_Logger::append( Client_Logger::sanitize_entry( $raw ) );
 		}
@@ -1095,11 +1145,21 @@ class Form_Submit {
 								Client_Logger::append(
 									Client_Logger::sanitize_entry(
 										[
-											'type'    => 'message',
-											'form_id' => intval( $id ),
-											'message' => 'Email notification failed to send. ' . $reason,
+											'type'       => 'message',
+											'form_id'    => intval( $id ),
+											'form_title' => Helper::get_string_value( get_the_title( intval( $id ) ) ),
+											'message'    => 'Email notification failed to send. ' . $reason,
 										]
 									)
+								);
+
+								// Its own category: the entry saved, so this is not a
+								// submission failure. The site owner is simply not being
+								// told about entries they did receive.
+								Client_Logger::record_failure(
+									'notification',
+									intval( $id ),
+									Helper::get_string_value( get_the_title( intval( $id ) ) )
 								);
 							}
 						}

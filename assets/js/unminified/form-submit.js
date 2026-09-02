@@ -735,6 +735,16 @@ async function submitFormData( form ) {
 				status,
 				duration_ms: durationMs,
 				message: `Submission responded ${ status } (${ contentType })${ errorCode }: ${ reason }${ codeText }`,
+				// The whole payload, not only the line picked out of it above. The
+				// interesting part of a rejection is often a key we did not think to
+				// read -- api_response detail, a nested code, an unexpected shape.
+				body: ( () => {
+					try {
+						return JSON.stringify( parsed ).slice( 0, 500 );
+					} catch ( e ) {
+						return '';
+					}
+				} )(),
 				field_keys: rejected.length
 					? rejected
 					: [ ...filteredFormData.keys() ],
@@ -803,6 +813,11 @@ async function afterSubmit( formStatus, form ) {
 				status,
 				duration_ms: durationMs,
 				message: `After-submission step responded ${ status }`,
+				body: await response
+					.clone()
+					.text()
+					.then( ( text ) => String( text ).slice( 0, 500 ) )
+					.catch( () => '' ),
 			} );
 			srfmLog.flush( form );
 		}
@@ -1069,11 +1084,24 @@ async function handleFormSubmission(
 			// runs, so nothing downstream can see it. This is the class of failure
 			// where a third-party script breaks a field's own validation -- the
 			// visitor is stopped and the server never hears about it.
+			// The reason, not just the fact. Validation has already rendered its
+			// message for the visitor, so read that rather than logging a generic
+			// "validation failed" that says nothing a support engineer can act on.
+			const shownErrors = [ ...form.querySelectorAll( '.srfm-error-message' ) ]
+				.map( ( el ) => el.textContent.trim() )
+				.filter( Boolean )
+				.slice( 0, 5 )
+				.join( ' | ' );
+
+			const captchaReason =
+				captchaErrorElement?.textContent?.trim() ||
+				`captcha: ${ recaptchaType || 'unknown type' }`;
+
 			srfmLog.add( {
 				type: 'blocked',
 				message: isValidate?.validateResult
-					? 'Blocked before submit: field validation failed.'
-					: 'Blocked before submit: captcha validation failed.',
+					? `Blocked before submit: field validation failed. ${ shownErrors }`
+					: `Blocked before submit: ${ captchaReason }`,
 				field_keys: isValidate?.firstErrorInput?.name
 					? [ isValidate.firstErrorInput.name ]
 					: [],
