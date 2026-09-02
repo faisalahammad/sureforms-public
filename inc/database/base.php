@@ -229,6 +229,192 @@ abstract class Base {
 	}
 
 	/**
+	 * Whether this table currently exists in the database.
+	 *
+	 * Deliberately `SHOW TABLES LIKE` rather than the existing get_columns():
+	 * `SHOW COLUMNS FROM <missing table>` is a MySQL error, so it pollutes
+	 * $wpdb->last_error, prints under WP_DEBUG_DISPLAY, and cannot tell "the table
+	 * is gone" apart from "SHOW is denied". This returns a clean empty set instead.
+	 *
+	 * esc_like() matters because $wpdb->prefix contains `_`, which is a LIKE
+	 * wildcard — without it `wp_srfm_entries` would also match `wpXsrfm_entries`.
+	 * The comparison is against the real, unescaped name so the match stays exact.
+	 *
+	 * Fails safe: any DB-level error reports the table as present. A false "your
+	 * database needs updating" on a transient connection blip is worse than a
+	 * missed one, because the notice it drives asks the user to alter their schema.
+	 *
+	 * @since 2.12.6
+	 * @return bool True when the table exists, or when existence cannot be determined.
+	 */
+	public function table_exists() {
+		$wpdb  = $this->wpdb;
+		$table = $this->get_tablename();
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Schema lookup; the caller owns caching, and a cached answer here would defeat the check.
+		$found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
+
+		if ( ! empty( $wpdb->last_error ) ) {
+			return true;
+		}
+
+		return $found === $table;
+	}
+
+	/**
+	 * A table holding this table's data under a different prefix, if there is one.
+	 *
+	 * Changing `$table_prefix` — a manual edit, a restored dump from a site with a
+	 * different prefix, or a security plugin that renames tables and misses the ones
+	 * it does not know about — leaves our data behind under the old name while the
+	 * plugin looks for the new one. Creating a fresh empty table there would strand
+	 * every stored entry, so look for the old one first and adopt it instead.
+	 *
+	 * Refuses to guess. Returns '' unless exactly one credible candidate exists, and
+	 * only when that candidate carries every column this table's schema declares —
+	 * an unrelated table that merely ends in the same words is never touched.
+	 *
+	 * On multisite, other blogs' tables are legitimate and belong to those blogs.
+	 * Anything matching the `{base_prefix}{digits}_` pattern, or the base prefix
+	 * itself, is excluded so a subsite can never adopt another subsite's data.
+	 *
+	 * @since 2.12.6
+	 * @return string Full table name to adopt, or '' when there is nothing safe to adopt.
+	 */
+	public function find_adoptable_table() {
+		$wpdb    = $this->wpdb;
+		$correct = $this->get_tablename();
+		$needle  = 'srfm_' . $this->table_suffix;
+
+		// Wildcard on the left only: the name must *end* at the suffix, so a
+		// deliberate copy such as `wp_srfm_entries_backup` is never a candidate.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Schema lookup; a cached answer would defeat the check.
+		$found = $wpdb->get_col( $wpdb->prepare( 'SHOW TABLES LIKE %s', '%' . $wpdb->esc_like( $needle ) ) );
+
+		if ( ! empty( $wpdb->last_error ) || ! is_array( $found ) ) {
+			return '';
+		}
+
+		$base       = $wpdb->base_prefix;
+		$blog_table = '/^' . preg_quote( $base, '/' ) . '\d+_' . preg_quote( $needle, '/' ) . '$/';
+		$candidates = [];
+
+		foreach ( $found as $table ) {
+			$table = (string) $table;
+
+			// The table we are looking for, another blog's table, or the network's
+			// main-site table — none of these are ours to rename.
+			if ( $table === $correct || $base . $needle === $table || preg_match( $blog_table, $table ) ) {
+				continue;
+			}
+
+			$candidates[] = $table;
+		}
+
+		// More than one and we cannot tell which holds the real data. Refuse rather
+		// than pick, and let the caller fall back to creating an empty table.
+		if ( 1 !== count( $candidates ) ) {
+			return '';
+		}
+
+		return $this->has_expected_columns( $candidates[0] ) ? $candidates[0] : '';
+	}
+
+	/**
+	 * Rename a differently-prefixed table into this table's expected name.
+	 *
+	 * RENAME rather than create-and-copy: it is atomic, needs no second copy of the
+	 * data, and cannot half-succeed and leave rows in two places.
+	 *
+	 * @param string $from Full name of the table to adopt.
+	 * @since 2.12.6
+	 * @return bool True when the table is in place afterwards.
+	 */
+	public function adopt_table( $from ) {
+		$wpdb = $this->wpdb;
+		$to   = $this->get_tablename();
+
+		if ( empty( $from ) || $from === $to ) {
+			return false;
+		}
+
+		// Never rename over an existing table; the one already in place wins.
+		if ( $this->table_exists() ) {
+			return true;
+		}
+
+		$query = $wpdb->prepare( 'RENAME TABLE %1s TO %2s', str_replace( '`', '', $from ), str_replace( '`', '', $to ) ); // phpcs:ignore -- Same complex-placeholder pattern as create(): identifiers must not be quoted, and both names come from SHOW TABLES / $wpdb->prefix.
+
+		if ( ! $query ) {
+			// prepare() returned nothing usable; do not fall through to a raw query.
+			return false;
+		}
+
+		$wpdb->query( $query ); // phpcs:ignore -- We are already using prepare above, and one-off DDL has nothing to cache.
+
+		if ( ! empty( $wpdb->last_error ) ) {
+			/** This action is documented in inc/database/base.php */
+			do_action( 'srfm_db_upgrade_query_failed', $wpdb->last_error, 'RENAME TABLE', $to );
+		}
+
+		return $this->table_exists();
+	}
+
+	/**
+	 * Stamp this site's owner signature onto a table's MySQL comment.
+	 *
+	 * Best-effort: a host that refuses ALTER simply leaves the table unstamped,
+	 * which later reads as "ownership unproven" — the safe direction.
+	 *
+	 * @param string $table Full table name; defaults to this table's own name.
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public function stamp_owner_signature( $table = '' ) {
+		$wpdb  = $this->wpdb;
+		$table = '' === $table ? $this->get_tablename() : $table;
+
+		$query = $wpdb->prepare( 'ALTER TABLE %1s COMMENT = %s', str_replace( '`', '', $table ), $this->get_owner_signature() ); // phpcs:ignore -- Identifier must not be quoted; the comment value is a bound, quoted string.
+
+		if ( ! $query ) {
+			return;
+		}
+
+		$wpdb->query( $query ); // phpcs:ignore -- Prepared above; one-off DDL with nothing to cache.
+	}
+
+	/**
+	 * Whether a table carries this site's owner signature.
+	 *
+	 * Gates adoption: on shared hosting a different install's identically-named,
+	 * same-schema table can be the only candidate, and renaming it in would destroy
+	 * that site's data. Deny by default — anything but an exact signature match
+	 * (including a read error, an empty comment, or a legacy table stamped before
+	 * this plugin wrote signatures) returns false.
+	 *
+	 * @param string $table Full table name to inspect.
+	 * @since 2.12.6
+	 * @return bool
+	 */
+	public function table_belongs_to_site( $table ) {
+		$wpdb = $this->wpdb;
+		$bare = str_replace( '`', '', (string) $table );
+
+		if ( '' === $bare ) {
+			return false;
+		}
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Schema lookup; a cached answer would defeat the check.
+		$comment = $wpdb->get_var( $wpdb->prepare( 'SELECT TABLE_COMMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s', $bare ) );
+
+		if ( ! empty( $wpdb->last_error ) || ! is_string( $comment ) || '' === $comment ) {
+			return false;
+		}
+
+		return hash_equals( $this->get_owner_signature(), $comment );
+	}
+
+	/**
 	 * Conditionally returns current database charset or collate.
 	 *
 	 * @since 0.0.10
@@ -287,6 +473,27 @@ abstract class Base {
 		if ( false === $result ) {
 			// Stop DB alteration if we have any error.
 			$this->db_upgradable = false;
+
+			/**
+			 * Fires when a table could not be created.
+			 *
+			 * Column changes have announced their failures since 2.11.0 but table
+			 * creation never did — so the one failure that leaves a site with no
+			 * table at all, a host denying CREATE TABLE, was the only silent one.
+			 * Same signature as the ALTER case so one listener can handle both.
+			 *
+			 * @param string $last_error The database error.
+			 * @param string $query      The query that failed.
+			 * @param string $table_name The table it was for.
+			 * @since 2.12.6
+			 */
+			do_action( 'srfm_db_upgrade_query_failed', $wpdb->last_error, $query, $this->get_tablename() );
+		}
+
+		if ( false !== $result ) {
+			// Stamp our own table so a future adoption can prove it belongs to this
+			// site before renaming it in. See stamp_owner_signature().
+			$this->stamp_owner_signature();
 		}
 
 		return $result;
@@ -721,6 +928,57 @@ abstract class Base {
 
 		// Execute the query and return the integer count.
 		return Helper::get_integer_value( $this->cache_set( $query, $results ) );
+	}
+
+	/**
+	 * The signature this plugin stamps on tables it owns on this site.
+	 *
+	 * A random per-site token, generated once and stored in options. Embedded in
+	 * the table's MySQL comment at creation time; the comment survives RENAME, so a
+	 * table that moved under a different prefix still carries it, while an unrelated
+	 * install sharing the same database carries a different one.
+	 *
+	 * @since 2.12.6
+	 * @return string
+	 */
+	protected function get_owner_signature() {
+		$token = get_option( 'srfm_db_owner_token' );
+
+		if ( ! is_string( $token ) || '' === $token ) {
+			$token = wp_generate_password( 20, false );
+			update_option( 'srfm_db_owner_token', $token, false );
+		}
+
+		return 'srfm-owner:' . $token;
+	}
+
+	/**
+	 * Whether a table carries every column this table's schema declares.
+	 *
+	 * Guards adoption: a same-named table from an unrelated source should never be
+	 * renamed into place just because its name matches.
+	 *
+	 * @param string $table Full table name to inspect.
+	 * @since 2.12.6
+	 * @return bool
+	 */
+	protected function has_expected_columns( $table ) {
+		$wpdb = $this->wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- Schema lookup; a cached answer would defeat the check.
+		$columns = $wpdb->get_col( $wpdb->prepare( 'SHOW COLUMNS FROM %1s', str_replace( '`', '', $table ) ) ); // phpcs:ignore -- Same complex-placeholder pattern as create(): an identifier must not be quoted, and the name comes from SHOW TABLES on this connection.
+
+		if ( ! empty( $wpdb->last_error ) || ! is_array( $columns ) ) {
+			return false;
+		}
+
+		foreach ( array_keys( $this->get_schema() ) as $column ) {
+			if ( ! in_array( $column, $columns, true ) ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	/**

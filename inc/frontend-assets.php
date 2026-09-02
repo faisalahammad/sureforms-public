@@ -180,6 +180,12 @@ class Frontend_Assets {
 				// Resolved RFC 5321 email limits so the client honors the
 				// srfm_email_field_char_limits filter instead of hardcoding 64/255.
 				'email_char_limits' => Field_Validation::get_email_char_limits(),
+				// Hint only. This value is baked into cached HTML and can be a full
+				// cache TTL out of date, so the server re-checks on every write --
+				// see Form_Submit::client_error_log_permissions_check(). Its job is
+				// to keep the browser from posting when logging is plainly off.
+				'logging_enabled'   => Client_Logger::is_enabled(),
+				'log_error_url'     => esc_url_raw( rest_url( 'sureforms/v1/log-client-error' ) ),
 			]
 		);
 
