@@ -627,6 +627,52 @@ class Test_Client_Logger extends TestCase {
 	}
 
 	/**
+	 * The raw store, including categories already reported.
+	 *
+	 * get_open_failures() filters those out, so this is what shows a report was
+	 * made rather than the failure having gone away.
+	 */
+	public function test_get_failures() {
+		$this->assertSame( [], Client_Logger::get_failures() );
+
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
+		Client_Logger::acknowledge_category( 'notification' );
+
+		$all = Client_Logger::get_failures();
+
+		$this->assertArrayHasKey( 'notification', $all, 'A reported failure is still on record.' );
+		$this->assertSame( 1, $all['notification']['count'] );
+		$this->assertSame( 1, $all['notification']['acked'] );
+		$this->assertSame( [], Client_Logger::get_open_failures(), 'But it is no longer open.' );
+	}
+
+	/**
+	 * Only categories with failures the owner has not reported, compared on the
+	 * count rather than the clock -- both are written to the second, so a failure
+	 * landing in the same second as the report would look not-newer and be hidden.
+	 */
+	public function test_get_open_failures() {
+		$this->assertSame( [], Client_Logger::get_open_failures() );
+
+		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
+
+		$this->assertArrayHasKey( 'submission', Client_Logger::get_open_failures() );
+
+		Client_Logger::acknowledge_category( 'submission' );
+
+		$this->assertSame( [], Client_Logger::get_open_failures() );
+
+		// Same second as the acknowledgement: the count still separates them.
+		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
+
+		$this->assertArrayHasKey(
+			'submission',
+			Client_Logger::get_open_failures(),
+			'A failure in the same second as the report must still be open.'
+		);
+	}
+
+	/**
 	 * An unrecognised category is dropped rather than creating a notice nothing
 	 * knows how to describe.
 	 */
