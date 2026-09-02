@@ -90,14 +90,44 @@ class Test_Generate_Form_Markup extends TestCase {
 		$admin  = $this->set_current_user_with_role( 'administrator' );
 		$markup = Generate_Form_Markup::get_form_markup( $form_id );
 		$this->assertStringContainsString( 'class="srfm-edit-form-btn"', $markup );
-		$this->assertStringContainsString( 'href="' . esc_url( get_edit_post_link( $form_id ) ) . '"', $markup );
+
+		// Assert the whole href, not just `post=<id>`. The marker is appended with
+		// add_query_arg(), so the thing worth guarding is that the link still points
+		// at the editor — a refactor that lost `action=edit` would leave a bare
+		// `post=<id>` assertion green while the pill stopped opening the editor.
+		$expected_href = esc_url(
+			add_query_arg(
+				Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG,
+				'embed',
+				get_edit_post_link( $form_id, 'raw' )
+			)
+		);
+		$this->assertStringContainsString( 'href="' . $expected_href . '"', $markup, 'The pill href should be the editor link for this form, carrying the marker.' );
+		$this->assertMatchesRegularExpression( '/post=' . $form_id . '&(amp;|#0?38;)?action=edit/', $markup, 'The link must still open the editor.' );
 		$this->assertTrue( wp_style_is( 'srfm-edit-form-btn', 'enqueued' ), 'The Edit Form stylesheet should be enqueued.' );
+
+		// The pill sits in normal flow ABOVE the form, which is what stops it
+		// overlapping a field (#3062). DOM order is the guarantee — an overlay only
+		// clears the fields when the container happens to have enough top padding.
+		$pill_pos = strpos( $markup, 'srfm-edit-form-btn-wrap' );
+		$form_pos = strpos( $markup, '<form ' );
+		$this->assertNotFalse( $pill_pos, 'The pill should be wrapped in its flow-level row.' );
+		$this->assertNotFalse( $form_pos, 'The form element should be present.' );
+		$this->assertLessThan( $form_pos, $pill_pos, 'The pill must render before the <form>, not overlaid on it.' );
+
+		// The link carries the attribution marker that Admin reads back on load-post.php.
+		$this->assertStringContainsString( Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG . '=embed', html_entity_decode( $markup ), 'The edit link should carry the analytics source marker.' );
 
 		// A second form links to its OWN editor, not the first — the multiple-forms
 		// acceptance criterion, and a guard against passing the wrong post ID.
 		$markup2 = Generate_Form_Markup::get_form_markup( $form_id2 );
-		$this->assertStringContainsString( 'href="' . esc_url( get_edit_post_link( $form_id2 ) ) . '"', $markup2 );
-		$this->assertStringNotContainsString( 'href="' . esc_url( get_edit_post_link( $form_id ) ) . '"', $markup2 );
+		$this->assertStringContainsString( 'post=' . $form_id2, $markup2 );
+
+		// Anchored on the full param rather than a `post=<id>&` prefix, which only
+		// avoided a collision between the two IDs by the shape they happen to have.
+		preg_match_all( '/post=(\d+)/', html_entity_decode( $markup2 ), $matches );
+		$this->assertNotEmpty( $matches[1], 'The second form should link to an editor.' );
+		$this->assertNotContains( (string) $form_id, $matches[1], 'The second form must not link to the first form\'s editor.' );
 
 		// A suppression filter removes it even for an administrator.
 		add_filter( 'srfm_show_edit_form_button', '__return_false' );
@@ -107,6 +137,30 @@ class Test_Generate_Form_Markup extends TestCase {
 		wp_delete_user( $admin );
 		wp_delete_post( $form_id, true );
 		wp_delete_post( $form_id2, true );
+	}
+
+	/**
+	 * The pill's stylesheet must keep it in normal flow.
+	 *
+	 * This is the half of the overlap fix (#3062) that DOM order alone cannot
+	 * guarantee: rendering above the form is pointless if the CSS lifts the pill
+	 * back out of flow and drops it onto the first row of fields. The container's
+	 * `position: relative` rule goes with it — it existed only to anchor the old
+	 * overlay, so leaving it behind would be dead CSS shipped to every page with
+	 * an embedded form.
+	 */
+	public function test_get_edit_form_button_css() {
+		$css = $this->call_private_static( Generate_Form_Markup::class, 'get_edit_form_button_css' );
+
+		$this->assertStringNotContainsString( 'position: absolute', $css, 'The pill must not be absolutely positioned over the form.' );
+		$this->assertStringNotContainsString( 'position: relative', $css, 'The container no longer needs a positioning context.' );
+		$this->assertStringContainsString( '.srfm-edit-form-btn-wrap', $css, 'The flow-level wrapper must be styled.' );
+		$this->assertStringContainsString( 'justify-content: flex-end', $css, 'The pill should sit at the inline end of its own row.' );
+
+		// Logical, not physical — the row has to read correctly in RTL without a
+		// second rule, which is why the old build used inset-inline-end.
+		$this->assertStringNotContainsString( 'margin-bottom', $css, 'Spacing should use the logical margin-block-end.' );
+		$this->assertStringContainsString( 'margin-block-end', $css );
 	}
 
 	public function test_add_entries_admin_bar_node() {
@@ -274,6 +328,19 @@ class Test_Generate_Form_Markup extends TestCase {
 			}
 		}
 		$this->assertTrue( $found, 'The generate-form-markup endpoint should be registered' );
+	}
+
+	/**
+	 * Invoke a private static method.
+	 *
+	 * @param string $class_name  Fully-qualified class name.
+	 * @param string $method_name Method to invoke.
+	 * @return mixed
+	 */
+	private function call_private_static( $class_name, $method_name ) {
+		$method = new ReflectionMethod( $class_name, $method_name );
+		$method->setAccessible( true );
+		return $method->invoke( null );
 	}
 
 	/**

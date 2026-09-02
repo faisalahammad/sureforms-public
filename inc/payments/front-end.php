@@ -485,6 +485,15 @@ class Front_End {
 		// Block IDs that produced a verified payment on this submission.
 		$verified_block_ids = [];
 
+		// Field keys of every payment field seen in this submission, and the
+		// subset whose payment we actually verified below. A payment field's
+		// value is only a trustworthy payment-record id once verified here; any
+		// field left unverified is cleared before it reaches the submission data,
+		// so the {form-payment} smart tag can never resolve a client-supplied id
+		// to an arbitrary payment row.
+		$payment_field_names  = [];
+		$verified_field_names = [];
+
 		// Loop through form data to find payment fields.
 		foreach ( $form_data as $field_name => $field_value ) {
 			// Check if field name contains "-lbl-" pattern.
@@ -504,6 +513,8 @@ class Front_End {
 			if ( ! ( strpos( $name_parts[0], 'srfm-payment-' ) === 0 ) ) {
 				continue;
 			}
+
+			$payment_field_names[] = $field_name;
 
 			// Value will be in the form of the json string.
 			$payment_value = json_decode( $field_value, true );
@@ -552,6 +563,16 @@ class Front_End {
 				$form_data[ $field_name ] = $payment_response['payment_id'];
 
 				$verified_block_ids[ Helper::get_string_value( $block_id ) ] = true;
+
+				$verified_field_names[ $field_name ] = true;
+			}
+		}
+
+		// Deny-by-default: drop any payment field we did not verify this request,
+		// so its raw client value cannot later be read back as a payment-record id.
+		foreach ( $payment_field_names as $payment_field_name ) {
+			if ( ! isset( $verified_field_names[ $payment_field_name ] ) ) {
+				$form_data[ $payment_field_name ] = '';
 			}
 		}
 

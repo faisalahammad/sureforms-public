@@ -203,4 +203,123 @@ class Test_Forms_Data extends TestCase {
 		wp_delete_post( $form_id, true );
 		wp_delete_user( $admin_id );
 	}
+
+	/**
+	 * Call a private/protected method on the Forms_Data instance.
+	 */
+	private function call_private( $method, $args = [] ) {
+		$m = new ReflectionMethod( Forms_Data::class, $method );
+		$m->setAccessible( true );
+		return $m->invokeArgs( $this->forms_data, $args );
+	}
+
+	private function make_tracked_form( $views, $post_date_gmt = null ) {
+		$args = [
+			'post_title'  => 'Metrics Form',
+			'post_type'   => SRFM_FORMS_POST_TYPE,
+			'post_status' => 'publish',
+		];
+		if ( $post_date_gmt ) {
+			$args['post_date_gmt'] = $post_date_gmt;
+			$args['post_date']     = $post_date_gmt;
+		}
+		$id = wp_insert_post( $args );
+		update_post_meta( $id, \SRFM\Inc\Form_Views::META_KEY, $views );
+		return (int) $id;
+	}
+
+	/**
+	 * The sorted metric and the rendered value must be the same number.
+	 *
+	 * They were computed in two places and drifted: the sort divided ALL-TIME
+	 * entries by views while the column divided only entries inside the tracking
+	 * window. A form whose entry history predated the window therefore rendered a
+	 * dash while sorting as though its rate were several hundred percent, landing
+	 * at the top of a descending sort. Both paths now come through this method.
+	 */
+	public function test_calculate_form_metrics() {
+		delete_option( 'srfm_general_settings_options' );
+		delete_option( \SRFM\Inc\Form_Views::TRACKING_STARTED_OPTION );
+
+		$form_id = $this->make_tracked_form( 10 );
+
+		// Tracking off → no numbers at all, and no entry query.
+		$off = $this->call_private( 'calculate_form_metrics', [ $form_id, '', null ] );
+		$this->assertSame( 0, $off['views'], 'Views must not be reported while the feature is off.' );
+		$this->assertNull( $off['conversion_rate'], 'No rate while the feature is off.' );
+
+		// Enable → window opens, views are reported.
+		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => true ] );
+		$on = $this->call_private( 'calculate_form_metrics', [ $form_id, '', null ] );
+		$this->assertSame( 10, $on['views'], 'Views should be reported once enabled.' );
+		$this->assertSame( 0.0, $on['conversion_rate'], 'No entries yet is a real 0%, not a dash.' );
+
+		// A form with no views cannot have a rate — 0 views is not 0%.
+		$unseen = $this->make_tracked_form( 0 );
+		$none   = $this->call_private( 'calculate_form_metrics', [ $unseen, '', null ] );
+		$this->assertSame( 0, $none['views'] );
+		$this->assertNull( $none['conversion_rate'], 'Zero views must give a dash, not 0%.' );
+
+		// More entries than views is impossible, so the count is incomplete and any
+		// percentage would be invented. The caller's all-time count is used directly
+		// when the form is younger than the window, which is the cheap path.
+		$young = $this->make_tracked_form( 2, gmdate( 'Y-m-d H:i:s' ) );
+		$over  = $this->call_private( 'calculate_form_metrics', [ $young, gmdate( 'Y-m-d H:i:s' ), 50 ] );
+		$this->assertSame( 2, $over['views'] );
+		$this->assertNull( $over['conversion_rate'], 'Entries exceeding views must render as a dash, never >100%.' );
+
+		// Normal case on the cheap path: 1 entry, 2 views → 50%.
+		$half = $this->call_private( 'calculate_form_metrics', [ $young, gmdate( 'Y-m-d H:i:s' ), 1 ] );
+		$this->assertSame( 50.0, $half['conversion_rate'] );
+
+		wp_delete_post( $form_id, true );
+		wp_delete_post( $unseen, true );
+		wp_delete_post( $young, true );
+		delete_option( 'srfm_general_settings_options' );
+		delete_option( \SRFM\Inc\Form_Views::TRACKING_STARTED_OPTION );
+	}
+
+	/**
+	 * The listing row must carry the same numbers calculate_form_metrics() produces.
+	 */
+	public function test_prepare_form_for_listing() {
+		delete_option( \SRFM\Inc\Form_Views::TRACKING_STARTED_OPTION );
+		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => true ] );
+
+		$form_id = $this->make_tracked_form( 7 );
+		$row     = $this->call_private( 'prepare_form_for_listing', [ get_post( $form_id ) ] );
+		$metrics = $this->call_private( 'calculate_form_metrics', [ $form_id, get_post( $form_id )->post_date_gmt, $row['entries_count'] ] );
+
+		$this->assertSame( $metrics['views'], $row['views'], 'The row must show the calculated views.' );
+		$this->assertSame( $metrics['conversion_rate'], $row['conversion_rate'], 'The row must show the calculated rate.' );
+		$this->assertSame( $form_id, $row['id'] );
+
+		wp_delete_post( $form_id, true );
+		delete_option( 'srfm_general_settings_options' );
+		delete_option( \SRFM\Inc\Form_Views::TRACKING_STARTED_OPTION );
+	}
+
+	/**
+	 * The window boundary must be expressed in MySQL's frame of reference.
+	 *
+	 * `created_at` is written by MySQL and compared in the session time zone, so a
+	 * bare gmdate() of a PHP timestamp is off by the clock offset between them and
+	 * permanently mis-counts entries near the boundary.
+	 */
+	public function test_window_boundary_sql() {
+		global $wpdb;
+
+		$now       = time();
+		$boundary  = $this->call_private( 'window_boundary_sql', [ $now ] );
+		$mysql_now = $wpdb->get_var( 'SELECT NOW()' );
+
+		$this->assertMatchesRegularExpression( '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $boundary, 'Must be a MySQL datetime string.' );
+
+		// Within a couple of seconds of MySQL's own clock, whatever PHP's offset is.
+		$this->assertLessThanOrEqual(
+			5,
+			abs( strtotime( $boundary ) - strtotime( (string) $mysql_now ) ),
+			'The boundary for "now" should line up with the database clock, not PHP\'s.'
+		);
+	}
 }
