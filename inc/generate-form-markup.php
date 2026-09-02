@@ -25,6 +25,14 @@ class Generate_Form_Markup {
 	use Get_Instance;
 
 	/**
+	 * Query arg marking an editor visit as arriving from the front-end "Edit Form"
+	 * pill, so the click can be attributed without any front-end JavaScript.
+	 *
+	 * @since 2.12.6
+	 */
+	public const EDIT_FORM_BUTTON_SOURCE_ARG = 'srfm_edit_src';
+
+	/**
 	 * Current block attributes for the form being rendered.
 	 * Used by child blocks (like inline button) to access parent form's embed styling.
 	 *
@@ -855,10 +863,23 @@ class Generate_Form_Markup {
 				return ob_get_clean();
 			}
 			$submit_token = Submit_Token::generate( (int) $id );
+			// Separately namespaced from the submission token: this one is only good
+			// for incrementing a view counter, so scraping it from the page buys an
+			// attacker nothing beyond what the beacon already does, and it cannot be
+			// replayed against the submit endpoint.
+			$view_token = Submit_Token::generate( (int) $id, Submit_Token::NAMESPACE_VIEW );
+
+			// Admin-only shortcut into the form editor. Emitted here, immediately
+			// above the <form>, so it occupies its own row in normal flow and can
+			// never overlap a field. Already inside the `.srfm-form-container`
+			// branch, so a zero-block form (no container) never reaches here and
+			// cannot emit an orphaned pill. Works for every embed method (block,
+			// shortcode, widget) because they all render through this function.
+			self::render_edit_form_button( (int) $id );
 
 			?>
 				<form method="post" enctype="multipart/form-data" id="srfm-form-<?php echo esc_attr( Helper::get_string_value( $id ) ); ?>" class="srfm-form <?php echo esc_attr( 'sureforms_form' === $post_type ? 'srfm-single-form ' : '' ); ?>"
-				form-id="<?php echo esc_attr( Helper::get_string_value( $id ) ); ?>" after-submission="<?php echo esc_attr( $submission_action ); ?>" message-type="<?php echo esc_attr( $confirmation_type ? $confirmation_type : 'same page' ); ?>" success-url="<?php echo esc_attr( $success_url ? $success_url : '' ); ?>" ajaxurl="<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>" data-submit-token="<?php echo esc_attr( $submit_token ); ?>"
+				form-id="<?php echo esc_attr( Helper::get_string_value( $id ) ); ?>" after-submission="<?php echo esc_attr( $submission_action ); ?>" message-type="<?php echo esc_attr( $confirmation_type ? $confirmation_type : 'same page' ); ?>" success-url="<?php echo esc_attr( $success_url ? $success_url : '' ); ?>" ajaxurl="<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>" data-submit-token="<?php echo esc_attr( $submit_token ); ?>" data-view-token="<?php echo esc_attr( $view_token ); ?>"
 				>
 				<?php
 					// Submission security is handled via the HMAC token in data-submit-token.
@@ -980,18 +1001,6 @@ class Generate_Form_Markup {
 				<div aria-live="polite" aria-atomic="true" role="alert" id="srfm-success-message-page-<?php echo esc_attr( Helper::get_string_value( $id ) ); ?>" class="srfm-success-box-description"></div>
 			</div>
 			<?php
-			// Admin-only shortcut into the form editor, overlaid at the top-right of
-			// the embedded form. Rendered only for users who can edit THIS form, so
-			// it is fully absent from the DOM for everyone else and, being absolutely
-			// positioned, never affects the layout or submission for regular
-			// visitors. Works for every embed method (block, shortcode, widget)
-			// because they all render through this function. Gated on the same
-			// condition as the `.srfm-form-container` open above, so a zero-block
-			// form (no container) never emits an orphaned, unpositioned pill.
-			if ( '' !== $id && 0 !== $block_count ) {
-				self::render_edit_form_button( (int) $id );
-			}
-
 			// Add preview script for real-time styling updates from block editor.
 			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- This is a preview context, nonce not required.
 			if ( isset( $_GET['form_preview'] ) && 'true' === $_GET['form_preview'] && isset( $container_id ) ) {
@@ -1330,9 +1339,18 @@ class Generate_Form_Markup {
 	/**
 	 * Print the admin-only "Edit Form" shortcut on an embedded form.
 	 *
-	 * Renders a small pill link overlaid at the top-right of the form container
-	 * (Elementor/Beaver-Builder style) that opens the block editor for this form.
-	 * Being absolutely positioned, it never affects the form's layout.
+	 * Renders a small pill link that opens the block editor for this form, on its
+	 * own right-aligned row directly above the form.
+	 *
+	 * It sits in normal flow rather than being absolutely positioned over the
+	 * form's top-right corner, which is what it used to do. An overlay can only
+	 * avoid the fields when the container happens to have enough top padding —
+	 * with the default theme styling it landed on top of the first row's last
+	 * field (#3062). Flow layout cannot overlap anything by construction, at any
+	 * width, with any theme. The cost is that the form shifts down by the pill's
+	 * height, which happens only for users who can edit the form; the markup and
+	 * its styles remain entirely absent from the DOM for everyone else, so no
+	 * regular visitor sees a layout change.
 	 *
 	 * Admin-only by construction: the `sureforms_form` CPT registers with
 	 * `map_meta_cap => false`, so `edit_post` collapses to a blanket
@@ -1390,7 +1408,21 @@ class Generate_Form_Markup {
 
 		// Page-builder editor canvases render the form directly (not over REST),
 		// where their own element-edit handles would collide with the pill.
-		if ( class_exists( '\Elementor\Plugin' ) && \Elementor\Plugin::$instance->editor->is_edit_mode() ) {
+		// `$instance` is checked as well as the class name: Elementor declares
+		// `public static $instance = null` and only populates it on boot, so the
+		// class can exist while the singleton is still null. Dereferencing it then
+		// is a fatal Error, not a warning, and guarding only on class_exists() left
+		// that reachable — test-generate-form-markup.php hit it. The bundled stub
+		// types $instance as non-nullable, which is why PHPStan reads the isset()
+		// as redundant and has to be told otherwise.
+		//
+		// ->editor is checked for the same reason one level down: Elementor assigns it
+		// in init_components() on `init`, while the singleton itself is created on
+		// `plugins_loaded`. Between those two hooks $instance is set and ->editor is
+		// still null, so checking only the singleton reproduces the original fatal a
+		// property later.
+		// @phpstan-ignore-next-line -- Stub disagrees with runtime; see above.
+		if ( class_exists( '\Elementor\Plugin' ) && isset( \Elementor\Plugin::$instance->editor ) && \Elementor\Plugin::$instance->editor->is_edit_mode() ) {
 			return;
 		}
 		if ( function_exists( 'bricks_is_builder' ) && bricks_is_builder() ) {
@@ -1409,11 +1441,21 @@ class Generate_Form_Markup {
 			return;
 		}
 
-		$edit_link = get_edit_post_link( $form_id );
+		$edit_link = get_edit_post_link( $form_id, 'raw' );
 
 		if ( empty( $edit_link ) ) {
 			return;
 		}
+
+		// Attribution marker read back by Admin::maybe_track_edit_form_button_click()
+		// when the editor loads. Added before the filter below so an integration that
+		// replaces the link wholesale drops the marker with it, rather than having our
+		// query arg appended to a third-party URL.
+		// 'url' context, not the default 'display': the latter returns &amp;-escaped
+		// separators, and feeding those to add_query_arg() only round-trips because
+		// build_query() happens to re-emit the mangled `amp;action` key verbatim. The
+		// raw form has no such dependency, and esc_url() below still escapes on output.
+		$edit_link = add_query_arg( self::EDIT_FORM_BUTTON_SOURCE_ARG, 'embed', $edit_link );
 
 		/**
 		 * Filter the target of the admin "Edit Form" shortcut.
@@ -1439,34 +1481,38 @@ class Generate_Form_Markup {
 		}
 		wp_enqueue_style( $style_handle );
 		?>
-		<a class="srfm-edit-form-btn" href="<?php echo esc_url( $edit_link ); ?>" target="_blank" rel="noopener noreferrer">
-			<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
-			<span><?php esc_html_e( 'Edit Form', 'sureforms' ); ?></span>
-			<span class="screen-reader-text"><?php esc_html_e( '(opens in a new tab)', 'sureforms' ); ?></span>
-		</a>
+		<div class="srfm-edit-form-btn-wrap">
+			<a class="srfm-edit-form-btn" href="<?php echo esc_url( $edit_link ); ?>" target="_blank" rel="noopener noreferrer">
+				<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>
+				<span><?php esc_html_e( 'Edit Form', 'sureforms' ); ?></span>
+				<span class="screen-reader-text"><?php esc_html_e( '(opens in a new tab)', 'sureforms' ); ?></span>
+			</a>
+		</div>
 		<?php
 	}
 
 	/**
 	 * Stylesheet for the admin "Edit Form" pill (#3029).
 	 *
-	 * `position: relative` on the container is scoped to the `srfm-styling-none`
-	 * case: with default styling on, the shipped CSS already sets it, so a global
-	 * rule here would only risk overriding a site that deliberately set it static.
-	 * Offsets use a small positive inset (`inset-inline-end`) so the pill sits
-	 * inside the box — no mobile horizontal overflow — and is RTL-correct.
+	 * The wrapper is a flow-level flex row rather than an absolute overlay, so the
+	 * pill reserves its own space and cannot cover a field (#3062). `justify-content`
+	 * uses the logical `flex-end`, which follows the writing direction and is
+	 * therefore RTL-correct without a separate rule.
+	 *
+	 * No `position: relative` on the container any more: that rule existed solely to
+	 * be the positioning context for the old overlay.
 	 *
 	 * @return string
 	 * @since 2.12.4
 	 */
 	private static function get_edit_form_button_css() {
 		return '
-		.srfm-form-container.srfm-styling-none { position: relative; }
+		.srfm-edit-form-btn-wrap {
+			display: flex;
+			justify-content: flex-end;
+			margin-block-end: 8px;
+		}
 		.srfm-edit-form-btn {
-			position: absolute;
-			top: 8px;
-			inset-inline-end: 8px;
-			z-index: 5;
 			display: inline-flex;
 			align-items: center;
 			gap: 6px;

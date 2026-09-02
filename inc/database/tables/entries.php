@@ -261,7 +261,16 @@ class Entries extends Base {
 			$data['logs'] = $instance->get_logs();
 		}
 
-		return $instance->use_insert( $data );
+		$result = $instance->use_insert( $data );
+
+		if ( ! $result ) {
+			// A failed entries write is the live-drop signal issue #3084 describes: the
+			// table can have been dropped after being cached as present. Drop that cache
+			// so the next admin load re-checks instead of trusting a stale answer.
+			\SRFM\Inc\Database\Register::flush_entries_table_cache();
+		}
+
+		return $result;
 	}
 
 	/**

@@ -448,6 +448,11 @@ class Post_Types {
 			]
 		);
 
+		// NOTE: `_srfm_form_views` is intentionally NOT registered here. It is a
+		// server-side counter written only by Form_Views (get/add_post_meta + atomic
+		// SQL). Exposing it to the block editor via show_in_rest let a form save /
+		// autosave round-trip a stale value and clobber the live count back to 0.
+
 		// Form Custom CSS meta.
 		register_post_meta(
 			'sureforms_form',
