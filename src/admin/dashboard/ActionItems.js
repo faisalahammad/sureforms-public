@@ -70,6 +70,34 @@ export default () => {
 		setDismissed( ( prev ) => [ ...prev, item.id ] );
 	};
 
+	// Self-serve first. Someone who can fix it themselves should see that before
+	// they are pointed at a support queue, and the emphasis follows the order
+	// rather than the identity -- whichever action leads reads as the primary one,
+	// so an item with no guide still has Contact Support in front.
+	const actionsFor = ( item ) => [
+		...( item.guide_label && item.guide_url
+			? [
+				{
+					name: item.guide_action,
+					label: item.guide_label,
+					url: item.guide_url,
+					external: true,
+				},
+			  ]
+			: [] ),
+		...( item.cta_label
+			? [
+				{
+					name: item.cta_action,
+					label: item.cta_label,
+					url: item.cta_url,
+					// A mailto: must open in the mail client, not a new tab.
+					external: ! item.cta_url?.startsWith( 'mailto:' ),
+				},
+			  ]
+			: [] ),
+	];
+
 	// The mailto now carries the log in its body, so the link just works -- no
 	// download to trigger, nothing to intercept.
 	const handleFix = ( item, action ) => () =>
@@ -141,47 +169,33 @@ export default () => {
 									</Button>
 								) }
 							</div>
-							{ ( !! item.cta_label || !! item.guide_label ) && (
+							{ !! actionsFor( item ).length && (
 								<div className="pl-6 flex items-center gap-4">
-									{ !! item.cta_label && (
-										<Button
-											variant="link"
-											size="xs"
-											tag="a"
-											href={ item.cta_url }
-											{ ...( ! item.cta_url?.startsWith(
-												'mailto:'
-											) && {
-												target: '_blank',
-												rel: 'noopener noreferrer',
-											} ) }
-											onClick={ handleFix(
-												item,
-												item.cta_action
-											) }
-											className="font-medium focus:outline-none focus:[box-shadow:none] [&>span]:px-0"
-										>
-											{ item.cta_label }
-										</Button>
-									) }
-									{ /* A second action, when the failure is one the
-									     site owner can usually fix themselves. */ }
-									{ !! item.guide_label && !! item.guide_url && (
-										<Button
-											variant="link"
-											size="xs"
-											tag="a"
-											href={ item.guide_url }
-											target="_blank"
-											rel="noopener noreferrer"
-											onClick={ handleFix(
-												item,
-												item.guide_action
-											) }
-											className="font-medium focus:outline-none focus:[box-shadow:none] [&>span]:px-0 text-text-secondary"
-										>
-											{ item.guide_label }
-										</Button>
+									{ actionsFor( item ).map(
+										( action, index ) => (
+											<Button
+												key={ action.name }
+												variant="link"
+												size="xs"
+												tag="a"
+												href={ action.url }
+												{ ...( action.external && {
+													target: '_blank',
+													rel: 'noopener noreferrer',
+												} ) }
+												onClick={ handleFix(
+													item,
+													action.name
+												) }
+												className={ `font-medium focus:outline-none focus:[box-shadow:none] [&>span]:px-0${
+													index > 0
+														? ' text-text-secondary'
+														: ''
+												}` }
+											>
+												{ action.label }
+											</Button>
+										)
 									) }
 								</div>
 							) }

@@ -3429,20 +3429,17 @@ JS;
 			<div class="notice <?php echo esc_attr( $class ); ?>">
 				<p><strong><?php echo esc_html( $item['title'] ); ?></strong></p>
 				<p><?php echo esc_html( $item['message'] ); ?></p>
+				<?php
+				// Self-serve first, so the emphasis follows the order rather than the
+				// identity: whichever action leads is the primary button, and an item
+				// with no guide still leads with Contact Support.
+				$has_guide = ! empty( $item['guide_label'] ) && ! empty( $item['guide_url'] );
+				?>
 				<p>
-					<a
-						href="<?php echo esc_url( Helper::get_string_value( $item['cta_url'] ) ); ?>"
-						class="button button-primary"
-						data-srfm-notice-id="<?php echo esc_attr( Helper::get_string_value( $item['id'] ) ); ?>"
-						data-srfm-button="<?php echo esc_attr( Helper::get_string_value( $item['cta_action'] ?? '' ) ); ?>"
-						<?php echo 0 === strpos( Helper::get_string_value( $item['cta_url'] ), 'mailto:' ) ? '' : 'target="_blank" rel="noopener noreferrer"'; ?>
-					>
-						<?php echo esc_html( $item['cta_label'] ); ?>
-					</a>
-					<?php if ( ! empty( $item['guide_label'] ) && ! empty( $item['guide_url'] ) ) { ?>
+					<?php if ( $has_guide ) { ?>
 						<a
 							href="<?php echo esc_url( Helper::get_string_value( $item['guide_url'] ) ); ?>"
-							class="button"
+							class="button button-primary"
 							data-srfm-notice-id="<?php echo esc_attr( Helper::get_string_value( $item['id'] ) ); ?>"
 							data-srfm-button="<?php echo esc_attr( Helper::get_string_value( $item['guide_action'] ?? '' ) ); ?>"
 							target="_blank"
@@ -3451,6 +3448,15 @@ JS;
 							<?php echo esc_html( $item['guide_label'] ); ?>
 						</a>
 					<?php } ?>
+					<a
+						href="<?php echo esc_url( Helper::get_string_value( $item['cta_url'] ) ); ?>"
+						class="<?php echo $has_guide ? 'button' : 'button button-primary'; ?>"
+						data-srfm-notice-id="<?php echo esc_attr( Helper::get_string_value( $item['id'] ) ); ?>"
+						data-srfm-button="<?php echo esc_attr( Helper::get_string_value( $item['cta_action'] ?? '' ) ); ?>"
+						<?php echo 0 === strpos( Helper::get_string_value( $item['cta_url'] ), 'mailto:' ) ? '' : 'target="_blank" rel="noopener noreferrer"'; ?>
+					>
+						<?php echo esc_html( $item['cta_label'] ); ?>
+					</a>
 					<?php if ( ! empty( $item['dismissible'] ) ) { ?>
 						<a href="<?php echo esc_url( $this->get_dismiss_action_item_url( Helper::get_string_value( $item['id'] ) ) ); ?>" class="button">
 							<?php esc_html_e( 'Dismiss', 'sureforms' ); ?>

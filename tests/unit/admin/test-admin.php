@@ -1296,6 +1296,69 @@ class Test_Admin extends TestCase {
 	}
 
 	/**
+	 * The guide leads and Contact Support follows, in both surfaces.
+	 *
+	 * Someone who can fix it themselves should see that before being pointed at a
+	 * support queue. Emphasis follows position rather than identity, so an item with
+	 * no guide still leads with Contact Support as the primary button -- asserted
+	 * here, because a swap that only reorders would leave the secondary styling on
+	 * the leading action.
+	 */
+	public function test_render_action_item_notices_puts_the_guide_before_contact_support() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
+		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
+
+		global $pagenow;
+		$previous_pagenow = $pagenow;
+		$pagenow          = 'plugins.php';
+
+		ob_start();
+		Admin::get_instance()->render_action_item_notices();
+		$html = (string) ob_get_clean();
+
+		$pagenow = $previous_pagenow;
+
+		$guide = strpos( $html, 'help_me_fix' );
+		$this->assertNotFalse( $guide, 'The notification guide must render.' );
+
+		// The support link that follows it, not the one in the submission notice
+		// above, so this measures order within the same notice.
+		$support_after_guide = strpos( $html, 'contact_support', $guide );
+		$this->assertNotFalse( $support_after_guide, 'Contact Support must follow the guide.' );
+		$this->assertGreaterThan( $guide, $support_after_guide );
+
+		// Whichever action leads carries the primary button.
+		$this->assertMatchesRegularExpression(
+			'/class="button button-primary"[^>]*data-srfm-button="help_me_fix"/',
+			$html,
+			'The leading action must be the primary button.'
+		);
+		$this->assertMatchesRegularExpression(
+			'/class="button"[^>]*data-srfm-button="contact_support"/',
+			$html,
+			'The following action must be secondary.'
+		);
+
+		// An item with no guide keeps Contact Support primary.
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
+
+		$pagenow = 'plugins.php';
+		ob_start();
+		Admin::get_instance()->render_action_item_notices();
+		$alone = (string) ob_get_clean();
+		$pagenow = $previous_pagenow;
+
+		$this->assertMatchesRegularExpression(
+			'/class="button button-primary"[^>]*data-srfm-button="contact_support"/',
+			$alone,
+			'With no guide, Contact Support leads and stays primary.'
+		);
+	}
+
+	/**
 	 * An unknown category gets neutral wording rather than a specific claim.
 	 *
 	 * srfm_action_items is public, so an item can arrive with no category at all.
