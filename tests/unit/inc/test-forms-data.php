@@ -8,6 +8,7 @@
 use Yoast\PHPUnitPolyfills\TestCases\TestCase;
 use SRFM\Inc\Forms_Data;
 use SRFM\Inc\Helper;
+use SRFM\Inc\Database\Tables\Entries;
 
 class Test_Forms_Data extends TestCase {
 
@@ -65,6 +66,19 @@ class Test_Forms_Data extends TestCase {
 	/**
 	 * Helper: create an admin user, set as current, and return the user ID.
 	 */
+	/**
+	 * Create a user with the given role. Not set as the current user.
+	 */
+	private function make_user( string $role ): int {
+		return (int) wp_insert_user(
+			[
+				'user_login' => 'srfm_' . $role . '_' . wp_generate_password( 6, false ),
+				'user_pass'  => 'password',
+				'role'       => $role,
+			]
+		);
+	}
+
 	private function set_admin_user(): int {
 		$user_id = wp_insert_user(
 			[
@@ -244,37 +258,121 @@ class Test_Forms_Data extends TestCase {
 		$form_id = $this->make_tracked_form( 10 );
 
 		// Tracking off → no numbers at all, and no entry query.
-		$off = $this->call_private( 'calculate_form_metrics', [ $form_id, '', null ] );
+		$off = $this->call_private( 'calculate_form_metrics', [ $form_id ] );
 		$this->assertSame( 0, $off['views'], 'Views must not be reported while the feature is off.' );
 		$this->assertNull( $off['conversion_rate'], 'No rate while the feature is off.' );
 
 		// Enable → window opens, views are reported.
 		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => true ] );
-		$on = $this->call_private( 'calculate_form_metrics', [ $form_id, '', null ] );
+		$on = $this->call_private( 'calculate_form_metrics', [ $form_id ] );
 		$this->assertSame( 10, $on['views'], 'Views should be reported once enabled.' );
 		$this->assertSame( 0.0, $on['conversion_rate'], 'No entries yet is a real 0%, not a dash.' );
 
 		// A form with no views cannot have a rate — 0 views is not 0%.
 		$unseen = $this->make_tracked_form( 0 );
-		$none   = $this->call_private( 'calculate_form_metrics', [ $unseen, '', null ] );
+		$none   = $this->call_private( 'calculate_form_metrics', [ $unseen ] );
 		$this->assertSame( 0, $none['views'] );
 		$this->assertNull( $none['conversion_rate'], 'Zero views must give a dash, not 0%.' );
 
-		// More entries than views is impossible, so the count is incomplete and any
-		// percentage would be invented. The caller's all-time count is used directly
-		// when the form is younger than the window, which is the cheap path.
-		$young = $this->make_tracked_form( 2, gmdate( 'Y-m-d H:i:s' ) );
-		$over  = $this->call_private( 'calculate_form_metrics', [ $young, gmdate( 'Y-m-d H:i:s' ), 50 ] );
+		// More entries than views means the view count is incomplete, so any
+		// percentage would be invented.
+		$over_form = $this->make_tracked_form( 2 );
+		for ( $i = 0; $i < 3; $i++ ) {
+			Entries::add(
+				[
+					'form_id'   => $over_form,
+					'form_data' => [],
+				]
+			);
+		}
+		$over = $this->call_private( 'calculate_form_metrics', [ $over_form ] );
 		$this->assertSame( 2, $over['views'] );
 		$this->assertNull( $over['conversion_rate'], 'Entries exceeding views must render as a dash, never >100%.' );
 
-		// Normal case on the cheap path: 1 entry, 2 views → 50%.
-		$half = $this->call_private( 'calculate_form_metrics', [ $young, gmdate( 'Y-m-d H:i:s' ), 1 ] );
+		// Normal case: 1 entry, 2 views → 50%.
+		$half_form = $this->make_tracked_form( 2 );
+		Entries::add(
+			[
+				'form_id'   => $half_form,
+				'form_data' => [],
+			]
+		);
+		$half = $this->call_private( 'calculate_form_metrics', [ $half_form ] );
 		$this->assertSame( 50.0, $half['conversion_rate'] );
 
 		wp_delete_post( $form_id, true );
 		wp_delete_post( $unseen, true );
-		wp_delete_post( $young, true );
+		wp_delete_post( $over_form, true );
+		wp_delete_post( $half_form, true );
+		delete_option( 'srfm_general_settings_options' );
+		delete_option( \SRFM\Inc\Form_Views::TRACKING_STARTED_OPTION );
+	}
+
+	/**
+	 * Entries submitted by someone who can edit the site are left out of the rate.
+	 *
+	 * Views already exclude those people (Form_Views::should_track()), so counting
+	 * their submissions adds to the numerator and nothing to the denominator. An
+	 * admin testing a new form five times would report a rate several times the
+	 * real one, or trip the entries-exceed-views guard and render a dash on a form
+	 * that is working perfectly well.
+	 */
+	public function test_calculate_form_metrics_excludes_entries_from_users_who_can_edit() {
+		delete_option( \SRFM\Inc\Form_Views::TRACKING_STARTED_OPTION );
+		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => true ] );
+
+		$editor     = $this->make_user( 'editor' );
+		$subscriber = $this->make_user( 'subscriber' );
+
+		// The list is cached per request, and these users were created after
+		// earlier tests in this class already warmed it.
+		$cache = new ReflectionProperty( Forms_Data::class, 'editing_user_ids' );
+		$cache->setAccessible( true );
+		$cache->setValue( null, null );
+
+		$form_id = $this->make_tracked_form( 10 );
+
+		// Four entries, three of which must not count: the admin and editor can edit
+		// the site, so their views were never recorded either.
+		foreach ( [ 1, $editor, $editor, 0 ] as $user_id ) {
+			Entries::add(
+				[
+					'form_id'   => $form_id,
+					'user_id'   => $user_id,
+					'form_data' => [],
+				]
+			);
+		}
+
+		$metrics = $this->call_private( 'calculate_form_metrics', [ $form_id ] );
+
+		$this->assertSame( 10, $metrics['views'] );
+		$this->assertSame(
+			10.0,
+			$metrics['conversion_rate'],
+			'Only the logged-out entry counts: 1 of 10 views is 10%, not 40%.'
+		);
+
+		// A logged-in visitor who cannot edit is a real conversion, and their view
+		// was counted, so their entry must be counted too.
+		Entries::add(
+			[
+				'form_id'   => $form_id,
+				'user_id'   => $subscriber,
+				'form_data' => [],
+			]
+		);
+
+		$with_subscriber = $this->call_private( 'calculate_form_metrics', [ $form_id ] );
+		$this->assertSame(
+			20.0,
+			$with_subscriber['conversion_rate'],
+			'A subscriber is a genuine visitor on both halves of the rate.'
+		);
+
+		wp_delete_post( $form_id, true );
+		wp_delete_user( $editor );
+		wp_delete_user( $subscriber );
 		delete_option( 'srfm_general_settings_options' );
 		delete_option( \SRFM\Inc\Form_Views::TRACKING_STARTED_OPTION );
 	}
@@ -288,7 +386,7 @@ class Test_Forms_Data extends TestCase {
 
 		$form_id = $this->make_tracked_form( 7 );
 		$row     = $this->call_private( 'prepare_form_for_listing', [ get_post( $form_id ) ] );
-		$metrics = $this->call_private( 'calculate_form_metrics', [ $form_id, get_post( $form_id )->post_date_gmt, $row['entries_count'] ] );
+		$metrics = $this->call_private( 'calculate_form_metrics', [ $form_id ] );
 
 		$this->assertSame( $metrics['views'], $row['views'], 'The row must show the calculated views.' );
 		$this->assertSame( $metrics['conversion_rate'], $row['conversion_rate'], 'The row must show the calculated rate.' );

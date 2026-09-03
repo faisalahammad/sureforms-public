@@ -26,6 +26,22 @@ class Forms_Data {
 	use Get_Instance;
 
 	/**
+	 * Cached ids of users who can edit the site, or null before the first lookup.
+	 *
+	 * A class property rather than a `static` inside the method so it can be reset,
+	 * which the tests need: they create a user and then ask for the metrics inside
+	 * one process.
+	 *
+	 * Deliberately per-request and never written to the object cache. A persistent
+	 * cache would keep counting a newly promoted editor as a visitor until
+	 * something invalidated it, and there is no natural invalidation point.
+	 *
+	 * @var array<int,int>|null
+	 * @since 2.12.6
+	 */
+	private static $editing_user_ids = null;
+
+	/**
 	 * Constructor
 	 *
 	 * @since 0.0.1
@@ -348,20 +364,12 @@ class Forms_Data {
 		foreach ( $id_query->posts as $post_id ) {
 			$form_id = Helper::get_integer_value( $post_id );
 
-			// Same three arguments the render path passes. Calling this with only the
-			// form ID left $post_date_gmt empty, so strtotime() returned false, the
-			// "form is younger than the window" shortcut could never be taken, and the
-			// windowed COUNT ran for every row — both a second query per form and, for
-			// any entry whose created_at predates the form's post_date (an import, a
-			// migration, a restored backup), a different number than the column shows.
-			// The comment below promises order and display can never disagree; passing
-			// different arguments here is what made them disagree.
-			$post    = get_post( $form_id );
-			$metrics = $this->calculate_form_metrics(
-				$form_id,
-				$post->post_date_gmt ?? '',
-				Helper::get_integer_value( Entries::get_total_entries_by_status( 'all', $form_id ) )
-			);
+			// The form id is the whole input, here and on the render path, so the two
+			// cannot be handed different arguments and compute different numbers.
+			// They once could: this took a creation date and an all-time count as
+			// well, the two callers passed them differently, and the column and its
+			// sort order disagreed.
+			$metrics = $this->calculate_form_metrics( $form_id );
 
 			// Same helper the column renders from, so the order always matches the
 			// numbers on screen. An unmeasurable rate sorts as -1 rather than 0, so
@@ -444,6 +452,47 @@ class Forms_Data {
 	}
 
 	/**
+	 * Ids of every user who can edit the site, cached for the request.
+	 *
+	 * The mirror of Form_Views::should_track()'s `user_can( $user_id, 'edit_posts' )`
+	 * check, so the same people are absent from both halves of the rate.
+	 *
+	 * Cached because the forms listing asks once per row, and the answer cannot
+	 * change within a request.
+	 *
+	 * Approximates the view gate rather than matching it exactly: this reads roles
+	 * and capability meta, while `user_can()` also honours a `user_has_cap` filter,
+	 * so a capability granted at runtime by a membership plugin is excluded from
+	 * views but still counted here. Close enough for a percentage, and the
+	 * alternative is user_can() per entry.
+	 *
+	 * @since 2.12.6
+	 * @return array<int,int>
+	 */
+	private static function get_editing_user_ids() {
+		if ( null !== self::$editing_user_ids ) {
+			return self::$editing_user_ids;
+		}
+
+		// ponytail: NOT IN over this list is fine for the handful of editors a
+		// typical site has; a site with thousands of authors wants a user_id > 0
+		// join instead.
+		self::$editing_user_ids = array_map(
+			'intval',
+			Helper::get_array_value(
+				get_users(
+					[
+						'capability' => 'edit_posts',
+						'fields'     => 'ID',
+					]
+				)
+			)
+		);
+
+		return self::$editing_user_ids;
+	}
+
+	/**
 	 * Views and conversion rate for one form.
 	 *
 	 * The single source of truth for both the rendered value and the sorted metric.
@@ -452,20 +501,25 @@ class Forms_Data {
 	 * rendering a dash sorted as though its rate were several hundred percent.
 	 * Anything needing these numbers must come through here.
 	 *
-	 * Returns `null` for the rate rather than a number whenever it cannot be
-	 * measured — tracking off, window never opened, no views yet, or more entries
-	 * than views. That last case is not possible in reality (every entry needs a
-	 * view first), so it means the view count is incomplete and any percentage
-	 * would be invented; the table renders the dash instead. `0.0` is reserved for
-	 * a real measurement of zero.
+	 * Both halves exclude the same people. Views are not counted for anyone who
+	 * can edit the site (Form_Views::should_track()), so their submissions must not
+	 * be counted either: testing your own form five times would otherwise add five
+	 * to the numerator and nothing to the denominator, and report a rate several
+	 * times the real one. The Entries column is unaffected and stays a true
+	 * all-time count of every entry received.
 	 *
-	 * @param int    $form_id       Form post ID.
-	 * @param string $post_date_gmt Form creation date, GMT. Used to skip a redundant count.
-	 * @param int    $entries_all_time All-time entry count, when the caller already has it.
+	 * Returns `null` for the rate rather than a number whenever it cannot be
+	 * measured: tracking off, window never opened, no views yet, or more entries
+	 * than views. That last case should not arise once both halves exclude the same
+	 * people, so it means the view count is incomplete and any percentage would be
+	 * invented; the table renders the dash instead. `0.0` is reserved for a real
+	 * measurement of zero.
+	 *
+	 * @param int $form_id Form post ID.
 	 * @return array{views:int,conversion_rate:float|null}
 	 * @since 2.12.6
 	 */
-	private function calculate_form_metrics( $form_id, $post_date_gmt = '', $entries_all_time = null ) {
+	private function calculate_form_metrics( $form_id ) {
 		$none = [
 			'views'           => 0,
 			'conversion_rate' => null,
@@ -491,32 +545,38 @@ class Forms_Data {
 
 		// Compare like with like. The Entries column is all-time, but views only start
 		// accruing when tracking opens, so the rate counts entries from that same
-		// moment — otherwise a form that existed beforehand divides years of entries by
-		// days of views and reports a rate that is pure noise.
-		$form_created = strtotime( (string) $post_date_gmt );
+		// moment. Otherwise a form that existed beforehand divides years of entries
+		// by days of views and reports a rate that is pure noise.
+		$where = [
+			[
+				[
+					'key'     => 'created_at',
+					'compare' => '>=',
+					'value'   => self::window_boundary_sql( $window_start ),
+				],
+			],
+		];
 
-		if ( null !== $entries_all_time && $form_created && $form_created >= $window_start ) {
-			// The form is younger than the window, so every entry it has is already
-			// inside the window and the caller's all-time count is the same number.
-			// Skips a second COUNT per row on the listing.
-			$entries_since = Helper::get_integer_value( $entries_all_time );
-		} else {
-			$entries_since = Helper::get_integer_value(
-				Entries::get_total_entries_by_status(
-					'all',
-					$form_id,
-					[
-						[
-							[
-								'key'     => 'created_at',
-								'compare' => '>=',
-								'value'   => self::window_boundary_sql( $window_start ),
-							],
-						],
-					]
-				)
-			);
+		$editing_users = self::get_editing_user_ids();
+
+		if ( [] !== $editing_users ) {
+			$where[] = [
+				[
+					'key'     => 'user_id',
+					'compare' => 'NOT IN',
+					'value'   => $editing_users,
+				],
+			];
 		}
+
+		// Always counted, never taken from the caller's all-time total. That total
+		// includes the entries this exclusion exists to drop, so reusing it for a
+		// form created inside the window -- the newly built form an admin has just
+		// been testing, which is exactly the case that skews -- would hand back the
+		// unfiltered number and quietly undo the exclusion.
+		$entries_since = Helper::get_integer_value(
+			Entries::get_total_entries_by_status( 'all', $form_id, $where )
+		);
 
 		if ( $entries_since > $views ) {
 			return [
@@ -546,7 +606,7 @@ class Forms_Data {
 
 		// Views and conversion rate come from the same helper the sort path uses, so the
 		// column can never order by a different number than it displays.
-		$metrics         = $this->calculate_form_metrics( $form_id, $post->post_date_gmt, $entries_count );
+		$metrics         = $this->calculate_form_metrics( $form_id );
 		$views           = $metrics['views'];
 		$conversion_rate = $metrics['conversion_rate'];
 

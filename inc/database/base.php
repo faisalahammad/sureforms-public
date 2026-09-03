@@ -89,7 +89,7 @@ abstract class Base {
 	 * @var array<string>
 	 * @since 1.8.0
 	 */
-	private $allowed_where_operators = [ 'LIKE', 'IN', '=', '!=', '>', '<', '>=', '<=' ];
+	private $allowed_where_operators = [ 'LIKE', 'IN', 'NOT IN', '=', '!=', '>', '<', '>=', '<=' ];
 
 	/**
 	 * Init class.
@@ -1053,6 +1053,7 @@ abstract class Base {
 	 * }
 	 *
 	 * @since 1.1.1 -- Added support for "IN" compare.
+	 * @since 2.12.6 -- Added support for "NOT IN" compare.
 	 * @since 0.0.13
 	 * @return string The prepared SQL WHERE clause with placeholders, or an empty string if no clauses were provided.
 	 */
@@ -1100,6 +1101,16 @@ abstract class Base {
 									break;
 
 								case 'IN':
+								case 'NOT IN':
+									// An empty list cannot be interpolated: "col IN ()" is a syntax
+									// error that fails the whole query, listing and COUNT alike.
+									// Emit the constant the empty set actually means instead, so
+									// neither operator can silently widen to match everything.
+									if ( ! is_array( $_value['value'] ) || [] === $_value['value'] ) {
+										$clause_parts[] = 'IN' === $_value['compare'] ? '1 = 0' : '1 = 1';
+										break;
+									}
+
 									// Based on the number of values and datatype, it will create WHERE clause for $wpdb::prepare method. Eg: for ID with three values column: ID IN (%d, %d, %d).
 									$datatype       = $this->get_format_by_datatype( Helper::get_string_value( $schema[ $_value['key'] ]['type'] ) );
 									$clause_parts[] = $_value['key'] . ' ' . $_value['compare'] . ' (' . implode( ', ', array_fill( 0, count( $_value['value'] ), $datatype ) ) . ')';
