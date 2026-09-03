@@ -2819,6 +2819,7 @@ JS;
 			],
 			'notification_error'          => [
 				'contact_support' => 'notification_failure_notice_cta',
+				'help_me_fix'     => 'notification_failure_notice_guide',
 				'dismissed'       => 'notification_failure_notice_dismiss',
 			],
 			'integration_error'           => [
@@ -3438,6 +3439,18 @@ JS;
 					>
 						<?php echo esc_html( $item['cta_label'] ); ?>
 					</a>
+					<?php if ( ! empty( $item['guide_label'] ) && ! empty( $item['guide_url'] ) ) { ?>
+						<a
+							href="<?php echo esc_url( Helper::get_string_value( $item['guide_url'] ) ); ?>"
+							class="button"
+							data-srfm-notice-id="<?php echo esc_attr( Helper::get_string_value( $item['id'] ) ); ?>"
+							data-srfm-button="<?php echo esc_attr( Helper::get_string_value( $item['guide_action'] ?? '' ) ); ?>"
+							target="_blank"
+							rel="noopener noreferrer"
+						>
+							<?php echo esc_html( $item['guide_label'] ); ?>
+						</a>
+					<?php } ?>
 					<?php if ( ! empty( $item['dismissible'] ) ) { ?>
 						<a href="<?php echo esc_url( $this->get_dismiss_action_item_url( Helper::get_string_value( $item['id'] ) ) ); ?>" class="button">
 							<?php esc_html_e( 'Dismiss', 'sureforms' ); ?>
@@ -3551,6 +3564,10 @@ JS;
 				'title'   => __( 'We noticed a notification failure on %s.', 'sureforms' ),
 				'generic' => __( 'We noticed a notification failure.', 'sureforms' ),
 				'message' => __( 'The entry was saved, but we could not send the email about it. New entries may be coming in without you knowing.', 'sureforms' ),
+				// Email is the one failure here a site owner can usually fix without
+				// us: it is almost always SMTP not being configured. Offer the guide
+				// alongside support rather than making them wait for a reply.
+				'guide'   => 'https://sureforms.com/docs/troubleshooting-email-sending-in-sureforms/',
 			],
 			'integration'  => [
 				'id'      => 'integration_error',
@@ -3570,7 +3587,7 @@ JS;
 			// twenty of them, and the title is the first thing anyone asks for.
 			$form_title = Helper::get_string_value( $open[ $category ]['form_title'] ?? '' );
 
-			$warnings[] = [
+			$warning = [
 				'id'          => $copy['id'],
 				'status'      => 'error',
 				'title'       => '' !== $form_title
@@ -3578,10 +3595,21 @@ JS;
 					: $copy['generic'],
 				'message'     => $copy['message'],
 				'cta_label'   => __( 'Contact Support', 'sureforms' ),
-				'cta_url'     => $this->get_support_mailto_url(),
+				'cta_url'     => $this->get_support_mailto_url( $category, $form_title ),
 				'cta_action'  => 'contact_support',
 				'dismissible' => false,
 			];
+
+			// A second, optional action. Absent keys render nothing, so a category
+			// without a guide needs no branch in either renderer, and neither does
+			// an item contributed through srfm_action_items.
+			if ( ! empty( $copy['guide'] ) ) {
+				$warning['guide_label']  = __( 'Help Me Fix', 'sureforms' );
+				$warning['guide_url']    = $copy['guide'];
+				$warning['guide_action'] = 'help_me_fix';
+			}
+
+			$warnings[] = $warning;
 		}
 
 		$caching_plugin = Helper::get_active_caching_plugin();
@@ -3597,7 +3625,7 @@ JS;
 				),
 				'message'     => __( 'Caching can show visitors an old copy of your form, or load its scripts in the wrong order.', 'sureforms' ),
 				'cta_label'   => __( 'Help Me Fix', 'sureforms' ),
-				'cta_url'     => 'https://sureforms.com/docs/how-to-set-up-sureforms-with-caching-plugins/',
+				'cta_url'     => Helper::get_caching_plugin_doc_url(),
 				'cta_action'  => 'help_me_fix',
 				'dismissible' => true,
 			];
@@ -4289,29 +4317,39 @@ JS;
 	}
 
 	/**
-	 * Pre-addressed support email for a run of failed submissions.
+	 * Pre-addressed support email for one kind of failure.
 	 *
 	 * Carries the details support would otherwise have to ask for, so the first
 	 * reply can be an answer rather than a questionnaire, along with the recent log
 	 * entries inline.
+	 *
+	 * The subject and the opening line both come from the category. They used to be
+	 * hardcoded to submissions, so a site whose email was failing sent support a
+	 * ticket titled "form submissions are failing" and a count that belonged to a
+	 * different counter -- wrong at a glance and routed to the wrong place.
 	 *
 	 * The log is pasted into the body rather than attached because mailto has no
 	 * attachment parameter -- browsers drop any attempt to add one -- and it is a
 	 * tail rather than the whole file because a megabyte of JSON would exceed the
 	 * URL length every mail client enforces.
 	 *
+	 * @param string $category   One of Client_Logger::CATEGORIES. Unknown or absent
+	 *                           gets neutral wording rather than a specific claim.
+	 * @param string $form_title Form the failure was recorded against, when known.
 	 * @since 2.12.6
 	 * @return string
 	 */
-	private function get_support_mailto_url() {
+	private function get_support_mailto_url( $category = '', $form_title = '' ) {
+		$copy = $this->get_support_copy( $category );
+
 		$subject = sprintf(
 			/* translators: %s: site host. */
-			__( 'SureForms: form submissions are failing on %s', 'sureforms' ),
+			$copy['subject'],
 			Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) )
 		);
 
 		$log   = Client_Logger::get_tail();
-		$body  = $this->get_support_message();
+		$body  = $this->get_support_message( $category, $form_title );
 		$body .= "\r\n\r\n" . '---' . "\r\n";
 
 		if ( '' === $log['text'] ) {
@@ -4345,43 +4383,118 @@ JS;
 	}
 
 	/**
+	 * Subject and opening line for one kind of failure.
+	 *
+	 * Both come from here so they cannot drift apart: a subject naming one problem
+	 * over a body describing another is worse than either alone.
+	 *
+	 * An unknown or absent category gets deliberately neutral wording. The
+	 * alternative -- defaulting to the submission copy -- states something specific
+	 * that may not be true, and an item contributed through srfm_action_items has no
+	 * category at all.
+	 *
+	 * @param string $category One of Client_Logger::CATEGORIES.
+	 * @since 2.12.6
+	 * @return array{subject:string,singular:string,plural:string}
+	 */
+	private function get_support_copy( $category ) {
+		$copy = [
+			'submission'   => [
+				/* translators: %s: site host. */
+				'subject'  => __( 'SureForms: form submissions are failing on %s', 'sureforms' ),
+				/* translators: %d: number of failed submissions. */
+				'singular' => __( 'SureForms has recorded %d form submission that could not be completed.', 'sureforms' ),
+				/* translators: %d: number of failed submissions. */
+				'plural'   => __( 'SureForms has recorded %d form submissions that could not be completed.', 'sureforms' ),
+			],
+			'notification' => [
+				/* translators: %s: site host. */
+				'subject'  => __( 'SureForms: notification emails are not being sent on %s', 'sureforms' ),
+				/* translators: %d: number of failed notifications. */
+				'singular' => __( 'SureForms saved %d entry but could not send the notification email for it.', 'sureforms' ),
+				/* translators: %d: number of failed notifications. */
+				'plural'   => __( 'SureForms saved %d entries but could not send the notification emails for them.', 'sureforms' ),
+			],
+			'integration'  => [
+				/* translators: %s: site host. */
+				'subject'  => __( 'SureForms: an integration is not receiving entries on %s', 'sureforms' ),
+				/* translators: %d: number of failed integration hand-offs. */
+				'singular' => __( 'SureForms saved %d entry but could not pass it to a connected service.', 'sureforms' ),
+				/* translators: %d: number of failed integration hand-offs. */
+				'plural'   => __( 'SureForms saved %d entries but could not pass them to a connected service.', 'sureforms' ),
+			],
+		];
+
+		if ( isset( $copy[ $category ] ) ) {
+			return $copy[ $category ];
+		}
+
+		return [
+			/* translators: %s: site host. */
+			'subject'  => __( 'SureForms: a problem with the forms on %s', 'sureforms' ),
+			/* translators: %d: number of recorded problems. */
+			'singular' => __( 'SureForms has recorded %d problem with the forms on this site.', 'sureforms' ),
+			/* translators: %d: number of recorded problems. */
+			'plural'   => __( 'SureForms has recorded %d problems with the forms on this site.', 'sureforms' ),
+		];
+	}
+
+	/**
 	 * Diagnostics block for the support email.
 	 *
 	 * Carries what support would otherwise have to ask for, so the first reply can
 	 * be an answer rather than a questionnaire.
 	 *
+	 * The count is the one for this category, not get_fault_streak(), which reports
+	 * submissions only -- so a notification failure used to quote a number from an
+	 * unrelated counter, often zero.
+	 *
+	 * @param string $category   One of Client_Logger::CATEGORIES.
+	 * @param string $form_title Form the failure was recorded against, when known.
 	 * @since 2.12.6
 	 * @return string
 	 */
-	private function get_support_message() {
+	private function get_support_message( $category = '', $form_title = '' ) {
 		global $wp_version;
 
-		$count = Client_Logger::get_fault_streak();
+		$failures = Client_Logger::get_failures();
+		$count    = Helper::get_integer_value( $failures[ $category ]['count'] ?? 0 );
+		$copy     = $this->get_support_copy( $category );
+
+		// A category with nothing recorded still needs to read as a sentence, and
+		// "0 entries" reads as a bug in the email rather than a fault on the site.
+		$count = max( 1, $count );
 
 		$lines = [
 			__( 'Hello SureForms support,', 'sureforms' ),
 			'',
-			sprintf(
-				/* translators: %d: number of consecutive failed submissions. */
-				_n(
-					'SureForms has recorded %d form submission in a row that could not be completed.',
-					'SureForms has recorded %d form submissions in a row that could not be completed.',
-					$count,
-					'sureforms'
-				),
-				$count
-			),
-			'',
-			'---',
-			__( 'Site details', 'sureforms' ),
-			'Site: ' . home_url(),
-			'SureForms: ' . SRFM_VER,
-			'SureForms Pro: ' . ( Helper::has_pro() && defined( 'SRFM_PRO_VER' ) ? SRFM_PRO_VER : __( 'not active', 'sureforms' ) ),
-			'WordPress: ' . Helper::get_string_value( $wp_version ),
-			'PHP: ' . PHP_VERSION,
-			'Caching: ' . ( '' !== Helper::get_active_caching_plugin() ? Helper::get_active_caching_plugin() : __( 'none detected', 'sureforms' ) ),
-			'Consecutive failures: ' . $count,
+			sprintf( 1 === $count ? $copy['singular'] : $copy['plural'], $count ),
 		];
+
+		if ( '' !== $form_title ) {
+			$lines[] = '';
+			$lines[] = sprintf(
+				/* translators: %s: form title. */
+				__( 'Form: %s', 'sureforms' ),
+				$form_title
+			);
+		}
+
+		$lines = array_merge(
+			$lines,
+			[
+				'',
+				'---',
+				__( 'Site details', 'sureforms' ),
+				'Site: ' . home_url(),
+				'SureForms: ' . SRFM_VER,
+				'SureForms Pro: ' . ( Helper::has_pro() && defined( 'SRFM_PRO_VER' ) ? SRFM_PRO_VER : __( 'not active', 'sureforms' ) ),
+				'WordPress: ' . Helper::get_string_value( $wp_version ),
+				'PHP: ' . PHP_VERSION,
+				'Caching: ' . ( '' !== Helper::get_active_caching_plugin() ? Helper::get_active_caching_plugin() : __( 'none detected', 'sureforms' ) ),
+				'Recorded failures: ' . $count,
+			]
+		);
 
 		return implode( "\r\n", $lines );
 	}

@@ -3232,6 +3232,72 @@ class Test_Helper extends TestCase {
 	}
 
 	/**
+	 * Each plugin with a guide of its own must link to that guide.
+	 *
+	 * The point of the notice is advice the site owner can act on, and a page that
+	 * names the plugin they actually run is the difference between following it and
+	 * translating it. Asserted per plugin rather than as a count, so renaming a slug
+	 * fails here instead of quietly serving the general page.
+	 */
+	public function test_get_caching_plugin_doc_url() {
+		$expected = [
+			'litespeed-cache/litespeed-cache.php' => 'https://sureforms.com/docs/how-to-set-up-sureforms-with-litespeed-cache/',
+			'wp-rocket/wp-rocket.php'             => 'https://sureforms.com/docs/how-to-set-up-sureforms-with-wp-rocket/',
+			'w3-total-cache/w3-total-cache.php'   => 'https://sureforms.com/docs/how-to-set-up-sureforms-with-w3-total-cache/',
+			'wp-fastest-cache/wpFastestCache.php' => 'https://sureforms.com/docs/how-to-set-up-sureforms-with-wp-fastest-cache/',
+			'sg-cachepress/sg-cachepress.php'     => 'https://sureforms.com/docs/how-to-set-up-sureforms-with-siteground-optimizer/',
+			'autoptimize/autoptimize.php'         => 'https://sureforms.com/docs/how-to-set-up-sureforms-with-autoptimize/',
+		];
+
+		foreach ( $expected as $path => $url ) {
+			$filter = static function () use ( $path ) {
+				return [ $path ];
+			};
+
+			add_filter( 'pre_option_active_plugins', $filter );
+			$detected = Helper::get_caching_plugin_doc_url();
+			remove_filter( 'pre_option_active_plugins', $filter );
+
+			$this->assertSame( $url, $detected, $path . ' must link to its own guide.' );
+		}
+	}
+
+	/**
+	 * A recognised plugin with no guide of its own, and a site with no caching
+	 * plugin at all, both fall back to the general guide.
+	 *
+	 * Returning nothing would leave the notice with a Help Me Fix link pointing
+	 * nowhere, which is worse than general advice.
+	 */
+	public function test_get_caching_plugin_doc_url_falls_back_to_the_general_guide() {
+		$general = 'https://sureforms.com/docs/how-to-set-up-sureforms-with-caching-plugins/';
+
+		// Recognised, but has no guide of its own.
+		$filter = static function () {
+			return [ 'breeze/breeze.php' ];
+		};
+
+		add_filter( 'pre_option_active_plugins', $filter );
+		$detected = Helper::get_caching_plugin_doc_url();
+		$name     = Helper::get_active_caching_plugin();
+		remove_filter( 'pre_option_active_plugins', $filter );
+
+		$this->assertSame( $general, $detected, 'A plugin with no guide gets the general one.' );
+		$this->assertSame( 'Breeze', $name, 'It is still detected by name.' );
+
+		// No caching plugin at all.
+		$none = static function () {
+			return [ 'akismet/akismet.php' ];
+		};
+
+		add_filter( 'pre_option_active_plugins', $none );
+		$detected = Helper::get_caching_plugin_doc_url();
+		remove_filter( 'pre_option_active_plugins', $none );
+
+		$this->assertSame( $general, $detected, 'No caching plugin still yields a usable link.' );
+	}
+
+	/**
 	 * A site with no caching plugin must produce nothing. Caching plugins are
 	 * common but far from universal, and a false positive puts a permanent
 	 * "your forms may be broken" card on a site that is fine.

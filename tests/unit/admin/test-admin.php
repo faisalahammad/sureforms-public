@@ -1147,6 +1147,177 @@ class Test_Admin extends TestCase {
 	}
 
 	/**
+	 * The notification failure offers the SMTP guide alongside Contact Support.
+	 *
+	 * Email is the one failure here a site owner can usually fix without us -- it is
+	 * almost always SMTP not being configured -- so making them wait on a support
+	 * reply for it is the wrong default. The other two categories have no guide, and
+	 * must not grow an empty second button.
+	 */
+	public function test_get_action_items_offers_a_guide_for_notification_failures() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
+
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
+		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
+
+		$items = [];
+		foreach ( Admin::get_instance()->get_action_items() as $item ) {
+			$items[ $item['id'] ] = $item;
+		}
+
+		$this->assertArrayHasKey( 'notification_error', $items );
+		$this->assertSame(
+			'https://sureforms.com/docs/troubleshooting-email-sending-in-sureforms/',
+			$items['notification_error']['guide_url'] ?? '',
+			'The notification failure must link to the email troubleshooting guide.'
+		);
+		$this->assertSame( 'help_me_fix', $items['notification_error']['guide_action'] ?? '' );
+		$this->assertNotEmpty( $items['notification_error']['guide_label'] ?? '' );
+
+		// Contact Support is still there; the guide is an addition, not a swap.
+		$this->assertSame( 'contact_support', $items['notification_error']['cta_action'] ?? '' );
+
+		// A category with no guide must not carry empty guide keys, which both
+		// renderers treat as "render a second button".
+		$this->assertArrayHasKey( 'form_submission_error', $items );
+		$this->assertArrayNotHasKey( 'guide_url', $items['form_submission_error'] );
+		$this->assertArrayNotHasKey( 'guide_label', $items['form_submission_error'] );
+	}
+
+	/**
+	 * The guide click is a distinct analytics event, and is accepted by the
+	 * allowlist that gates every notice response.
+	 *
+	 * A button the allowlist does not know about is rejected with a 400, so adding
+	 * a CTA without its allowlist entry ships a link that reports nothing.
+	 */
+	public function test_handle_notice_response_accepts_the_notification_guide() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+
+		// check_ajax_referer() reads $_REQUEST, so $_POST alone fails the nonce.
+		$nonce                 = wp_create_nonce( 'srfm_notice_response' );
+		$_POST['nonce']        = $nonce;
+		$_REQUEST['nonce']     = $nonce;
+		$_POST['notice_id']    = 'notification_error';
+		$_REQUEST['notice_id'] = 'notification_error';
+		$_POST['button']       = 'help_me_fix';
+		$_REQUEST['button']    = 'help_me_fix';
+
+		// wp_send_json_*() terminates via wp_die(); make the handlers throw so the
+		// runner survives and the emitted body can be asserted on. Asserting on the
+		// body rather than "did it die" is what separates accept from reject here --
+		// both end the request.
+		$throw_handler = static function () {
+			return static function () {
+				throw new \WPDieException( 'srfm_test_die' );
+			};
+		};
+		// wp_send_json() only routes through wp_die() when wp_doing_ajax() is true;
+		// otherwise it calls a bare die() that no filter can intercept, which takes
+		// the test runner with it.
+		add_filter( 'wp_doing_ajax', '__return_true' );
+		add_filter( 'wp_die_ajax_handler', $throw_handler );
+		add_filter( 'wp_die_handler', $throw_handler );
+
+		ob_start();
+		try {
+			Admin::get_instance()->handle_notice_response();
+		} catch ( \WPDieException $e ) {
+			// Expected.
+		} finally {
+			$body = (string) ob_get_clean();
+			remove_filter( 'wp_doing_ajax', '__return_true' );
+			remove_filter( 'wp_die_ajax_handler', $throw_handler );
+			remove_filter( 'wp_die_handler', $throw_handler );
+			unset(
+				$_POST['nonce'],
+				$_POST['notice_id'],
+				$_POST['button'],
+				$_REQUEST['nonce'],
+				$_REQUEST['notice_id'],
+				$_REQUEST['button']
+			);
+		}
+
+		$this->assertStringContainsString( '"success":true', $body, 'The guide button must be on the allowlist.' );
+	}
+
+	/**
+	 * Each failure emails support about the failure that actually happened.
+	 *
+	 * Subject and opening line were both hardcoded to submissions, so a site whose
+	 * email was broken sent support a ticket titled "form submissions are failing"
+	 * carrying a count read from the submission counter -- often zero, and always
+	 * about something else. Wrong at a glance, and routed to the wrong queue.
+	 */
+	public function test_get_support_mailto_url_describes_the_failure_that_happened() {
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
+		Client_Logger::record_failure( 'integration', 43, 'Job Application' );
+
+		$method = new ReflectionMethod( Admin::class, 'get_support_mailto_url' );
+		$method->setAccessible( true );
+
+		$parts = static function ( $url ) {
+			parse_str( (string) wp_parse_url( $url, PHP_URL_QUERY ), $query );
+			return $query;
+		};
+
+		$submission   = $parts( $method->invoke( Admin::get_instance(), 'submission', 'Contact Form' ) );
+		$notification = $parts( $method->invoke( Admin::get_instance(), 'notification', 'Contact Form' ) );
+		$integration  = $parts( $method->invoke( Admin::get_instance(), 'integration', 'Job Application' ) );
+
+		// Three distinct subjects. Asserted against each other as well as their own
+		// text, because the failure mode here was one subject serving all three.
+		$this->assertStringContainsString( 'form submissions are failing', $submission['subject'] );
+		$this->assertStringContainsString( 'notification emails are not being sent', $notification['subject'] );
+		$this->assertStringContainsString( 'integration is not receiving entries', $integration['subject'] );
+		$this->assertNotSame( $submission['subject'], $notification['subject'] );
+		$this->assertNotSame( $notification['subject'], $integration['subject'] );
+
+		// The body must not claim submissions are failing when they are not.
+		$this->assertStringNotContainsString(
+			'form submission',
+			$notification['body'],
+			'A notification failure must not describe itself as a submission failure.'
+		);
+		$this->assertStringContainsString( 'could not send the notification emails', $notification['body'] );
+
+		// The count is this category's, not the submission counter's. Notification
+		// has 2 recorded against submission's 1, so a leaked streak shows up here.
+		$this->assertStringContainsString( 'SureForms saved 2 entries', $notification['body'] );
+		$this->assertStringContainsString( 'Recorded failures: 2', $notification['body'] );
+
+		// The form is named, which is the first thing support asks for.
+		$this->assertStringContainsString( 'Job Application', $integration['body'] );
+	}
+
+	/**
+	 * An unknown category gets neutral wording rather than a specific claim.
+	 *
+	 * srfm_action_items is public, so an item can arrive with no category at all.
+	 * Defaulting to the submission copy would state something that may not be true.
+	 */
+	public function test_get_support_mailto_url_stays_neutral_without_a_category() {
+		delete_option( Client_Logger::FAILURES_OPTION );
+
+		$method = new ReflectionMethod( Admin::class, 'get_support_mailto_url' );
+		$method->setAccessible( true );
+
+		parse_str(
+			(string) wp_parse_url( $method->invoke( Admin::get_instance(), '', '' ), PHP_URL_QUERY ),
+			$query
+		);
+
+		$this->assertStringContainsString( 'a problem with the forms on', $query['subject'] );
+		$this->assertStringNotContainsString( 'form submissions are failing', $query['subject'] );
+		$this->assertStringNotContainsString( 'form submission that could not', $query['body'] );
+	}
+
+	/**
 	 * An active caching plugin produces a dismissible advisory item pointing at the
 	 * setup guide.
 	 */
@@ -1174,7 +1345,13 @@ class Test_Admin extends TestCase {
 		$this->assertNotNull( $caching, 'An active caching plugin must be reported.' );
 		$this->assertStringContainsString( 'WP Rocket', $caching['title'] );
 		$this->assertTrue( $caching['dismissible'] );
-		$this->assertStringContainsString( 'caching-plugins', $caching['cta_url'] );
+		// The guide for the plugin actually running, not the general page. WP Rocket
+		// has one of its own, so linking to the general page here would be the
+		// regression this assertion exists to catch.
+		$this->assertSame(
+			'https://sureforms.com/docs/how-to-set-up-sureforms-with-wp-rocket/',
+			$caching['cta_url']
+		);
 	}
 
 	/**

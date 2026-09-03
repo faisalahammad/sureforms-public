@@ -72,12 +72,12 @@ export default () => {
 
 	// The mailto now carries the log in its body, so the link just works -- no
 	// download to trigger, nothing to intercept.
-	const handleFix = ( item ) => () =>
+	const handleFix = ( item, action ) => () =>
 		post( 'srfm_notice_response', srfm_admin?.notice_response_nonce, {
 			notice_id: item.id,
 			// Named by the server, so the button key is not duplicated here and in
 			// the allowlist that has to accept it.
-			button: item.cta_action,
+			button: action,
 		} );
 
 	return (
@@ -141,24 +141,48 @@ export default () => {
 									</Button>
 								) }
 							</div>
-							{ !! item.cta_label && (
-								<div className="pl-6">
-									<Button
-										variant="link"
-										size="xs"
-										tag="a"
-										href={ item.cta_url }
-										{ ...( ! item.cta_url?.startsWith(
-											'mailto:'
-										) && {
-											target: '_blank',
-											rel: 'noopener noreferrer',
-										} ) }
-										onClick={ handleFix( item ) }
-										className="font-medium focus:outline-none focus:[box-shadow:none] [&>span]:px-0"
-									>
-										{ item.cta_label }
-									</Button>
+							{ ( !! item.cta_label || !! item.guide_label ) && (
+								<div className="pl-6 flex items-center gap-4">
+									{ !! item.cta_label && (
+										<Button
+											variant="link"
+											size="xs"
+											tag="a"
+											href={ item.cta_url }
+											{ ...( ! item.cta_url?.startsWith(
+												'mailto:'
+											) && {
+												target: '_blank',
+												rel: 'noopener noreferrer',
+											} ) }
+											onClick={ handleFix(
+												item,
+												item.cta_action
+											) }
+											className="font-medium focus:outline-none focus:[box-shadow:none] [&>span]:px-0"
+										>
+											{ item.cta_label }
+										</Button>
+									) }
+									{ /* A second action, when the failure is one the
+									     site owner can usually fix themselves. */ }
+									{ !! item.guide_label && !! item.guide_url && (
+										<Button
+											variant="link"
+											size="xs"
+											tag="a"
+											href={ item.guide_url }
+											target="_blank"
+											rel="noopener noreferrer"
+											onClick={ handleFix(
+												item,
+												item.guide_action
+											) }
+											className="font-medium focus:outline-none focus:[box-shadow:none] [&>span]:px-0 text-text-secondary"
+										>
+											{ item.guide_label }
+										</Button>
+									) }
 								</div>
 							) }
 						</div>
