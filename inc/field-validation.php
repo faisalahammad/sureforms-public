@@ -228,15 +228,7 @@ class Field_Validation {
 		// rest of the request, and because the lookup short-circuits on isset() the walk
 		// would never be retried.
 		if ( ! isset( $cache[ $form_id ] ) ) {
-			$ids  = [];
-			$post = get_post( $form_id );
-
-			if ( $post instanceof \WP_Post && ! empty( $post->post_content ) && function_exists( 'parse_blocks' ) ) {
-				$visited = [];
-				self::collect_field_block_ids( parse_blocks( $post->post_content ), $ids, $visited );
-			}
-
-			$cache[ $form_id ] = $ids;
+			$cache[ $form_id ] = self::walk_field_identifiers( $form_id );
 		}
 
 		/**
@@ -253,17 +245,80 @@ class Field_Validation {
 		 * @param array<string,true> $ids     Map of known block id => true.
 		 * @param int                $form_id The form post id.
 		 */
-		$ids = apply_filters( 'srfm_known_field_block_ids', $cache[ $form_id ], $form_id );
+		$ids = apply_filters( 'srfm_known_field_block_ids', $cache[ $form_id ]['ids'], $form_id );
 
 		// Coerce defensively. A callback returning a list (`[ 'aaa', 'bbb' ]`) rather
 		// than a map would otherwise make every real field look unknown, and a non-array
 		// return would drop the whole allowlist — so fall back to the walked set instead
 		// of silently turning the check off.
 		if ( ! is_array( $ids ) ) {
-			return $cache[ $form_id ];
+			return $cache[ $form_id ]['ids'];
 		}
 
 		return wp_is_numeric_array( $ids ) ? array_fill_keys( array_map( 'strval', $ids ), true ) : $ids;
+	}
+
+	/**
+	 * The slugs of every SureForms field the form defines, block_id => true style.
+	 *
+	 * A slug is stable across renders where a block_id is not, so it is the identifier
+	 * used to keep a submitted field whose block_id drifted (full-page cache, an editor
+	 * rebuild). Mirrors get_known_field_block_ids(): one memoised walk, an unmemoised
+	 * filter pass.
+	 *
+	 * @param int|mixed $form_id The form post id.
+	 * @since 2.12.7
+	 * @return array<string,true> Map of known slug => true.
+	 */
+	public static function get_known_field_slugs( $form_id ) {
+		static $cache = [];
+
+		$form_id = Helper::get_integer_value( $form_id );
+		if ( $form_id <= 0 ) {
+			return [];
+		}
+
+		if ( ! isset( $cache[ $form_id ] ) ) {
+			$cache[ $form_id ] = self::walk_field_identifiers( $form_id );
+		}
+
+		/**
+		 * Filter the set of field slugs considered valid for a form during submission.
+		 *
+		 * @since 2.12.7
+		 * @param array<string,true> $slugs   Map of known slug => true.
+		 * @param int                $form_id The form post id.
+		 */
+		$slugs = apply_filters( 'srfm_known_field_slugs', $cache[ $form_id ]['slugs'], $form_id );
+
+		if ( ! is_array( $slugs ) ) {
+			return $cache[ $form_id ]['slugs'];
+		}
+
+		return wp_is_numeric_array( $slugs ) ? array_fill_keys( array_map( 'strval', $slugs ), true ) : $slugs;
+	}
+
+	/**
+	 * Walk a form's blocks once, returning both the block-id and slug allowlists.
+	 *
+	 * @param int $form_id The form post id.
+	 * @since 2.12.7
+	 * @return array{ids:array<string,true>,slugs:array<string,true>}
+	 */
+	private static function walk_field_identifiers( $form_id ) {
+		$ids   = [];
+		$slugs = [];
+		$post  = get_post( $form_id );
+
+		if ( $post instanceof \WP_Post && ! empty( $post->post_content ) && function_exists( 'parse_blocks' ) ) {
+			$visited = [];
+			self::collect_field_block_ids( parse_blocks( $post->post_content ), $ids, $slugs, $visited );
+		}
+
+		return [
+			'ids'   => $ids,
+			'slugs' => $slugs,
+		];
 	}
 
 	/**
@@ -297,12 +352,14 @@ class Field_Validation {
 			return [];
 		}
 
-		$known_block_ids = self::get_known_field_block_ids( Helper::get_integer_value( $form_id ) );
+		$form_id_int     = Helper::get_integer_value( $form_id );
+		$known_block_ids = self::get_known_field_block_ids( $form_id_int );
+		$known_slugs     = self::get_known_field_slugs( $form_id_int );
 
-		// Fail open. The set is empty only when the form's blocks could not be derived
+		// Fail open. The sets are empty only when the form's blocks could not be derived
 		// (no/empty post_content, a parse failure, or a structure this walk does not
 		// recognise). Enforcing on an empty set would strip every field.
-		if ( empty( $known_block_ids ) ) {
+		if ( empty( $known_block_ids ) && empty( $known_slugs ) ) {
 			return $form_data;
 		}
 
@@ -311,18 +368,66 @@ class Field_Validation {
 				continue;
 			}
 
-			if ( ! isset( $known_block_ids[ Helper::get_block_id_from_key( $key ) ] ) ) {
+			// Keep the field when EITHER its block_id OR its slug matches the form. The
+			// block_id can drift between the (possibly full-page-cached) HTML the visitor
+			// submitted and the current post_content; the slug does not, so requiring only
+			// a block_id match silently deleted real submissions (#1517643). A key with
+			// neither a known block_id nor a known slug is genuinely foreign and dropped.
+			if ( ! self::field_key_belongs_to_form( $key, $known_block_ids, $known_slugs ) ) {
 				unset( $form_data[ $key ] );
 				continue;
 			}
 
 			// A known key whose value is an array is a repeater: walk its rows.
 			if ( is_array( $value ) ) {
-				$form_data[ $key ] = self::strip_unknown_repeater_keys( $value, $known_block_ids );
+				$form_data[ $key ] = self::strip_unknown_repeater_keys( $value, $known_block_ids, $known_slugs );
 			}
 		}
 
 		return $form_data;
+	}
+
+	/**
+	 * Whether a submitted field key belongs to the form, by block_id or by slug.
+	 *
+	 * @param string             $key             Submitted field key.
+	 * @param array<string,true> $known_block_ids Allowlisted block ids.
+	 * @param array<string,true> $known_slugs     Allowlisted field slugs.
+	 * @since 2.12.7
+	 * @return bool
+	 */
+	private static function field_key_belongs_to_form( $key, $known_block_ids, $known_slugs ) {
+		if ( isset( $known_block_ids[ Helper::get_block_id_from_key( $key ) ] ) ) {
+			return true;
+		}
+
+		$slug = self::get_slug_from_key( $key );
+
+		return '' !== $slug && isset( $known_slugs[ $slug ] );
+	}
+
+	/**
+	 * Extract a field's slug from its submitted key.
+	 *
+	 * A key is `srfm-<type>-<block_id>-lbl-<base64 label>-<slug>`. Helper::encode() is
+	 * padding-stripped standard base64 and never contains a hyphen, so the slug is
+	 * everything after the first hyphen that follows `-lbl-` (the slug itself may
+	 * contain hyphens, which is why only the first is used as the boundary).
+	 *
+	 * @param string $key Submitted field key.
+	 * @since 2.12.7
+	 * @return string The slug, or '' when it cannot be derived.
+	 */
+	private static function get_slug_from_key( $key ) {
+		if ( ! is_string( $key ) || false === strpos( $key, '-lbl-' ) ) {
+			return '';
+		}
+
+		$parts = explode( '-lbl-', $key );
+		$after = isset( $parts[1] ) ? $parts[1] : '';
+		$pos   = strpos( $after, '-' );
+
+		return false === $pos ? '' : substr( $after, $pos + 1 );
 	}
 
 	/**
@@ -499,10 +604,11 @@ class Field_Validation {
 	 *
 	 * @param array<mixed>       $rows            The repeater's submitted rows.
 	 * @param array<string,true> $known_block_ids Map of block ids belonging to the form.
+	 * @param array<string,true> $known_slugs     Map of field slugs belonging to the form.
 	 * @since 2.12.3
 	 * @return array<mixed> The rows with unknown child keys removed.
 	 */
-	private static function strip_unknown_repeater_keys( $rows, $known_block_ids ) {
+	private static function strip_unknown_repeater_keys( $rows, $known_block_ids, $known_slugs = [] ) {
 		foreach ( $rows as $index => $row ) {
 			if ( ! is_array( $row ) ) {
 				continue;
@@ -513,7 +619,7 @@ class Field_Validation {
 					continue;
 				}
 
-				if ( ! isset( $known_block_ids[ Helper::get_block_id_from_key( $child_key ) ] ) ) {
+				if ( ! self::field_key_belongs_to_form( $child_key, $known_block_ids, $known_slugs ) ) {
 					unset( $row[ $child_key ] );
 				}
 			}
@@ -529,12 +635,13 @@ class Field_Validation {
 	 *
 	 * @param array<mixed>       $blocks  Parsed blocks from parse_blocks().
 	 * @param array<string,true> $ids     Accumulator of block id => true (by reference).
+	 * @param array<string,true> $slugs   Accumulator of field slug => true (by reference).
 	 * @param array<int,true>    $visited Expanded reusable-block post ids, guards cycles.
 	 * @param int                $depth   Current recursion depth, guards pathological trees.
 	 * @since 2.12.3
 	 * @return void
 	 */
-	private static function collect_field_block_ids( $blocks, &$ids, &$visited, $depth = 0 ) {
+	private static function collect_field_block_ids( $blocks, &$ids, &$slugs, &$visited, $depth = 0 ) {
 		if ( ! is_array( $blocks ) || $depth > 50 ) {
 			return;
 		}
@@ -553,8 +660,17 @@ class Field_Validation {
 			// alters under a different string than the one looked up, making a legitimate
 			// field permanently unsubmittable. These are map keys used for comparison
 			// only; nothing is echoed from here.
-			if ( 0 === strpos( $block_name, 'srfm/' ) && ! empty( $attrs['block_id'] ) && is_string( $attrs['block_id'] ) ) {
-				$ids[ $attrs['block_id'] ] = true;
+			if ( 0 === strpos( $block_name, 'srfm/' ) ) {
+				if ( ! empty( $attrs['block_id'] ) && is_string( $attrs['block_id'] ) ) {
+					$ids[ $attrs['block_id'] ] = true;
+				}
+				// Also index by slug. The block_id is rebuilt when the editor recreates a
+				// field and can differ between the cached HTML a visitor submitted and the
+				// current post_content, but the slug is the stable field identifier — so a
+				// slug match keeps a legitimately-submitted field whose block_id drifted.
+				if ( ! empty( $attrs['slug'] ) && is_string( $attrs['slug'] ) ) {
+					$slugs[ $attrs['slug'] ] = true;
+				}
 			}
 
 			// Expand reusable/synced patterns so fields living inside a pattern count as
@@ -565,13 +681,13 @@ class Field_Validation {
 					$visited[ $ref ] = true;
 					$ref_post        = get_post( $ref );
 					if ( $ref_post instanceof \WP_Post && 'wp_block' === $ref_post->post_type && '' !== $ref_post->post_content ) {
-						self::collect_field_block_ids( parse_blocks( $ref_post->post_content ), $ids, $visited, $depth + 1 );
+						self::collect_field_block_ids( parse_blocks( $ref_post->post_content ), $ids, $slugs, $visited, $depth + 1 );
 					}
 				}
 			}
 
 			if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
-				self::collect_field_block_ids( $block['innerBlocks'], $ids, $visited, $depth + 1 );
+				self::collect_field_block_ids( $block['innerBlocks'], $ids, $slugs, $visited, $depth + 1 );
 			}
 		}
 	}

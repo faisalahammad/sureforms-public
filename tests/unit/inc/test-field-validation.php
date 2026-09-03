@@ -580,6 +580,57 @@ class Test_Field_Validation extends TestCase {
 	}
 
 	/**
+	 * REGRESSION (#1517643): a field whose block_id drifted between the rendered HTML
+	 * the visitor submitted and the current post_content — the systematic case on a
+	 * full-page-cached site, or after an editor rebuild — must survive on its slug.
+	 *
+	 * Matching on block_id alone silently deleted real submission data (keys absent,
+	 * success message shown). The slug is the stable field identifier, so a slug match
+	 * keeps the field.
+	 */
+	public function test_strip_unknown_field_keys_keeps_a_drifted_block_id_via_slug() {
+		$form_id = wp_insert_post(
+			[
+				'post_type'    => 'sureforms_form',
+				'post_status'  => 'publish',
+				'post_title'   => 'Drift Form',
+				'post_content' => '<!-- wp:srfm/input {"block_id":"currentid","slug":"finish-time"} /-->',
+			]
+		);
+
+		// Different block_id (drift), same stable slug 'finish-time'.
+		$drifted = 'srfm-input-cachedid-lbl-RmluaXNo-finish-time';
+
+		$kept = Field_Validation::strip_unknown_field_keys( [ $drifted => 'value', 'form-id' => $form_id ], $form_id );
+
+		$this->assertArrayHasKey( $drifted, $kept, 'a field whose block_id drifted must survive on its slug' );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * The slug fallback must not weaken the anti-injection guard: a key with neither a
+	 * known block_id nor a known slug is still foreign and dropped.
+	 */
+	public function test_strip_unknown_field_keys_still_drops_foreign_block_id_and_slug() {
+		$form_id = wp_insert_post(
+			[
+				'post_type'    => 'sureforms_form',
+				'post_status'  => 'publish',
+				'post_title'   => 'Drift Form 2',
+				'post_content' => '<!-- wp:srfm/input {"block_id":"currentid","slug":"finish-time"} /-->',
+			]
+		);
+
+		$foreign  = 'srfm-input-deadbeef-lbl-R2hvc3Q-ghost';
+		$stripped = Field_Validation::strip_unknown_field_keys( [ $foreign => 'x', 'form-id' => $form_id ], $form_id );
+
+		$this->assertArrayNotHasKey( $foreign, $stripped, 'a key with neither a known block_id nor a known slug is dropped' );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
 	 * REGRESSION (#2993, review H1): repeater child keys must be validated too.
 	 *
 	 * Pro submits repeater rows as `repeaterKey[index][childKey]`, which PHP collapses
