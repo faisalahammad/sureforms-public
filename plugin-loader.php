@@ -29,6 +29,7 @@ use SRFM\Inc\Blocks\Register;
 use SRFM\Inc\Compatibility\Multilingual\Multilingual_Manager;
 use SRFM\Inc\Compatibility\Multilingual\String_Backfill;
 use SRFM\Inc\Compatibility\Multilingual\String_Collector;
+use SRFM\Inc\Compatibility\Page_Builders\Breakdance;
 use SRFM\Inc\Compatibility\Themes\Astra;
 use SRFM\Inc\Create_New_Form;
 use SRFM\Inc\Database\Register as DatabaseRegister;
@@ -334,6 +335,7 @@ class Plugin_Loader {
 		Abilities_Registrar::get_instance();
 		// Initializing Compatibilities.
 		Astra::get_instance();
+		Breakdance::get_instance();
 		Multilingual_Manager::get_instance();
 		String_Collector::get_instance();
 		String_Backfill::get_instance();
