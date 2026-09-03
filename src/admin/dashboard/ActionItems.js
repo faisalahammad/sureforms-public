@@ -132,12 +132,15 @@ export default () => {
 					) }
 				</button>
 			</div>
+			{ /* Same nesting as Quick Access below it: a grey well inside the white
+			     card, holding white rows. The two sit in one column and were
+			     reading as different components. */ }
 			{ open && (
-				<div className="space-y-2 p-1">
+				<div className="flex flex-col bg-background-secondary gap-1 p-1 rounded-lg">
 					{ items.map( ( item ) => (
 						<div
 							key={ item.id }
-							className="relative flex flex-col gap-1 p-3 bg-background-primary rounded-lg shadow-sm border-0.5 border-solid border-border-subtle"
+							className="relative flex flex-col gap-1 p-3 rounded-md bg-background-primary shadow-sm-blur-1"
 						>
 							<div className="w-full flex items-start gap-2">
 								{ ICONS[ item.status ] ?? ICONS.warning }
