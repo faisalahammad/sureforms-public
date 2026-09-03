@@ -299,29 +299,6 @@ class Field_Validation {
 	}
 
 	/**
-	 * Walk a form's blocks once, returning both the block-id and slug allowlists.
-	 *
-	 * @param int $form_id The form post id.
-	 * @since 2.12.7
-	 * @return array{ids:array<string,true>,slugs:array<string,true>}
-	 */
-	private static function walk_field_identifiers( $form_id ) {
-		$ids   = [];
-		$slugs = [];
-		$post  = get_post( $form_id );
-
-		if ( $post instanceof \WP_Post && ! empty( $post->post_content ) && function_exists( 'parse_blocks' ) ) {
-			$visited = [];
-			self::collect_field_block_ids( parse_blocks( $post->post_content ), $ids, $slugs, $visited );
-		}
-
-		return [
-			'ids'   => $ids,
-			'slugs' => $slugs,
-		];
-	}
-
-	/**
 	 * Remove submitted field keys the form does not define.
 	 *
 	 * The `-lbl-` substring proves only that a key LOOKS like a SureForms field, not that
@@ -385,49 +362,6 @@ class Field_Validation {
 		}
 
 		return $form_data;
-	}
-
-	/**
-	 * Whether a submitted field key belongs to the form, by block_id or by slug.
-	 *
-	 * @param string             $key             Submitted field key.
-	 * @param array<string,true> $known_block_ids Allowlisted block ids.
-	 * @param array<string,true> $known_slugs     Allowlisted field slugs.
-	 * @since 2.12.7
-	 * @return bool
-	 */
-	private static function field_key_belongs_to_form( $key, $known_block_ids, $known_slugs ) {
-		if ( isset( $known_block_ids[ Helper::get_block_id_from_key( $key ) ] ) ) {
-			return true;
-		}
-
-		$slug = self::get_slug_from_key( $key );
-
-		return '' !== $slug && isset( $known_slugs[ $slug ] );
-	}
-
-	/**
-	 * Extract a field's slug from its submitted key.
-	 *
-	 * A key is `srfm-<type>-<block_id>-lbl-<base64 label>-<slug>`. Helper::encode() is
-	 * padding-stripped standard base64 and never contains a hyphen, so the slug is
-	 * everything after the first hyphen that follows `-lbl-` (the slug itself may
-	 * contain hyphens, which is why only the first is used as the boundary).
-	 *
-	 * @param string $key Submitted field key.
-	 * @since 2.12.7
-	 * @return string The slug, or '' when it cannot be derived.
-	 */
-	private static function get_slug_from_key( $key ) {
-		if ( ! is_string( $key ) || false === strpos( $key, '-lbl-' ) ) {
-			return '';
-		}
-
-		$parts = explode( '-lbl-', $key );
-		$after = isset( $parts[1] ) ? $parts[1] : '';
-		$pos   = strpos( $after, '-' );
-
-		return false === $pos ? '' : substr( $after, $pos + 1 );
 	}
 
 	/**
@@ -597,6 +531,72 @@ class Field_Validation {
 			'local'  => isset( $email_limits['local'] ) ? absint( $email_limits['local'] ) : 64,
 			'domain' => isset( $email_limits['domain'] ) ? absint( $email_limits['domain'] ) : 255,
 		];
+	}
+
+	/**
+	 * Walk a form's blocks once, returning both the block-id and slug allowlists.
+	 *
+	 * @param int $form_id The form post id.
+	 * @since 2.12.7
+	 * @return array{ids:array<string,true>,slugs:array<string,true>}
+	 */
+	private static function walk_field_identifiers( $form_id ) {
+		$ids   = [];
+		$slugs = [];
+		$post  = get_post( $form_id );
+
+		if ( $post instanceof \WP_Post && ! empty( $post->post_content ) && function_exists( 'parse_blocks' ) ) {
+			$visited = [];
+			self::collect_field_block_ids( parse_blocks( $post->post_content ), $ids, $slugs, $visited );
+		}
+
+		return [
+			'ids'   => $ids,
+			'slugs' => $slugs,
+		];
+	}
+
+	/**
+	 * Whether a submitted field key belongs to the form, by block_id or by slug.
+	 *
+	 * @param string             $key             Submitted field key.
+	 * @param array<string,true> $known_block_ids Allowlisted block ids.
+	 * @param array<string,true> $known_slugs     Allowlisted field slugs.
+	 * @since 2.12.7
+	 * @return bool
+	 */
+	private static function field_key_belongs_to_form( $key, $known_block_ids, $known_slugs ) {
+		if ( isset( $known_block_ids[ Helper::get_block_id_from_key( $key ) ] ) ) {
+			return true;
+		}
+
+		$slug = self::get_slug_from_key( $key );
+
+		return '' !== $slug && isset( $known_slugs[ $slug ] );
+	}
+
+	/**
+	 * Extract a field's slug from its submitted key.
+	 *
+	 * A key is `srfm-<type>-<block_id>-lbl-<base64 label>-<slug>`. Helper::encode() is
+	 * padding-stripped standard base64 and never contains a hyphen, so the slug is
+	 * everything after the first hyphen that follows `-lbl-` (the slug itself may
+	 * contain hyphens, which is why only the first is used as the boundary).
+	 *
+	 * @param string $key Submitted field key.
+	 * @since 2.12.7
+	 * @return string The slug, or '' when it cannot be derived.
+	 */
+	private static function get_slug_from_key( $key ) {
+		if ( ! is_string( $key ) || false === strpos( $key, '-lbl-' ) ) {
+			return '';
+		}
+
+		$parts = explode( '-lbl-', $key );
+		$after = $parts[1] ?? '';
+		$pos   = strpos( $after, '-' );
+
+		return false === $pos ? '' : substr( $after, $pos + 1 );
 	}
 
 	/**
