@@ -524,6 +524,11 @@ const GeneralPage = ( {
 					/>
 				}
 			/>
+			{ /* Everything above configures how forms behave. The two below are
+			     about SureForms itself -- what it may report back, and what it
+			     records for support -- so they are set apart rather than read as
+			     more form settings. */ }
+			<hr className="w-full m-0 border-0 border-t border-solid border-border-subtle" />
 			<ContentSection
 				loading={ loading }
 				title={ __( 'Anonymous Analytics', 'sureforms' ) }
