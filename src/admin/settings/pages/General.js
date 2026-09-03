@@ -234,7 +234,7 @@ const FormViewsTrackingContent = ( {
 					'sureforms'
 				),
 				description: __(
-					'Adds the Views and Conversion Rate columns to the Forms list. A view is counted once per page visit when the form appears on screen, and the conversion rate is the share of those views that ended in a submission. Views and submissions by anyone who can edit the site, including you, are not counted, so testing your own forms does not change the figures. Counting starts the first time you turn this on, so submissions received before then are not counted towards the rate. Turning it off afterwards only hides the columns. Counting keeps running, so the figures are up to date if you switch it back on.',
+					'Adds the Views and Conversion Rate columns to the Forms list. A view is counted once per page visit when the form appears on screen, and the conversion rate is the share of those views that ended in a submission. Logged-out visitors are counted, and so are logged-in users who cannot edit the site, such as subscribers and customers. Views and submissions by anyone who can edit the site, including you, are left out, so testing your own forms does not change the figures. Counting starts the first time you turn this on, so submissions received before then are not counted towards the rate. Turning it off afterwards only hides the columns. Counting keeps running, so the figures are up to date if you switch it back on.',
 					'sureforms'
 				),
 			} }
