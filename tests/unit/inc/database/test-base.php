@@ -394,6 +394,95 @@ class Test_Database_Base extends TestCase {
 		$this->assertStringContainsString( '3', $result );
 	}
 
+	public function test_prepare_where_clauses_not_in_operator() {
+		$result = $this->prepare(
+			[
+				[
+					[
+						'key'     => 'user_id',
+						'compare' => 'NOT IN',
+						'value'   => [ 4, 5 ],
+					],
+				],
+			]
+		);
+
+		// Without 'NOT IN' on the operator allowlist the whole condition is dropped
+		// and the query silently matches every row, which is how an exclusion built
+		// on this would fail open.
+		$this->assertStringContainsString( 'NOT IN', $result );
+		$this->assertStringContainsString( 'user_id', $result );
+		$this->assertStringContainsString( '4', $result );
+		$this->assertStringContainsString( '5', $result );
+	}
+
+	/**
+	 * An empty list must not be interpolated into "col IN ()".
+	 *
+	 * That is a syntax error, and it fails the whole query rather than the one
+	 * condition, taking out the listing and its COUNT together. Each operator
+	 * collapses to the constant the empty set actually means, so neither can widen
+	 * to match everything.
+	 */
+	public function test_prepare_where_clauses_empty_list_does_not_emit_invalid_sql() {
+		$in = $this->prepare(
+			[
+				[
+					[
+						'key'     => 'ID',
+						'compare' => 'IN',
+						'value'   => [],
+					],
+				],
+			]
+		);
+
+		$this->assertStringNotContainsString( 'IN ()', $in );
+		$this->assertStringContainsString( '1 = 0', $in, 'An empty IN matches nothing.' );
+
+		$not_in = $this->prepare(
+			[
+				[
+					[
+						'key'     => 'ID',
+						'compare' => 'NOT IN',
+						'value'   => [],
+					],
+				],
+			]
+		);
+
+		$this->assertStringNotContainsString( 'IN ()', $not_in );
+		$this->assertStringContainsString( '1 = 1', $not_in, 'An empty NOT IN excludes nothing.' );
+	}
+
+	// ---------------------------------------------------------------
+	// cache_reset
+	// ---------------------------------------------------------------
+
+	/**
+	 * cache_reset() empties the per-instance query cache.
+	 */
+	public function test_cache_reset() {
+		$set   = new ReflectionMethod( $this->entries_table, 'cache_set' );
+		$get   = new ReflectionMethod( $this->entries_table, 'cache_get' );
+		$reset = new ReflectionMethod( $this->entries_table, 'cache_reset' );
+
+		foreach ( [ $set, $get, $reset ] as $method ) {
+			$method->setAccessible( true );
+		}
+
+		$set->invoke( $this->entries_table, 'srfm_cache_reset_probe', 'stored' );
+		$this->assertSame( 'stored', $get->invoke( $this->entries_table, 'srfm_cache_reset_probe' ) );
+
+		$reset->invoke( $this->entries_table );
+
+		$this->assertNull(
+			$get->invoke( $this->entries_table, 'srfm_cache_reset_probe' ),
+			'The cached value must be gone after a reset.'
+		);
+	}
+
 	// ---------------------------------------------------------------
 	// prepare_where_clauses — date range
 	// ---------------------------------------------------------------
