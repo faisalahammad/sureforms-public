@@ -468,7 +468,7 @@ class Admin_Ajax {
 	 * than guarding against it -- and keeps the unguessable file name, which is
 	 * what actually protects the log on nginx, out of the page.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	public function download_client_log() {
@@ -516,7 +516,7 @@ class Admin_Ajax {
 	/**
 	 * Delete the client debug log.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	public function clear_client_log() {
@@ -533,7 +533,7 @@ class Admin_Ajax {
 	 * Capability first, ahead of the nonce, matching the ordering of the sibling
 	 * handlers in this class.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	private function verify_log_request() {

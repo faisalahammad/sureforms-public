@@ -55,6 +55,29 @@ class Submit_Token {
 	public const DEFAULT_ACCEPTED_WINDOWS = 4;
 
 	/**
+	 * Namespace for tokens that authorise a form submission.
+	 *
+	 * The value is the historical payload prefix, so existing tokens keep verifying
+	 * across an upgrade — changing it would reject every token already embedded in
+	 * cached HTML.
+	 *
+	 * @since 2.12.6
+	 */
+	public const NAMESPACE_SUBMIT = 'srfm_submit';
+
+	/**
+	 * Namespace for tokens that authorise the page-view beacon.
+	 *
+	 * Separate from NAMESPACE_SUBMIT so the two cannot stand in for each other: a
+	 * view token scraped from the page must not authorise a submission, and the
+	 * view endpoint must not double as an oracle for whether a submit token is
+	 * still inside an accepted window.
+	 *
+	 * @since 2.12.6
+	 */
+	public const NAMESPACE_VIEW = 'srfm_view';
+
+	/**
 	 * Generate a submission token for a given form.
 	 *
 	 * The token encodes the form ID and the current half-day window, signed
@@ -62,11 +85,13 @@ class Submit_Token {
 	 * `verify()` accepts several consecutive past windows.
 	 *
 	 * @since  2.6.0
-	 * @param  int $form_id The form post ID.
+	 * @since  2.12.6 Added the $namespace parameter.
+	 * @param  int    $form_id   The form post ID.
+	 * @param  string $namespace Purpose the token is minted for. Defaults to form submission.
 	 * @return string 64-character lowercase hex HMAC-SHA256 token.
 	 */
-	public static function generate( int $form_id ): string {
-		return self::sign( $form_id, self::current_window() );
+	public static function generate( int $form_id, string $namespace = self::NAMESPACE_SUBMIT ): string {
+		return self::sign( $form_id, self::current_window(), $namespace );
 	}
 
 	/**
@@ -76,11 +101,13 @@ class Submit_Token {
 	 * using constant-time comparison throughout.
 	 *
 	 * @since  2.6.0
-	 * @param  string $token   Token value received from the client.
-	 * @param  int    $form_id Form post ID extracted from the request body.
+	 * @since  2.12.6 Added the $namespace parameter.
+	 * @param  string $token     Token value received from the client.
+	 * @param  int    $form_id   Form post ID extracted from the request body.
+	 * @param  string $namespace Purpose the token must have been minted for.
 	 * @return bool True if the token is valid for the given form, false otherwise.
 	 */
-	public static function verify( string $token, int $form_id ): bool {
+	public static function verify( string $token, int $form_id, string $namespace = self::NAMESPACE_SUBMIT ): bool {
 		if ( '' === $token || $form_id <= 0 ) {
 			return false;
 		}
@@ -91,7 +118,7 @@ class Submit_Token {
 
 		// Walk backwards through accepted windows; current window first.
 		for ( $offset = 0; $offset < $accepted; $offset++ ) {
-			if ( hash_equals( self::sign( $form_id, self::current_window() - $offset ), $token ) ) {
+			if ( hash_equals( self::sign( $form_id, self::current_window() - $offset, $namespace ), $token ) ) {
 				return true;
 			}
 		}
@@ -120,17 +147,18 @@ class Submit_Token {
 	 * replayed across time windows.
 	 *
 	 * @since  2.6.0
-	 * @param  int $form_id Post ID of the form.
-	 * @param  int $window  Half-day window index.
+	 * @param  int    $form_id   Post ID of the form.
+	 * @param  int    $window    Half-day window index.
+	 * @param  string $namespace Purpose prefix; keeps tokens for one action from authorising another.
 	 * @return string 64-character lowercase hex digest.
 	 */
-	private static function sign( int $form_id, int $window ): string {
+	private static function sign( int $form_id, int $window, string $namespace = self::NAMESPACE_SUBMIT ): string {
 		// Derive a plugin-specific sub-key from the site's auth salt so this
 		// system has an independent key surface from WordPress session cookies.
 		// Rotating wp-config.php secrets invalidates all outstanding tokens, which
 		// is intentional — a cache purge should follow any secret key rotation.
 		$signing_key = hash_hmac( 'sha256', 'srfm-submit-token-v1', wp_salt( 'auth' ) );
-		$payload     = implode( '|', [ 'srfm_submit', $form_id, $window ] );
+		$payload     = implode( '|', [ $namespace, $form_id, $window ] );
 		return hash_hmac( 'sha256', $payload, $signing_key );
 	}
 }

@@ -717,6 +717,7 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_render_database_repair_notice() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
 
 		$this->break_entries_table();
 
@@ -745,6 +746,7 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_register_database_repair_notice() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
 
 		\SRFM\Admin\Notice_Manager::clear_notices();
 		$this->break_entries_table();
@@ -775,6 +777,7 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_register_database_repair_notice_is_silent_when_healthy() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
 
 		\SRFM\Admin\Notice_Manager::clear_notices();
 		Admin::get_instance()->register_database_repair_notice();
@@ -791,6 +794,7 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_handle_database_repair() {
 		wp_set_current_user( $this->make_user( 'subscriber' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
 
 		// wp_die() ends the request; make it throw so the runner survives and we can
 		// assert that the capability check stopped us before anything else ran.
@@ -823,6 +827,7 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_register_pro_compatibility_notices() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
 
 		\SRFM\Admin\Notice_Manager::clear_notices();
 		Admin::get_instance()->register_pro_compatibility_notices();
@@ -842,6 +847,7 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_database_notice_is_absent_on_a_healthy_install() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
 
 		set_current_screen( 'dashboard' );
 		ob_start();
@@ -857,6 +863,7 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_database_notice_is_hidden_from_users_without_the_capability() {
 		wp_set_current_user( $this->make_user( 'subscriber' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
 
 		set_current_screen( 'dashboard' );
 		$_GET['srfm_db_repair'] = 'done';
@@ -874,6 +881,7 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_database_notice_reports_a_completed_repair() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
 
 		set_current_screen( 'dashboard' );
 		$_GET['srfm_db_repair'] = 'done';
@@ -892,6 +900,7 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_database_notice_reports_a_failed_repair_as_a_warning() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
 
 		set_current_screen( 'dashboard' );
 		$_GET['srfm_db_repair'] = 'failed';
@@ -910,6 +919,7 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_repair_url_is_nonce_protected() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
 
 		$method = new ReflectionMethod( Admin::class, 'get_database_repair_url' );
 		$method->setAccessible( true );
@@ -956,6 +966,7 @@ class Test_Admin extends TestCase {
 	 */
 	private function post_notice_response( $notice_id, $button ) {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
 
 		$_POST['nonce']     = wp_create_nonce( 'srfm_notice_response' );
 		$_POST['notice_id'] = $notice_id;
@@ -1069,7 +1080,7 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_get_action_items_reports_only_passing_checks_when_healthy() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
-		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+		delete_option( Client_Logger::FAILURES_OPTION );
 
 		$filter = static function () {
 			return [ 'akismet/akismet.php' ];
@@ -1092,10 +1103,10 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_get_action_items() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
-		update_option( Client_Logger::FAULT_STREAK_OPTION, Client_Logger::FAULT_THRESHOLD );
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
 
 		$items = Admin::get_instance()->get_action_items();
-		delete_option( Client_Logger::FAULT_STREAK_OPTION );
 
 		$ids = wp_list_pluck( $items, 'id' );
 		$this->assertContains( 'form_submission_error', $ids );
@@ -1113,7 +1124,7 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_get_action_items_flags_an_active_caching_plugin() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
-		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+		delete_option( Client_Logger::FAILURES_OPTION );
 		Helper::update_srfm_option( 'dismissed_action_items', [] );
 
 		$filter = static function () {
@@ -1143,7 +1154,7 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_get_action_items_respects_a_dismissal() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
-		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+		delete_option( Client_Logger::FAILURES_OPTION );
 		Helper::update_srfm_option( 'dismissed_action_items', [ 'caching_plugin' ] );
 
 		$filter = static function () {
@@ -1169,7 +1180,7 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_has_action_item_warnings() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
-		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+		delete_option( Client_Logger::FAILURES_OPTION );
 		Helper::update_srfm_option( 'dismissed_action_items', [] );
 
 		$quiet = static function () {
@@ -1180,13 +1191,12 @@ class Test_Admin extends TestCase {
 		$this->assertFalse( Admin::get_instance()->has_action_item_warnings() );
 		remove_filter( 'pre_option_active_plugins', $quiet );
 
-		update_option( Client_Logger::FAULT_STREAK_OPTION, Client_Logger::FAULT_THRESHOLD );
+		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
 
 		add_filter( 'pre_option_active_plugins', $quiet );
 		$this->assertTrue( Admin::get_instance()->has_action_item_warnings() );
 		remove_filter( 'pre_option_active_plugins', $quiet );
 
-		delete_option( Client_Logger::FAULT_STREAK_OPTION );
 	}
 
 	/**
@@ -1195,7 +1205,7 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_has_action_item_warnings_respects_a_dismissal() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
-		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+		delete_option( Client_Logger::FAILURES_OPTION );
 
 		$caching = static function () {
 			return [ 'wp-rocket/wp-rocket.php' ];
@@ -1218,6 +1228,7 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_handle_dismiss_action_item() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
 		Helper::update_srfm_option( 'dismissed_action_items', [] );
 
 		$this->assertStringContainsString( '"success":true', $this->post_dismiss( 'caching_plugin' ) );
@@ -1235,6 +1246,7 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_handle_dismiss_action_item_link() {
 		wp_set_current_user( $this->make_user( 'subscriber' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
 
 		$throw = static function () {
 			return static function ( $m = '' ) {
@@ -1308,7 +1320,8 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_render_action_item_notices() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
-		update_option( Client_Logger::FAULT_STREAK_OPTION, Client_Logger::FAULT_THRESHOLD );
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
 
 		foreach ( [ 'dashboard', 'edit-post', 'plugins' ] as $screen ) {
 			set_current_screen( $screen );
@@ -1321,7 +1334,6 @@ class Test_Admin extends TestCase {
 			$this->assertStringContainsString( 'Contact Support', $output );
 		}
 
-		delete_option( Client_Logger::FAULT_STREAK_OPTION );
 	}
 
 	/**
@@ -1330,7 +1342,8 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_render_action_item_notices_defers_to_the_form_checks_panel() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
-		update_option( Client_Logger::FAULT_STREAK_OPTION, Client_Logger::FAULT_THRESHOLD );
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
 
 		set_current_screen( 'dashboard' );
 		$_GET['page']     = 'sureforms_menu';
@@ -1341,7 +1354,6 @@ class Test_Admin extends TestCase {
 		$output = ob_get_clean();
 
 		unset( $_GET['page'], $_REQUEST['page'] );
-		delete_option( Client_Logger::FAULT_STREAK_OPTION );
 
 		$this->assertSame( '', $output );
 	}
@@ -1351,7 +1363,8 @@ class Test_Admin extends TestCase {
 	 */
 	public function test_render_action_item_notices_is_hidden_without_the_capability() {
 		wp_set_current_user( $this->make_user( 'subscriber' ) );
-		update_option( Client_Logger::FAULT_STREAK_OPTION, Client_Logger::FAULT_THRESHOLD );
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
 
 		set_current_screen( 'dashboard' );
 
@@ -1359,7 +1372,6 @@ class Test_Admin extends TestCase {
 		Admin::get_instance()->render_action_item_notices();
 		$output = ob_get_clean();
 
-		delete_option( Client_Logger::FAULT_STREAK_OPTION );
 
 		$this->assertSame( '', $output );
 	}

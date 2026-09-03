@@ -12,7 +12,7 @@
  * instead of being talked through DevTools.
  *
  * @package SureForms
- * @since   x.x.x
+ * @since   2.12.6
  */
 
 namespace SRFM\Inc;
@@ -36,50 +36,71 @@ if ( ! defined( 'ABSPATH' ) ) {
  *    rotating. Someone reproducing a bug must not have the tail of their repro
  *    evicted by newer noise from an unrelated visitor.
  *
- * @since x.x.x
+ * @since 2.12.6
  */
 class Client_Logger {
 	/**
 	 * Option holding the random component of the log file name.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	public const FILENAME_OPTION = 'srfm_client_log_file';
 
 	/**
-	 * Option holding the run of consecutive faults with no successful submission.
-	 *
-	 * @since x.x.x
-	 */
-	public const FAULT_STREAK_OPTION = 'srfm_client_log_fault_streak';
-
-	/**
 	 * Consecutive faults before the site owner is told something is wrong.
 	 *
-	 * @since x.x.x
+	 * One. A fault is already filtered down to what a visitor cannot fix by trying
+	 * again -- the request never reached PHP, the response was not JSON, the server
+	 * errored, an email could not be sent -- so waiting for a run of them means
+	 * staying quiet through the first several lost submissions.
+	 *
+	 * @since 2.12.6
 	 */
-	public const FAULT_THRESHOLD = 5;
+	public const FAULT_THRESHOLD = 1;
 
 	/**
 	 * Maximum size of the log file in bytes.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	public const MAX_FILE_SIZE = 1048576;
 
 	/**
 	 * Longest free-text value stored on a single entry, in characters.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	public const MAX_TEXT_LENGTH = 500;
 
 	/**
 	 * Longest single field key stored on an entry, in characters.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	public const MAX_KEY_LENGTH = 100;
+
+	/**
+	 * Option holding per-category failure state, keyed by category.
+	 *
+	 * Shape: [ category => [ 'count' => int, 'form_id' => int, 'form_title' => string,
+	 * 'at' => int, 'acked' => int ] ].
+	 *
+	 * Kept per category because the three read completely differently to a site
+	 * owner: submissions failing means visitors cannot reach you, a notification
+	 * failing means you are not hearing about entries that did save, and an
+	 * integration failing means a third party is not receiving them. Collapsing
+	 * them into one warning would describe none of those accurately.
+	 *
+	 * @since 2.12.6
+	 */
+	public const FAILURES_OPTION = 'srfm_client_log_failures';
+
+	/**
+	 * Categories a failure can belong to.
+	 *
+	 * @since 2.12.6
+	 */
+	public const CATEGORIES = [ 'submission', 'notification', 'integration' ];
 
 	/**
 	 * Whether client error logging is currently switched on.
@@ -96,7 +117,7 @@ class Client_Logger {
 	 * baked into cached HTML and can be a full cache TTL out of date, so every
 	 * write path re-checks here.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool
 	 */
 	public static function is_enabled() {
@@ -123,7 +144,7 @@ class Client_Logger {
 	 * error status, or a notification email could not be sent.
 	 *
 	 * @param array<string,mixed> $entry Entry as returned by sanitize_entry().
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool
 	 */
 	public static function is_fault( array $entry ) {
@@ -148,46 +169,199 @@ class Client_Logger {
 	}
 
 	/**
-	 * How many faults have happened with no successful submission in between.
+	 * Record a failure against a category and the form it happened on.
 	 *
-	 * @since x.x.x
+	 * The form is carried because "a form is failing" is not actionable on a site
+	 * with twenty of them -- the first thing anyone asks is which one.
+	 *
+	 * @param string $category   One of self::CATEGORIES.
+	 * @param int    $form_id    Form the failure happened on.
+	 * @param string $form_title Form title, resolved by the caller.
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public static function record_failure( $category, $form_id = 0, $form_title = '' ) {
+		if ( ! in_array( $category, self::CATEGORIES, true ) ) {
+			return;
+		}
+
+		$failures = self::get_failures();
+		$existing = $failures[ $category ] ?? [];
+
+		$failures[ $category ] = [
+			'count'      => Helper::get_integer_value( $existing['count'] ?? 0 ) + 1,
+			'form_id'    => absint( $form_id ),
+			'form_title' => mb_substr( sanitize_text_field( $form_title ), 0, 100 ),
+			'at'         => time(),
+			// Preserved: a report already made still stands until this new count
+			// overtakes it, which is what get_open_failures() compares.
+			'acked'      => Helper::get_integer_value( $existing['acked'] ?? 0 ),
+		];
+
+		update_option( self::FAILURES_OPTION, $failures, false );
+	}
+
+	/**
+	 * All recorded failure state.
+	 *
+	 * @since 2.12.6
+	 * @return array<string,array<string,mixed>>
+	 */
+	public static function get_failures() {
+		return Helper::get_array_value( get_option( self::FAILURES_OPTION, [] ) );
+	}
+
+	/**
+	 * Categories with failures the site owner has not already reported.
+	 *
+	 * @since 2.12.6
+	 * @return array<string,array<string,mixed>>
+	 */
+	public static function get_open_failures() {
+		$open = [];
+
+		foreach ( self::get_failures() as $category => $failure ) {
+			if ( ! in_array( $category, self::CATEGORIES, true ) ) {
+				continue;
+			}
+
+			$count = Helper::get_integer_value( $failure['count'] ?? 0 );
+
+			// Compared on the count, not the clock: both are written to the second,
+			// so a failure landing in the same second as the report would look
+			// not-newer and be hidden.
+			if ( $count > 0 && $count > Helper::get_integer_value( $failure['acked'] ?? 0 ) ) {
+				$open[ $category ] = $failure;
+			}
+		}
+
+		return $open;
+	}
+
+	/**
+	 * Mark one category as reported.
+	 *
+	 * @param string $category One of self::CATEGORIES.
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public static function acknowledge_category( $category ) {
+		$failures = self::get_failures();
+
+		if ( ! isset( $failures[ $category ] ) ) {
+			return;
+		}
+
+		$failures[ $category ]['acked'] = Helper::get_integer_value( $failures[ $category ]['count'] ?? 0 );
+
+		update_option( self::FAILURES_OPTION, $failures, false );
+	}
+
+	/**
+	 * Forget one category's failures entirely.
+	 *
+	 * @param string $category One of self::CATEGORIES.
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public static function clear_category( $category ) {
+		$failures = self::get_failures();
+
+		if ( ! isset( $failures[ $category ] ) ) {
+			return;
+		}
+
+		unset( $failures[ $category ] );
+
+		update_option( self::FAILURES_OPTION, $failures, false );
+	}
+
+	/**
+	 * How many submission faults have been recorded.
+	 *
+	 * @since 2.12.6
 	 * @return int
 	 */
 	public static function get_fault_streak() {
-		return Helper::get_integer_value( get_option( self::FAULT_STREAK_OPTION, 0 ) );
+		$failures = self::get_failures();
+
+		return Helper::get_integer_value( $failures['submission']['count'] ?? 0 );
 	}
 
 	/**
-	 * Whether the form has failed often enough, and recently enough, to say so.
+	 * Whether submissions are failing and it has not already been reported.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool
 	 */
 	public static function has_persistent_failures() {
-		return self::get_fault_streak() >= self::FAULT_THRESHOLD;
+		return self::get_fault_streak() >= self::FAULT_THRESHOLD
+			&& isset( self::get_open_failures()['submission'] );
 	}
 
 	/**
-	 * Clear the run of faults.
+	 * The recorded acknowledgement for submission failures, if there is one.
 	 *
-	 * Hooked - srfm_form_submit, which fires only on the success path. One
-	 * submission getting through is the most reliable evidence available that the
-	 * form is not broken, so it retires the notice without anyone dismissing it.
+	 * @since 2.12.6
+	 * @return array<string,mixed> Empty when nothing has been acknowledged.
+	 */
+	public static function get_acknowledgement() {
+		$failures = self::get_failures();
+		$acked    = Helper::get_integer_value( $failures['submission']['acked'] ?? 0 );
+
+		if ( $acked < 1 ) {
+			return [];
+		}
+
+		return [
+			'at'     => Helper::get_integer_value( $failures['submission']['at'] ?? 0 ),
+			'streak' => $acked,
+		];
+	}
+
+	/**
+	 * When the most recent submission fault happened.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
+	 * @return int Unix timestamp, or 0 when nothing has failed.
+	 */
+	public static function get_last_fault_time() {
+		$failures = self::get_failures();
+
+		return Helper::get_integer_value( $failures['submission']['at'] ?? 0 );
+	}
+
+	/**
+	 * Record that the site owner has reported the current submission failures.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public static function acknowledge_failures() {
+		self::acknowledge_category( 'submission' );
+	}
+
+	/**
+	 * Forget the submission failures after one gets through.
+	 *
+	 * Hooked - srfm_form_submit, which fires only on the success path.
+	 *
+	 * Only the submission category is cleared. A submission getting through says
+	 * nothing about whether its notification email sent or its integrations ran,
+	 * so those clear when they next succeed or when the owner reports them.
+	 *
+	 * @since 2.12.6
 	 * @return void
 	 */
 	public static function reset_fault_streak() {
-		if ( self::get_fault_streak() > 0 ) {
-			update_option( self::FAULT_STREAK_OPTION, 0, false );
-		}
+		self::clear_category( 'submission' );
 	}
 
 	/**
 	 * Absolute path to the log file, creating its directory if needed.
 	 *
 	 * @param bool $create Whether to create the directory when it is absent.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string Absolute path, or '' when the location is unusable.
 	 */
 	public static function get_log_path( $create = true ) {
@@ -214,7 +388,7 @@ class Client_Logger {
 	 * Append one validated entry to the log.
 	 *
 	 * @param array<string,mixed> $entry Entry as returned by sanitize_entry().
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool True when the line was written.
 	 */
 	public static function append( array $entry ) {
@@ -232,8 +406,14 @@ class Client_Logger {
 		// Counted before the file is touched. A full log or an unwritable uploads
 		// directory must not stop the site owner being told the form is failing --
 		// on a badly broken site those are exactly the conditions that occur.
-		if ( self::is_fault( $entry ) ) {
-			update_option( self::FAULT_STREAK_OPTION, self::get_fault_streak() + 1, false );
+		// A notification or integration failure records its own category at the call
+		// site; everything else reaching here is the submission itself.
+		if ( self::is_fault( $entry ) && 'message' !== ( $entry['type'] ?? '' ) ) {
+			self::record_failure(
+				'submission',
+				Helper::get_integer_value( $entry['form_id'] ?? 0 ),
+				Helper::get_string_value( $entry['form_title'] ?? '' )
+			);
 		}
 
 		$path = self::get_log_path();
@@ -271,7 +451,7 @@ class Client_Logger {
 	 * Whole lines only -- half a JSON object helps nobody.
 	 *
 	 * @param int $max_chars Character budget for the returned text.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return array{text:string,shown:int,total:int}
 	 */
 	public static function get_tail( $max_chars = 1200 ) {
@@ -321,7 +501,7 @@ class Client_Logger {
 	/**
 	 * Whether the log has reached its size cap.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool
 	 */
 	public static function is_full() {
@@ -331,7 +511,7 @@ class Client_Logger {
 	/**
 	 * Current size of the log file in bytes.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return int
 	 */
 	public static function get_file_size() {
@@ -349,7 +529,7 @@ class Client_Logger {
 	/**
 	 * Delete the log file.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool
 	 */
 	public static function clear() {
@@ -371,7 +551,7 @@ class Client_Logger {
 	 * administrator later opens.
 	 *
 	 * @param array<string,mixed> $raw Decoded request payload.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return array<string,mixed> Empty when nothing usable survived.
 	 */
 	public static function sanitize_entry( array $raw ) {
@@ -387,7 +567,7 @@ class Client_Logger {
 			'form_id' => isset( $raw['form_id'] ) ? absint( Helper::get_integer_value( $raw['form_id'] ) ) : 0,
 		];
 
-		foreach ( [ 'message', 'source', 'body' ] as $key ) {
+		foreach ( [ 'message', 'source', 'body', 'form_title' ] as $key ) {
 			if ( ! isset( $raw[ $key ] ) ) {
 				continue;
 			}
@@ -436,7 +616,7 @@ class Client_Logger {
 	 * inc/ai-form-builder/ai-helper.php.
 	 *
 	 * @param string $text Raw text.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string
 	 */
 	public static function scrub_text( $text ) {
@@ -468,7 +648,7 @@ class Client_Logger {
 	 * salt-only hash would be identical on every site of a multisite network, and
 	 * older subdirectory installs can share one uploads directory.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string
 	 */
 	private static function get_filename_hash() {
@@ -494,7 +674,7 @@ class Client_Logger {
 	 * these files — is what actually protects the log.
 	 *
 	 * @param string $dir Directory to guard.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	private static function protect_directory( $dir ) {

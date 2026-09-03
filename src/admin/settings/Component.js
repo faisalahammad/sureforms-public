@@ -40,6 +40,7 @@ const Component = ( { path, subpage } ) => {
 		srfm_form_analytics: false,
 		srfm_bsf_analytics: false,
 		srfm_admin_notification: true,
+		srfm_form_views_tracking: false,
 		srfm_enable_logs: false,
 	} );
 	// Server-reported log status. Deliberately outside generalTabOptions: it is
@@ -272,6 +273,8 @@ const Component = ( { path, subpage } ) => {
 						srfm_form_analytics,
 						srfm_bsf_analytics,
 						srfm_admin_notification,
+						// Opt-in: absent means the feature was never switched on.
+						srfm_form_views_tracking = false,
 						srfm_enable_logs,
 					} = data.srfm_general_settings_options;
 					const snap = {
@@ -279,6 +282,7 @@ const Component = ( { path, subpage } ) => {
 						srfm_form_analytics,
 						srfm_bsf_analytics,
 						srfm_admin_notification,
+						srfm_form_views_tracking,
 						srfm_enable_logs,
 					};
 					setGeneralTabOptions( snap );

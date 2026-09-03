@@ -123,6 +123,14 @@ class Duplicate_Form {
 					continue;
 				}
 
+				// The view counter belongs to the form that earned it. Cloning it
+				// would give the copy an impression count with no submissions behind
+				// it — a permanent 0% conversion rate — and double-count those views
+				// in the site-wide analytics total.
+				if ( \SRFM\Inc\Form_Views::META_KEY === $meta_key ) {
+					continue;
+				}
+
 				// Handle unserialized metas (these are already arrays/objects).
 				// Note: get_post_meta() returns unslashed data, but add_post_meta()
 				// internally runs wp_unslash() on the value. Without re-slashing,

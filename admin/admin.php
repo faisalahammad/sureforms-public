@@ -84,7 +84,7 @@ class Admin {
 	 * `allowed_astra_notices` option and the per-user dismissal meta bounded to one
 	 * row, and lets a dismissed user short-circuit before the query runs.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	public const THANKYOU_PROMPT_NOTICE_ID = 'srfm-thankyou-prompt';
 
@@ -785,7 +785,7 @@ JS;
 	 * conditions there would have meant two copies drifting apart. Reading it costs
 	 * nothing extra — get_thankyou_prompt_forms() memoizes its query per request.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return array<string,mixed>|null The form to prompt for, or null when no prompt should render.
 	 */
 	public function get_displayable_thankyou_prompt() {
@@ -2817,6 +2817,14 @@ JS;
 				'contact_support' => 'submission_failure_notice_cta',
 				'dismissed'       => 'submission_failure_notice_dismiss',
 			],
+			'notification_error'          => [
+				'contact_support' => 'notification_failure_notice_cta',
+				'dismissed'       => 'notification_failure_notice_dismiss',
+			],
+			'integration_error'           => [
+				'contact_support' => 'integration_failure_notice_cta',
+				'dismissed'       => 'integration_failure_notice_dismiss',
+			],
 			'caching_plugin'              => [
 				'help_me_fix' => 'caching_plugin_notice_cta',
 				'dismissed'   => 'caching_plugin_notice_dismiss',
@@ -2839,6 +2847,23 @@ JS;
 
 		$event_name = $valid[ $notice_id ][ $button ];
 		Analytics::events()->track( $event_name, $button );
+
+		// Reporting the failures retires the notice until something new fails.
+		// Handled here rather than in the browser so it holds for the classic
+		// wp-admin notice too, which is a plain link with no JavaScript.
+		$categories = [
+			'form_submission_error' => 'submission',
+			'notification_error'    => 'notification',
+			'integration_error'     => 'integration',
+		];
+
+		if ( 'contact_support' === $button && isset( $categories[ $notice_id ] ) ) {
+			Client_Logger::acknowledge_category( $categories[ $notice_id ] );
+
+			if ( 'form_submission_error' === $notice_id ) {
+				Client_Logger::acknowledge_failures();
+			}
+		}
 
 		wp_send_json_success();
 	}
@@ -3202,7 +3227,7 @@ JS;
 	 * `srfm_options` row, which holds unrelated settings.
 	 *
 	 * @return void
-	 * @since x.x.x
+	 * @since 2.12.6
 	 */
 	public function maybe_track_edit_form_button_click() {
 		// is_string() before sanitize_key(): `?srfm_edit_src[]=x` satisfies isset(),
@@ -3270,7 +3295,7 @@ JS;
 	 * every subresource the editor loads.
 	 *
 	 * @param array<string> $args Query args core already removes.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return array<string> Args with the marker appended.
 	 */
 	public function add_removable_query_args( $args ) {
@@ -3371,7 +3396,7 @@ JS;
 	 * suppress_foreign_admin_notices() strips any callback it cannot attribute to
 	 * a SureForms class -- a closure here would be silently removed.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	public function render_action_item_notices() {
@@ -3429,7 +3454,7 @@ JS;
 	 *
 	 * Hooked - admin_post_srfm_dismiss_action_item_link.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	public function handle_dismiss_action_item_link() {
@@ -3456,7 +3481,7 @@ JS;
 	 * get_action_items(), which records an impression as a side effect and must not
 	 * run from a show_if callback.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool
 	 */
 	public function has_action_item_warnings() {
@@ -3484,7 +3509,7 @@ JS;
 	 * not something to wave away, and clears itself when a submission succeeds. A
 	 * caching plugin being present is information, so it can be dismissed.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return array<int,array<string,mixed>>
 	 */
 	public function get_action_items() {
@@ -3496,36 +3521,67 @@ JS;
 		$warnings  = [];
 		$passing   = [];
 
-		if ( Client_Logger::has_persistent_failures() ) {
-			$count = Client_Logger::get_fault_streak();
+		$open = Client_Logger::get_open_failures();
+
+		// One item per category. They read differently to a site owner and must not
+		// be collapsed: submissions failing means visitors cannot reach you, a
+		// notification failing means you are not hearing about entries that did
+		// save, an integration failing means a third party is not receiving them.
+		$categories = [
+			'submission'   => [
+				'id'      => 'form_submission_error',
+				/* translators: %s: form title. */
+				'title'   => __( 'We noticed a form submission failure on %s.', 'sureforms' ),
+				'generic' => __( 'We noticed a form submission failure.', 'sureforms' ),
+				'message' => __( 'Visitors may be unable to reach you, and those entries were not saved.', 'sureforms' ),
+				'passing' => __( 'Form submissions are completing normally.', 'sureforms' ),
+			],
+			'notification' => [
+				'id'      => 'notification_error',
+				/* translators: %s: form title. */
+				'title'   => __( 'We noticed a notification failure on %s.', 'sureforms' ),
+				'generic' => __( 'We noticed a notification failure.', 'sureforms' ),
+				'message' => __( 'The entry was saved, but the email telling you about it could not be sent — so new entries may be arriving without you hearing about them.', 'sureforms' ),
+				'passing' => __( 'Notification emails are sending normally.', 'sureforms' ),
+			],
+			'integration'  => [
+				'id'      => 'integration_error',
+				/* translators: %s: form title. */
+				'title'   => __( 'We noticed an integration failure on %s.', 'sureforms' ),
+				'generic' => __( 'We noticed an integration failure.', 'sureforms' ),
+				'message' => __( 'The entry was saved, but it could not be passed on to a connected service.', 'sureforms' ),
+				'passing' => __( 'Integrations are running normally.', 'sureforms' ),
+			],
+		];
+
+		foreach ( $categories as $category => $copy ) {
+			if ( ! isset( $open[ $category ] ) ) {
+				$passing[] = [
+					'id'          => $copy['id'],
+					'status'      => 'success',
+					'title'       => $copy['passing'],
+					'message'     => '',
+					'cta_label'   => '',
+					'cta_url'     => '',
+					'dismissible' => false,
+				];
+				continue;
+			}
+
+			// Name the form. "A form is failing" is not actionable on a site with
+			// twenty of them, and the title is the first thing anyone asks for.
+			$form_title = Helper::get_string_value( $open[ $category ]['form_title'] ?? '' );
 
 			$warnings[] = [
-				'id'          => 'form_submission_error',
+				'id'          => $copy['id'],
 				'status'      => 'error',
-				'title'       => sprintf(
-					/* translators: %d: number of consecutive failed submissions. */
-					_n(
-						'%d form submission in a row could not be completed.',
-						'%d form submissions in a row could not be completed.',
-						$count,
-						'sureforms'
-					),
-					$count
-				),
-				'message'     => __( 'Visitors may be unable to reach you, and those entries were not saved.', 'sureforms' ),
+				'title'       => '' !== $form_title
+					? sprintf( $copy['title'], $form_title )
+					: $copy['generic'],
+				'message'     => $copy['message'],
 				'cta_label'   => __( 'Contact Support', 'sureforms' ),
-				'cta_url'     => $this->get_support_mailto_url( $count ),
+				'cta_url'     => $this->get_support_mailto_url(),
 				'cta_action'  => 'contact_support',
-				'dismissible' => false,
-			];
-		} else {
-			$passing[] = [
-				'id'          => 'form_submission_error',
-				'status'      => 'success',
-				'title'       => __( 'Form submissions are completing normally.', 'sureforms' ),
-				'message'     => '',
-				'cta_label'   => '',
-				'cta_url'     => '',
 				'dismissible' => false,
 			];
 		}
@@ -3573,7 +3629,7 @@ JS;
 		 * handle_dismiss_action_item()'s allowlist can actually be dismissed, so
 		 * adding a dismissible item here also needs a line there.
 		 *
-		 * @since x.x.x
+		 * @since 2.12.6
 		 *
 		 * @param array<int,array<string,mixed>> $items Action items.
 		 */
@@ -3588,7 +3644,7 @@ JS;
 	 * Only items get_action_items() marks dismissible can be dismissed, so a
 	 * crafted request cannot silence a genuine fault.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	public function handle_dismiss_action_item() {
@@ -3940,7 +3996,7 @@ JS;
 	 *                                                text, url, and optionally
 	 *                                                primary, class, external,
 	 *                                                dismiss and snooze (seconds).
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string
 	 */
 	private static function build_srfm_notice_markup( $title, $text, $actions ) {
@@ -4166,7 +4222,7 @@ JS;
 	 * WordPress's own `is-dismissible` only hides the notice for that pageview.
 	 *
 	 * @param string $item_id Item to dismiss.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string
 	 */
 	private function get_dismiss_action_item_url( $item_id ) {
@@ -4193,7 +4249,7 @@ JS;
 	 * Passing checks are not counted. "Nothing is wrong" is not an impression.
 	 *
 	 * @param array<int,array<string,mixed>> $warnings Warning items only.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return void
 	 */
 	private function track_action_item_impressions( $warnings ) {
@@ -4247,19 +4303,18 @@ JS;
 	 * Pre-addressed support email for a run of failed submissions.
 	 *
 	 * Carries the details support would otherwise have to ask for, so the first
-	 * reply can be an answer rather than a questionnaire. The log itself is not
-	 * included: mailto has no attachment parameter -- browsers drop anything
-	 * beyond subject and body -- and a megabyte of JSON would exceed the URL
-	 * length every client enforces. The log is downloaded alongside instead, and
-	 * the body asks for it to be attached.
+	 * reply can be an answer rather than a questionnaire, along with the recent log
+	 * entries inline.
 	 *
-	 * @param int $count Consecutive failures.
-	 * @since x.x.x
+	 * The log is pasted into the body rather than attached because mailto has no
+	 * attachment parameter -- browsers drop any attempt to add one -- and it is a
+	 * tail rather than the whole file because a megabyte of JSON would exceed the
+	 * URL length every mail client enforces.
+	 *
+	 * @since 2.12.6
 	 * @return string
 	 */
-	private function get_support_mailto_url( $count ) {
-		unset( $count );
-
+	private function get_support_mailto_url() {
 		$subject = sprintf(
 			/* translators: %s: site host. */
 			__( 'SureForms: form submissions are failing on %s', 'sureforms' ),
@@ -4306,7 +4361,7 @@ JS;
 	 * Carries what support would otherwise have to ask for, so the first reply can
 	 * be an answer rather than a questionnaire.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string
 	 */
 	private function get_support_message() {
@@ -4350,7 +4405,7 @@ JS;
 	 * otherwise a crafted request could silence the one message that matters.
 	 *
 	 * @param string $item_id Item to dismiss.
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return bool False when the id is not dismissible.
 	 */
 	private function dismiss_action_item( $item_id ) {

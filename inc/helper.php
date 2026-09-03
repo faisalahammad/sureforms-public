@@ -771,7 +771,7 @@ class Helper {
 	 * Returns 0 for genuinely anonymous submissions, so callers can keep treating
 	 * falsy as "not logged in".
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return int User ID, or 0 when the submitter is not signed in.
 	 */
 	public static function get_submitting_user_id() {
@@ -2221,7 +2221,7 @@ class Helper {
 	 * Detection is by plugin path, mirroring is_any_smtp_plugin_active(), including
 	 * the multisite network-active merge.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.6
 	 * @return string Human-readable plugin name, or '' when none is active.
 	 */
 	public static function get_active_caching_plugin() {

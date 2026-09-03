@@ -23,12 +23,12 @@ class Test_Client_Logger extends TestCase {
 
 		$this->set_logging( true );
 		Client_Logger::clear();
-		delete_option( Client_Logger::FAULT_STREAK_OPTION );
+		delete_option( Client_Logger::FAILURES_OPTION );
+		delete_option( Client_Logger::FAILURES_OPTION );
 	}
 
 	protected function tearDown(): void {
 		Client_Logger::clear();
-		delete_option( Client_Logger::FAULT_STREAK_OPTION );
 		$this->set_logging( false );
 		delete_option( Client_Logger::FILENAME_OPTION );
 
@@ -442,15 +442,19 @@ class Test_Client_Logger extends TestCase {
 	public function test_has_persistent_failures() {
 		$this->assertFalse( Client_Logger::has_persistent_failures() );
 
-		for ( $i = 0; $i < Client_Logger::FAULT_THRESHOLD - 1; $i++ ) {
-			Client_Logger::append( [ 'type' => 'error', 'message' => 'TypeError: Failed to fetch' ] );
+		// However many visitor-correctable stops occur, none of them is a fault.
+		// This is what stops the notice firing on a mistyped email now that a
+		// single fault is enough to raise it.
+		for ( $i = 0; $i < 10; $i++ ) {
+			Client_Logger::append( [ 'type' => 'blocked', 'message' => 'field validation failed' ] );
 		}
 
-		$this->assertFalse( Client_Logger::has_persistent_failures(), 'One short of the threshold must stay quiet.' );
+		$this->assertFalse( Client_Logger::has_persistent_failures(), 'Blocked entries must never raise it.' );
 
 		Client_Logger::append( [ 'type' => 'error', 'message' => 'TypeError: Failed to fetch' ] );
 
-		$this->assertTrue( Client_Logger::has_persistent_failures() );
+		$this->assertSame( Client_Logger::FAULT_THRESHOLD, Client_Logger::get_fault_streak() );
+		$this->assertTrue( Client_Logger::has_persistent_failures(), 'A single fault is enough.' );
 	}
 
 	/**
@@ -464,6 +468,108 @@ class Test_Client_Logger extends TestCase {
 
 		$this->assertSame( 0, Client_Logger::get_fault_streak() );
 		$this->assertFalse( Client_Logger::has_persistent_failures() );
+	}
+
+	/**
+	 * When the newest fault happened. Not what the notice decides on -- the fault
+	 * counter is, because both are written to the second -- but it is what tells
+	 * support how recent the trouble is, so it has to actually advance.
+	 */
+	public function test_get_last_fault_time() {
+		$this->assertSame( 0, Client_Logger::get_last_fault_time() );
+
+		Client_Logger::append( [ 'type' => 'error', 'message' => 'failure' ] );
+
+		$this->assertGreaterThan( 0, Client_Logger::get_last_fault_time() );
+
+		// A visitor-correctable stop is not a fault and must not move it.
+		$before = Client_Logger::get_last_fault_time();
+		Client_Logger::append( [ 'type' => 'blocked', 'message' => 'field validation failed' ] );
+
+		$this->assertSame( $before, Client_Logger::get_last_fault_time() );
+	}
+
+	/**
+	 * Reporting the failures retires the notice, and a fault the site owner has
+	 * not reported brings it straight back.
+	 */
+	public function test_acknowledge_failures() {
+		for ( $i = 0; $i < Client_Logger::FAULT_THRESHOLD; $i++ ) {
+			Client_Logger::append( [ 'type' => 'error', 'message' => 'TypeError: Failed to fetch' ] );
+		}
+
+		$this->assertTrue( Client_Logger::has_persistent_failures() );
+
+		Client_Logger::acknowledge_failures();
+
+		$this->assertFalse( Client_Logger::has_persistent_failures(), 'Reported failures must go quiet.' );
+		$this->assertFalse( Client_Logger::has_persistent_failures(), 'And stay quiet with nothing new.' );
+
+		Client_Logger::append( [ 'type' => 'response', 'status' => 500, 'body' => 'a new fatal' ] );
+
+		$this->assertTrue( Client_Logger::has_persistent_failures(), 'An unreported fault must bring it back.' );
+	}
+
+	/**
+	 * Decided on the fault counter, not the clock.
+	 *
+	 * Both the acknowledgement and the fault are written to the second, so a fault
+	 * landing in the same second as the click would compare as not-newer and stay
+	 * hidden -- suppressing a failure nobody has reported. The counter is
+	 * monotonic, so the comparison is exact regardless of timing.
+	 */
+	public function test_acknowledge_failures_is_not_decided_by_the_clock() {
+		for ( $i = 0; $i < Client_Logger::FAULT_THRESHOLD; $i++ ) {
+			Client_Logger::append( [ 'type' => 'error', 'message' => 'failure' ] );
+		}
+
+		Client_Logger::acknowledge_failures();
+		$acknowledged = Client_Logger::get_acknowledgement();
+
+		// Same-second: a timestamp comparison cannot separate these two.
+		Client_Logger::append( [ 'type' => 'error', 'message' => 'same second failure' ] );
+
+		$this->assertSame(
+			$acknowledged['at'],
+			Client_Logger::get_acknowledgement()['at'],
+			'Fixture must exercise the same-second case.'
+		);
+		$this->assertTrue(
+			Client_Logger::has_persistent_failures(),
+			'A fault in the same second as the acknowledgement must still show.'
+		);
+	}
+
+	/**
+	 * The stored record carries the timestamp as well as the count -- the count
+	 * decides, but the timestamp is what tells support when it was reported.
+	 */
+	public function test_get_acknowledgement() {
+		$this->assertSame( [], Client_Logger::get_acknowledgement() );
+
+		Client_Logger::append( [ 'type' => 'error', 'message' => 'failure' ] );
+		Client_Logger::acknowledge_failures();
+
+		$stored = Client_Logger::get_acknowledgement();
+
+		$this->assertArrayHasKey( 'at', $stored );
+		$this->assertArrayHasKey( 'streak', $stored );
+		$this->assertGreaterThan( 0, $stored['at'] );
+	}
+
+	/**
+	 * A working form clears the acknowledgement with the streak, so the next run
+	 * of failures is judged on its own rather than against a stale report.
+	 */
+	public function test_reset_fault_streak_clears_the_acknowledgement() {
+		Client_Logger::append( [ 'type' => 'error', 'message' => 'failure' ] );
+		Client_Logger::acknowledge_failures();
+
+		$this->assertNotSame( [], Client_Logger::get_acknowledgement() );
+
+		Client_Logger::reset_fault_streak();
+
+		$this->assertSame( [], Client_Logger::get_acknowledgement() );
 	}
 
 	/**
@@ -495,6 +601,131 @@ class Test_Client_Logger extends TestCase {
 		Client_Logger::append( [ 'type' => 'error', 'message' => 'TypeError: Failed to fetch' ] );
 
 		$this->assertSame( $before + 1, Client_Logger::get_fault_streak() );
+	}
+
+	// ---------------------------------------------------------------
+	// Per-category failures
+	// ---------------------------------------------------------------
+
+	/**
+	 * The three read completely differently to a site owner, so they are tracked
+	 * apart: submissions failing means visitors cannot reach you, a notification
+	 * failing means you are not hearing about entries that did save, an
+	 * integration failing means a third party is not receiving them.
+	 */
+	public function test_record_failure() {
+		$this->assertSame( [], Client_Logger::get_open_failures() );
+
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
+
+		$open = Client_Logger::get_open_failures();
+
+		$this->assertArrayHasKey( 'notification', $open );
+		$this->assertArrayNotHasKey( 'submission', $open, 'Categories must not bleed into each other.' );
+		$this->assertSame( 42, $open['notification']['form_id'] );
+		$this->assertSame( 'Contact Form', $open['notification']['form_title'] );
+	}
+
+	/**
+	 * The raw store, including categories already reported.
+	 *
+	 * get_open_failures() filters those out, so this is what shows a report was
+	 * made rather than the failure having gone away.
+	 */
+	public function test_get_failures() {
+		$this->assertSame( [], Client_Logger::get_failures() );
+
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
+		Client_Logger::acknowledge_category( 'notification' );
+
+		$all = Client_Logger::get_failures();
+
+		$this->assertArrayHasKey( 'notification', $all, 'A reported failure is still on record.' );
+		$this->assertSame( 1, $all['notification']['count'] );
+		$this->assertSame( 1, $all['notification']['acked'] );
+		$this->assertSame( [], Client_Logger::get_open_failures(), 'But it is no longer open.' );
+	}
+
+	/**
+	 * Only categories with failures the owner has not reported, compared on the
+	 * count rather than the clock -- both are written to the second, so a failure
+	 * landing in the same second as the report would look not-newer and be hidden.
+	 */
+	public function test_get_open_failures() {
+		$this->assertSame( [], Client_Logger::get_open_failures() );
+
+		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
+
+		$this->assertArrayHasKey( 'submission', Client_Logger::get_open_failures() );
+
+		Client_Logger::acknowledge_category( 'submission' );
+
+		$this->assertSame( [], Client_Logger::get_open_failures() );
+
+		// Same second as the acknowledgement: the count still separates them.
+		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
+
+		$this->assertArrayHasKey(
+			'submission',
+			Client_Logger::get_open_failures(),
+			'A failure in the same second as the report must still be open.'
+		);
+	}
+
+	/**
+	 * An unrecognised category is dropped rather than creating a notice nothing
+	 * knows how to describe.
+	 */
+	public function test_record_failure_rejects_an_unknown_category() {
+		Client_Logger::record_failure( 'not_a_category', 42, 'Contact Form' );
+
+		$this->assertSame( [], Client_Logger::get_open_failures() );
+	}
+
+	/**
+	 * Reporting one category must not silence the others.
+	 */
+	public function test_acknowledge_category() {
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
+		Client_Logger::record_failure( 'integration', 42, 'Contact Form' );
+
+		Client_Logger::acknowledge_category( 'notification' );
+
+		$open = Client_Logger::get_open_failures();
+
+		$this->assertArrayNotHasKey( 'notification', $open );
+		$this->assertArrayHasKey( 'integration', $open, 'Only the reported category goes quiet.' );
+
+		// A further failure in the reported category brings it back.
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
+
+		$this->assertArrayHasKey( 'notification', Client_Logger::get_open_failures() );
+	}
+
+	/**
+	 * A submission getting through says nothing about notifications or
+	 * integrations, so it must not clear them.
+	 */
+	public function test_reset_fault_streak_clears_only_the_submission_category() {
+		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
+
+		Client_Logger::reset_fault_streak();
+
+		$open = Client_Logger::get_open_failures();
+
+		$this->assertArrayNotHasKey( 'submission', $open );
+		$this->assertArrayHasKey( 'notification', $open );
+	}
+
+	/**
+	 * Forgetting a category removes it outright, unlike acknowledging it.
+	 */
+	public function test_clear_category() {
+		Client_Logger::record_failure( 'integration', 42, 'Contact Form' );
+		Client_Logger::clear_category( 'integration' );
+
+		$this->assertSame( [], Client_Logger::get_failures() );
 	}
 
 	// ---------------------------------------------------------------

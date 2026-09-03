@@ -216,6 +216,41 @@ const AdminNotificationContent = ( {
 };
 
 /**
+ * Form Views & Conversion tracking settings section.
+ *
+ * @param {Object}   props
+ * @param {Object}   props.generalTabOptions    - General settings.
+ * @param {Function} props.updateGlobalSettings - Settings update handler.
+ */
+const FormViewsTrackingContent = ( {
+	generalTabOptions,
+	updateGlobalSettings,
+} ) => {
+	return (
+		<Switch
+			label={ {
+				heading: __(
+					'Show views and conversion rate',
+					'sureforms'
+				),
+				description: __(
+					'Adds the Views and Conversion Rate columns to the Forms list. A view is counted once per page visit when the form appears on screen, and the conversion rate is the share of those views that ended in a submission. Counting starts the first time you turn this on, so submissions received before then are not counted towards the rate. Turning it off afterwards only hides the columns — counting continues, so the figures are up to date if you switch it back on.',
+					'sureforms'
+				),
+			} }
+			value={ generalTabOptions.srfm_form_views_tracking }
+			onChange={ ( value ) =>
+				updateGlobalSettings(
+					'srfm_form_views_tracking',
+					value,
+					'general-settings'
+				)
+			}
+		/>
+	);
+};
+
+/**
  * Usage Tracking / Analytics settings section.
  *
  * @param {Object}   props
@@ -314,10 +349,19 @@ const LogsContent = ( {
 		setConfirmingClear( false );
 		setClearing( true );
 		try {
-			await fetch(
+			const response = await fetch(
 				`${ ajaxUrl }?action=srfm_clear_logs&_wpnonce=${ nonce }`,
 				{ method: 'POST', credentials: 'same-origin' }
 			);
+
+			// fetch only rejects on a network failure, so a 403 from a stale nonce
+			// or a 500 resolves normally. Without this the toast said the log was
+			// cleared and the size was zeroed -- hiding the row -- while the file
+			// was still on disk.
+			if ( ! response.ok ) {
+				throw new Error( `HTTP ${ response.status }` );
+			}
+
 			setLogMeta( { ...logMeta, size: 0 } );
 			toast.success( __( 'Log cleared.', 'sureforms' ) );
 		} catch ( error ) {
@@ -467,6 +511,16 @@ const GeneralPage = ( {
 						generalTabOptions={ generalTabOptions }
 						updateGlobalSettings={ updateGlobalSettings }
 						showLearnTip={ showLearnTip }
+					/>
+				}
+			/>
+			<ContentSection
+				loading={ loading }
+				title={ __( 'Form Views & Conversion', 'sureforms' ) }
+				content={
+					<FormViewsTrackingContent
+						generalTabOptions={ generalTabOptions }
+						updateGlobalSettings={ updateGlobalSettings }
 					/>
 				}
 			/>

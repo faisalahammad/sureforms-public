@@ -264,6 +264,75 @@ class Test_Duplicate_Form extends TestCase {
 	}
 
 	/**
+	 * A duplicated form must not inherit the original's view count.
+	 *
+	 * duplicate_form() copies every meta key except an explicit skip list, so the
+	 * view counter came along by default. The copy would then show impressions it
+	 * never had, against zero entries — a permanently wrong 0% conversion rate —
+	 * and those views would be counted twice in the site-wide analytics total.
+	 *
+	 * Ordinary form meta is asserted alongside it, so a future skip list that is
+	 * too eager fails here too rather than silently dropping real settings.
+	 */
+	public function test_duplicate_form_does_not_clone_view_count() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || ! function_exists( 'wp_insert_post' ) ) {
+			$this->markTestSkipped( 'WordPress post functions not available for this test.' );
+		}
+
+		$admin = wp_insert_user(
+			[
+				'user_login' => 'srfm_dup_admin_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_dup_admin_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $admin ) ? 0 : (int) $admin );
+
+		$form_id = wp_insert_post(
+			[
+				'post_title'  => 'Duplicate Views Source',
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_status' => 'publish',
+			]
+		);
+
+		update_post_meta( $form_id, \SRFM\Inc\Form_Views::META_KEY, 137 );
+		update_post_meta( $form_id, '_srfm_submit_button_text', 'Send it' );
+
+		$result = $this->duplicate_form->duplicate_form( $form_id );
+
+		if ( is_wp_error( $result ) ) {
+			wp_delete_post( $form_id, true );
+			$this->fail( 'Duplication failed: ' . $result->get_error_message() );
+		}
+
+		// duplicate_form() returns a response array, not a post ID.
+		$new_id = (int) $result['new_form_id'];
+
+		$this->assertSame(
+			'',
+			(string) get_post_meta( $new_id, \SRFM\Inc\Form_Views::META_KEY, true ),
+			'A duplicated form must start with no view count.'
+		);
+		// Read the full array, not the single value: the CPT seeds defaults on
+		// insert, so the copied row may not be the first one for this key.
+		$this->assertContains(
+			'Send it',
+			array_map( 'strval', (array) get_post_meta( $new_id, '_srfm_submit_button_text' ) ),
+			'Ordinary form meta must still be copied.'
+		);
+		$this->assertSame( 137, (int) get_post_meta( $form_id, \SRFM\Inc\Form_Views::META_KEY, true ), 'The original must keep its count.' );
+
+		wp_delete_post( $new_id, true );
+		wp_delete_post( $form_id, true );
+		wp_set_current_user( 0 );
+		if ( ! is_wp_error( $admin ) ) {
+			wp_delete_user( (int) $admin );
+		}
+	}
+
+	/**
 	 * Test security fix - authorization check.
 	 * This function verifies that the authorization fix is working correctly.
 	 * It tests that current_user_can('edit_post', $form_id) is checked.

@@ -149,19 +149,21 @@ class Global_Settings {
 	 */
 	public static function srfm_save_general_settings( $setting_options ) {
 
-		$srfm_ip_log             = $setting_options['srfm_ip_log'] ?? false;
-		$srfm_form_analytics     = $setting_options['srfm_form_analytics'] ?? false;
-		$srfm_bsf_analytics      = $setting_options['srfm_bsf_analytics'] ?? false;
-		$srfm_admin_notification = isset( $setting_options['srfm_admin_notification'] ) ? (bool) $setting_options['srfm_admin_notification'] : true;
+		$srfm_ip_log              = $setting_options['srfm_ip_log'] ?? false;
+		$srfm_form_analytics      = $setting_options['srfm_form_analytics'] ?? false;
+		$srfm_bsf_analytics       = $setting_options['srfm_bsf_analytics'] ?? false;
+		$srfm_admin_notification  = isset( $setting_options['srfm_admin_notification'] ) ? (bool) $setting_options['srfm_admin_notification'] : true;
+		$srfm_form_views_tracking = isset( $setting_options['srfm_form_views_tracking'] ) ? (bool) $setting_options['srfm_form_views_tracking'] : false;
 		// Absent means on, matching Client_Logger::is_enabled(). A save that omits
 		// the key must not be read as the site opting out.
 		$srfm_enable_logs = isset( $setting_options['srfm_enable_logs'] ) ? (bool) $setting_options['srfm_enable_logs'] : true;
 
 		$settings = [
-			'srfm_ip_log'             => $srfm_ip_log,
-			'srfm_form_analytics'     => $srfm_form_analytics,
-			'srfm_admin_notification' => $srfm_admin_notification,
-			'srfm_enable_logs'        => $srfm_enable_logs,
+			'srfm_ip_log'              => $srfm_ip_log,
+			'srfm_form_analytics'      => $srfm_form_analytics,
+			'srfm_admin_notification'  => $srfm_admin_notification,
+			'srfm_form_views_tracking' => $srfm_form_views_tracking,
+			'srfm_enable_logs'         => $srfm_enable_logs,
 		];
 
 		/**
@@ -665,15 +667,20 @@ class Global_Settings {
 
 		if ( empty( $global_setting_options['srfm_general_settings_options'] ) || ! is_array( $global_setting_options['srfm_general_settings_options'] ) ) {
 				$global_setting_options['srfm_general_settings_options'] = [
-					'srfm_ip_log'             => false,
-					'srfm_form_analytics'     => false,
-					'srfm_admin_notification' => true,
-					'srfm_enable_logs'        => true,
+					'srfm_ip_log'              => false,
+					'srfm_form_analytics'      => false,
+					'srfm_admin_notification'  => true,
+					'srfm_form_views_tracking' => false,
+					'srfm_enable_logs'         => true,
 				];
 		}
 
 		if ( ! isset( $global_setting_options['srfm_general_settings_options']['srfm_admin_notification'] ) ) {
 				$global_setting_options['srfm_general_settings_options']['srfm_admin_notification'] = true;
+		}
+
+		if ( ! isset( $global_setting_options['srfm_general_settings_options']['srfm_form_views_tracking'] ) ) {
+				$global_setting_options['srfm_general_settings_options']['srfm_form_views_tracking'] = false;
 		}
 
 		// Back-fill for installs whose option predates the setting. Logging is on by
