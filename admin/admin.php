@@ -3477,7 +3477,7 @@ JS;
 	/**
 	 * Whether anything is currently wrong enough to warrant a notice.
 	 *
-	 * Deliberately re-derives the two conditions rather than calling
+	 * Deliberately re-derives its conditions rather than calling
 	 * get_action_items(), which records an impression as a side effect and must not
 	 * run from a show_if callback.
 	 *
@@ -3485,6 +3485,10 @@ JS;
 	 * @return bool
 	 */
 	public function has_action_item_warnings() {
+		if ( ! Client_Logger::is_enabled() ) {
+			return false;
+		}
+
 		if ( Client_Logger::has_persistent_failures() ) {
 			return true;
 		}
@@ -3517,9 +3521,15 @@ JS;
 			return [];
 		}
 
+		// Logging off means the site owner has opted out of this whole surface: the
+		// fault counters stop being fed, so anything still standing in them is
+		// stale and cannot be trusted to reflect the site now.
+		if ( ! Client_Logger::is_enabled() ) {
+			return [];
+		}
+
 		$dismissed = Helper::get_array_value( Helper::get_srfm_option( 'dismissed_action_items', [] ) );
 		$warnings  = [];
-		$passing   = [];
 
 		$open = Client_Logger::get_open_failures();
 
@@ -3533,38 +3543,26 @@ JS;
 				/* translators: %s: form title. */
 				'title'   => __( 'We noticed a form submission failure on %s.', 'sureforms' ),
 				'generic' => __( 'We noticed a form submission failure.', 'sureforms' ),
-				'message' => __( 'Visitors may be unable to reach you, and those entries were not saved.', 'sureforms' ),
-				'passing' => __( 'Form submissions are completing normally.', 'sureforms' ),
+				'message' => __( 'Visitors may not be able to reach you, and their entries were not saved.', 'sureforms' ),
 			],
 			'notification' => [
 				'id'      => 'notification_error',
 				/* translators: %s: form title. */
 				'title'   => __( 'We noticed a notification failure on %s.', 'sureforms' ),
 				'generic' => __( 'We noticed a notification failure.', 'sureforms' ),
-				'message' => __( 'The entry was saved, but the email telling you about it could not be sent — so new entries may be arriving without you hearing about them.', 'sureforms' ),
-				'passing' => __( 'Notification emails are sending normally.', 'sureforms' ),
+				'message' => __( 'The entry was saved, but we could not send the email about it. New entries may be coming in without you knowing.', 'sureforms' ),
 			],
 			'integration'  => [
 				'id'      => 'integration_error',
 				/* translators: %s: form title. */
 				'title'   => __( 'We noticed an integration failure on %s.', 'sureforms' ),
 				'generic' => __( 'We noticed an integration failure.', 'sureforms' ),
-				'message' => __( 'The entry was saved, but it could not be passed on to a connected service.', 'sureforms' ),
-				'passing' => __( 'Integrations are running normally.', 'sureforms' ),
+				'message' => __( 'The entry was saved, but we could not send it to a connected service.', 'sureforms' ),
 			],
 		];
 
 		foreach ( $categories as $category => $copy ) {
 			if ( ! isset( $open[ $category ] ) ) {
-				$passing[] = [
-					'id'          => $copy['id'],
-					'status'      => 'success',
-					'title'       => $copy['passing'],
-					'message'     => '',
-					'cta_label'   => '',
-					'cta_url'     => '',
-					'dismissible' => false,
-				];
 				continue;
 			}
 
@@ -3588,17 +3586,7 @@ JS;
 
 		$caching_plugin = Helper::get_active_caching_plugin();
 
-		if ( '' === $caching_plugin ) {
-			$passing[] = [
-				'id'          => 'caching_plugin',
-				'status'      => 'success',
-				'title'       => __( 'No caching plugin that needs configuring was found.', 'sureforms' ),
-				'message'     => '',
-				'cta_label'   => '',
-				'cta_url'     => '',
-				'dismissible' => false,
-			];
-		} elseif ( ! in_array( 'caching_plugin', $dismissed, true ) ) {
+		if ( '' !== $caching_plugin && ! in_array( 'caching_plugin', $dismissed, true ) ) {
 			$warnings[] = [
 				'id'          => 'caching_plugin',
 				'status'      => 'warning',
@@ -3607,7 +3595,7 @@ JS;
 					__( '%s may interfere with your forms.', 'sureforms' ),
 					$caching_plugin
 				),
-				'message'     => __( 'Caching and JavaScript optimisation can serve a stale copy of your form or load its scripts out of order.', 'sureforms' ),
+				'message'     => __( 'Caching can show visitors an old copy of your form, or load its scripts in the wrong order.', 'sureforms' ),
 				'cta_label'   => __( 'Help Me Fix', 'sureforms' ),
 				'cta_url'     => 'https://sureforms.com/docs/how-to-set-up-sureforms-with-caching-plugins/',
 				'cta_action'  => 'help_me_fix',
@@ -3615,9 +3603,10 @@ JS;
 			];
 		}
 
-		// Warnings first: the point of the panel is what needs attention, with the
-		// passing checks below as reassurance rather than as the headline.
-		$items = array_merge( $warnings, $passing );
+		// Only what needs attention. A panel confirming that nothing is wrong is
+		// something people learn to skip, and it takes sidebar space from the cards
+		// that do have something to say.
+		$items = $warnings;
 
 		$this->track_action_item_impressions( $warnings );
 

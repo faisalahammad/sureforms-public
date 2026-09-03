@@ -1074,11 +1074,12 @@ class Test_Admin extends TestCase {
 	// ---------------------------------------------------------------
 
 	/**
-	 * A healthy site still reports, but only as passing checks. Nothing may be a
-	 * warning -- logging is on by default, so a false positive reaches every
-	 * install.
+	 * A healthy site produces nothing at all, so the panel does not render.
+	 *
+	 * A widget confirming that nothing is wrong is something people learn to skip,
+	 * and it takes sidebar space from the cards that do have something to say.
 	 */
-	public function test_get_action_items_reports_only_passing_checks_when_healthy() {
+	public function test_get_action_items_is_empty_when_healthy() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
 		delete_option( Client_Logger::FAILURES_OPTION );
 
@@ -1090,11 +1091,38 @@ class Test_Admin extends TestCase {
 		$items = Admin::get_instance()->get_action_items();
 		remove_filter( 'pre_option_active_plugins', $filter );
 
-		$this->assertNotEmpty( $items );
+		$this->assertSame( [], $items );
+	}
 
-		foreach ( $items as $item ) {
-			$this->assertSame( 'success', $item['status'], $item['id'] . ' must pass on a healthy site.' );
-		}
+	/**
+	 * Turning logging off takes the whole panel down with it.
+	 *
+	 * The toggle is what feeds the fault counters, so once it is off whatever is
+	 * still standing in them describes the site as it was, not as it is. Asserted
+	 * with a fault recorded and a caching plugin active -- both surfaces the panel
+	 * has -- so this cannot pass just because there was nothing to show.
+	 */
+	public function test_get_action_items_shows_nothing_when_logging_is_off() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
+
+		update_option( 'srfm_general_settings_options', [ 'srfm_enable_logs' => false ] );
+
+		$filter = static function () {
+			return [ 'wp-rocket/wp-rocket.php' ];
+		};
+
+		add_filter( 'pre_option_active_plugins', $filter );
+		$items    = Admin::get_instance()->get_action_items();
+		$warnings = Admin::get_instance()->has_action_item_warnings();
+		remove_filter( 'pre_option_active_plugins', $filter );
+
+		delete_option( 'srfm_general_settings_options' );
+
+		$this->assertSame( [], $items );
+		$this->assertFalse( $warnings );
 	}
 
 	/**
