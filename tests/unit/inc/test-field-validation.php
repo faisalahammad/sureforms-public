@@ -536,6 +536,32 @@ class Test_Field_Validation extends TestCase {
 	}
 
 	/**
+	 * get_known_field_slugs() collects the slug of every SureForms field in the form,
+	 * recursing into innerBlocks, so a submitted field can be matched by its stable
+	 * slug when its block_id has drifted.
+	 */
+	public function test_get_known_field_slugs_collects_field_slugs() {
+		$form_id = wp_insert_post(
+			[
+				'post_type'    => 'sureforms_form',
+				'post_status'  => 'publish',
+				'post_title'   => 'Slug Set Form',
+				'post_content' => '<!-- wp:srfm/input {"block_id":"aaa111","slug":"finish-time"} /-->'
+					. '<!-- wp:srfm/url {"block_id":"bbb222","slug":"result-url"} /-->',
+			]
+		);
+
+		$slugs = Field_Validation::get_known_field_slugs( $form_id );
+
+		$this->assertArrayHasKey( 'finish-time', $slugs );
+		$this->assertArrayHasKey( 'result-url', $slugs );
+		$this->assertArrayNotHasKey( 'not-a-field', $slugs );
+		$this->assertSame( [], Field_Validation::get_known_field_slugs( 0 ), 'invalid form id yields an empty set' );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
 	 * Invalid form ids return an empty set (callers fail open).
 	 */
 	public function test_get_known_field_block_ids_empty_for_invalid_form() {
