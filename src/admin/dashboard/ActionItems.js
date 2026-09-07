@@ -117,8 +117,38 @@ export default () => {
 	];
 
 	const handleCopy = ( item ) => async () => {
+		const text = item.details || '';
+
 		try {
-			await navigator.clipboard.writeText( item.details || '' );
+			// Both flavours. A rich-text composer -- Gmail's, for one -- drops the
+			// newlines out of plain text, which is what turned the diagnostics into
+			// one paragraph; pasting HTML keeps every break, and <pre> keeps the
+			// log's columns lined up. A plain-text field still gets the text.
+			//
+			// Escaped here because the source is a log holding whatever a server put
+			// in an error message. It is never trusted as markup.
+			const html = `<pre style="font-family:monospace;white-space:pre-wrap;word-break:break-word;margin:0">${ text
+				.replace( /&/g, '&amp;' )
+				.replace( /</g, '&lt;' )
+				.replace( />/g, '&gt;' ) }</pre>`;
+
+			if ( window.ClipboardItem && navigator.clipboard?.write ) {
+				await navigator.clipboard.write( [
+					new window.ClipboardItem( {
+						'text/plain': new Blob( [ text ], {
+							type: 'text/plain',
+						} ),
+						'text/html': new Blob( [ html ], {
+							type: 'text/html',
+						} ),
+					} ),
+				] );
+			} else {
+				// No ClipboardItem: the formatting is lost, which still beats
+				// copying nothing.
+				await navigator.clipboard.writeText( text );
+			}
+
 			setCopied( true );
 			// Reverts on its own: a button stuck on "Copied" says nothing about the
 			// next click.

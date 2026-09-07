@@ -199,6 +199,70 @@
 	// ------------------------------------------------------------------
 
 	/**
+	 * The details as HTML, for the clipboard's text/html flavour.
+	 *
+	 * Gmail's composer is a rich-text field: it drops the newlines out of plain
+	 * text, which is what turned the diagnostics into one paragraph. Pasting HTML
+	 * instead keeps every break, and <pre> keeps the log's columns lined up.
+	 *
+	 * Escaped here, not on the server, so the escaping happens once and in the same
+	 * place the markup is built. The source is a log holding whatever a server put
+	 * in an error message, so it is never trusted as markup.
+	 *
+	 * @param {string} text Plain-text details.
+	 * @return {string} Escaped HTML.
+	 */
+	function detailsAsHtml( text ) {
+		const escaped = text
+			.replace( /&/g, '&amp;' )
+			.replace( /</g, '&lt;' )
+			.replace( />/g, '&gt;' );
+
+		return (
+			'<pre style="font-family:monospace;white-space:pre-wrap;' +
+			'word-break:break-word;margin:0">' +
+			escaped +
+			'</pre>'
+		);
+	}
+
+	/**
+	 * Put the details on the clipboard in both flavours.
+	 *
+	 * A rich composer takes the HTML and keeps the line breaks; a plain-text field
+	 * takes the text. Falls back to writeText where ClipboardItem is unavailable --
+	 * that loses the formatting, but losing it is better than copying nothing.
+	 *
+	 * @param {string}   text Plain-text details.
+	 * @param {Function} done Called once the clipboard actually holds it.
+	 */
+	function copyDetails( text, done ) {
+		const supportsRich =
+			window.ClipboardItem &&
+			navigator.clipboard &&
+			navigator.clipboard.write;
+
+		if ( supportsRich ) {
+			const item = new window.ClipboardItem( {
+				'text/plain': new Blob( [ text ], { type: 'text/plain' } ),
+				'text/html': new Blob( [ detailsAsHtml( text ) ], {
+					type: 'text/html',
+				} ),
+			} );
+
+			navigator.clipboard.write( [ item ] ).then( done, function () {
+				// Refused (insecure origin, permission policy). The text is on
+				// screen and selectable, so say nothing rather than claim success.
+			} );
+			return;
+		}
+
+		if ( navigator.clipboard && navigator.clipboard.writeText ) {
+			navigator.clipboard.writeText( text ).then( done, function () {} );
+		}
+	}
+
+	/**
 	 * Show what would be sent to support, before anything is sent.
 	 *
 	 * The text is already in the page, hidden next to its notice, so opening this
@@ -290,7 +354,7 @@
 		}
 
 		copy.addEventListener( 'click', function () {
-			const done = function () {
+			copyDetails( text, function () {
 				copy.textContent = labels.copied || 'Copied';
 				// Reverts on its own: a button stuck on "Copied" says nothing about
 				// the next click.
@@ -298,18 +362,7 @@
 					copy.textContent = labels.copy || 'Copy details';
 				}, 2000 );
 				sendResponse( noticeId, 'copy_details' );
-			};
-
-			if ( navigator.clipboard && navigator.clipboard.writeText ) {
-				navigator.clipboard.writeText( text ).then( done, function () {
-					// Refused (insecure origin, permission policy). The text is on
-					// screen and selectable, so say nothing rather than claim it
-					// was copied.
-				} );
-				return;
-			}
-
-			pre.focus();
+			} );
 		} );
 
 		contact.addEventListener( 'click', function () {
