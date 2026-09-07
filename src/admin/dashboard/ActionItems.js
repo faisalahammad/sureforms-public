@@ -169,7 +169,7 @@ export default () => {
 										variant="link"
 										size="xs"
 										onClick={ handleIgnore( item ) }
-										className="font-medium focus:outline-none focus:[box-shadow:none] [&>span]:px-0 text-text-secondary shrink-0"
+										className="font-medium no-underline hover:underline focus:outline-none focus:[box-shadow:none] [&>span]:px-0 text-text-secondary shrink-0"
 									>
 										{ __( 'Ignore', 'sureforms' ) }
 									</Button>
@@ -193,7 +193,12 @@ export default () => {
 													item,
 													action.name
 												) }
-												className={ `font-medium focus:outline-none focus:[box-shadow:none] [&>span]:px-0${
+												// Underlined on hover only, matching
+												// Quick Access below it. Three
+												// underlined links stacked in a narrow
+												// column read as a block of noise
+												// rather than as actions.
+												className={ `font-medium no-underline hover:underline focus:outline-none focus:[box-shadow:none] [&>span]:px-0${
 													index > 0
 														? ' text-text-secondary'
 														: ''
