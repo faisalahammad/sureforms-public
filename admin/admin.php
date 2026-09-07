@@ -4397,9 +4397,14 @@ JS;
 			Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) )
 		);
 
+		// Bare LF, not CRLF. CRLF is the mailto convention and correct when a mail
+		// client parses the URL, but Gmail's compose window does not honour the
+		// carriage returns and runs the whole body together as one paragraph -- the
+		// diagnostics and the log arrive as a wall of text. Nothing parses this as
+		// a mail header any more, so there is no reason left to send CRLF.
 		$log   = Client_Logger::get_tail();
 		$body  = $this->get_support_message( $category, $form_title );
-		$body .= "\r\n\r\n" . '---' . "\r\n";
+		$body .= "\n\n" . '---' . "\n";
 
 		if ( '' === $log['text'] ) {
 			$body .= __( 'Debug log: no entries recorded.', 'sureforms' );
@@ -4409,14 +4414,15 @@ JS;
 				__( 'Debug log (most recent %1$d of %2$d entries)', 'sureforms' ),
 				$log['shown'],
 				$log['total']
-			) . "\r\n";
+			) . "\n";
 
 			// Fenced so it survives a reply and reads as data rather than prose in
-			// clients that render Markdown.
-			$body .= '```' . "\r\n" . str_replace( "\n", "\r\n", $log['text'] ) . "\r\n" . '```';
+			// clients that render Markdown. The log's own newlines are already LF,
+			// so nothing needs rewriting.
+			$body .= '```' . "\n" . $log['text'] . "\n" . '```';
 
 			if ( $log['shown'] < $log['total'] ) {
-				$body .= "\r\n\r\n" . __( 'Older entries were left out to keep this email within the length a mail client accepts. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
+				$body .= "\n\n" . __( 'Older entries were left out to keep this email within the length a mail client accepts. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
 			}
 		}
 
@@ -4452,7 +4458,7 @@ JS;
 			// land inside a percent-escape and produce a malformed URL.
 			$budget = max( 0, (int) floor( $room / 3 ) );
 			$body   = mb_substr( $body, 0, $budget );
-			$body  .= "\r\n\r\n" . __( 'This log was shortened to fit. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
+			$body  .= "\n\n" . __( 'This log was shortened to fit. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
 		}
 
 		return $base . rawurlencode( $body );
@@ -4572,7 +4578,7 @@ JS;
 			]
 		);
 
-		return implode( "\r\n", $lines );
+		return implode( "\n", $lines );
 	}
 
 	/**
