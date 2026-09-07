@@ -242,45 +242,48 @@ export default () => {
 							</div>
 							{ !! actionsFor( item ).length && (
 								<div className="pl-6 flex items-center gap-4">
-									{ actionsFor( item ).map(
-										( action, index ) => (
+									{ actionsFor( item ).map( ( action, index ) =>
+										// A native button for the one that opens the
+										// dialog. Routed through force-ui's Button it
+										// followed the href instead -- the same page in
+										// a new tab -- and a control that navigates is
+										// the wrong element for something that opens a
+										// panel in place.
+										action.dialog ? (
+											<button
+												key={ action.name }
+												type="button"
+												onClick={ () => {
+													setCopied( false );
+													setDetails( item );
+													handleFix(
+														item,
+														action.name
+													)();
+												} }
+												className={ `bg-transparent border-0 p-0 cursor-pointer text-xs font-medium no-underline hover:underline${
+													index > 0
+														? ' text-text-secondary'
+														: ' text-text-interactive'
+												}` }
+											>
+												{ action.label }
+											</button>
+										) : (
 											<Button
 												key={ action.name }
 												variant="link"
 												size="xs"
-												{ ...( action.dialog
-													? {
-														onClick: ( e ) => {
-															e.preventDefault();
-															setCopied(
-																false
-															);
-															setDetails(
-																item
-															);
-															handleFix(
-																item,
-																action.name
-															)();
-														},
-													  }
-													: {
-														tag: 'a',
-														href: action.url,
-														onClick: handleFix(
-															item,
-															action.name
-														),
-														...( action.external && {
-															target: '_blank',
-															rel: 'noopener noreferrer',
-														} ),
-													  } ) }
-												// Underlined on hover only, matching
-												// Quick Access below it. Three
-												// underlined links stacked in a narrow
-												// column read as a block of noise
-												// rather than as actions.
+												tag="a"
+												href={ action.url }
+												{ ...( action.external && {
+													target: '_blank',
+													rel: 'noopener noreferrer',
+												} ) }
+												onClick={ handleFix(
+													item,
+													action.name
+												) }
 												className={ `font-medium no-underline hover:underline focus:outline-none focus:[box-shadow:none] [&>span]:px-0${
 													index > 0
 														? ' text-text-secondary'
