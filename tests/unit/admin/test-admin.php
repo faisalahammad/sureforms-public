@@ -1175,8 +1175,12 @@ class Test_Admin extends TestCase {
 		$this->assertSame( 'help_me_fix', $items['notification_error']['guide_action'] ?? '' );
 		$this->assertNotEmpty( $items['notification_error']['guide_label'] ?? '' );
 
-		// Contact Support is still there; the guide is an addition, not a swap.
-		$this->assertSame( 'contact_support', $items['notification_error']['cta_action'] ?? '' );
+		// The details action is still there; the guide is an addition, not a swap.
+		$this->assertSame( 'view_details', $items['notification_error']['cta_action'] ?? '' );
+		$this->assertNotEmpty(
+			$items['notification_error']['details'] ?? '',
+			'The dialog has nothing to show without the details payload.'
+		);
 
 		// A category with no guide must not carry empty guide keys, which both
 		// renderers treat as "render a second button".
@@ -1356,7 +1360,7 @@ class Test_Admin extends TestCase {
 	 * here, because a swap that only reorders would leave the secondary styling on
 	 * the leading action.
 	 */
-	public function test_render_action_item_notices_puts_the_guide_before_contact_support() {
+	public function test_render_action_item_notices_puts_the_guide_before_the_details_action() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
 		delete_option( Client_Logger::FAILURES_OPTION );
 		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
@@ -1375,11 +1379,11 @@ class Test_Admin extends TestCase {
 		$guide = strpos( $html, 'help_me_fix' );
 		$this->assertNotFalse( $guide, 'The notification guide must render.' );
 
-		// The support link that follows it, not the one in the submission notice
+		// The details action that follows it, not the one in the submission notice
 		// above, so this measures order within the same notice.
-		$support_after_guide = strpos( $html, 'contact_support', $guide );
-		$this->assertNotFalse( $support_after_guide, 'Contact Support must follow the guide.' );
-		$this->assertGreaterThan( $guide, $support_after_guide );
+		$details_after_guide = strpos( $html, 'view_details', $guide );
+		$this->assertNotFalse( $details_after_guide, 'View details must follow the guide.' );
+		$this->assertGreaterThan( $guide, $details_after_guide );
 
 		// Whichever action leads carries the primary button.
 		$this->assertMatchesRegularExpression(
@@ -1388,7 +1392,7 @@ class Test_Admin extends TestCase {
 			'The leading action must be the primary button.'
 		);
 		$this->assertMatchesRegularExpression(
-			'/class="button"[^>]*data-srfm-button="contact_support"/',
+			'/class="button"[^>]*data-srfm-button="view_details"/',
 			$html,
 			'The following action must be secondary.'
 		);
@@ -1404,9 +1408,9 @@ class Test_Admin extends TestCase {
 		$pagenow = $previous_pagenow;
 
 		$this->assertMatchesRegularExpression(
-			'/class="button button-primary"[^>]*data-srfm-button="contact_support"/',
+			'/class="button button-primary"[^>]*data-srfm-button="view_details"/',
 			$alone,
-			'With no guide, Contact Support leads and stays primary.'
+			'With no guide, View details leads and stays primary.'
 		);
 	}
 
@@ -1651,7 +1655,10 @@ class Test_Admin extends TestCase {
 			$output = ob_get_clean();
 
 			$this->assertStringContainsString( 'notice-error', $output, $screen . ' must show the notice.' );
-			$this->assertStringContainsString( 'Contact Support', $output );
+			// Contact Support moved into the details modal; the notice itself offers
+			// the diagnostics first.
+			$this->assertStringContainsString( 'View details', $output );
+			$this->assertStringContainsString( 'srfm-notice-details', $output, 'The modal payload must ship with the notice.' );
 		}
 
 	}

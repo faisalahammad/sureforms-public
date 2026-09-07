@@ -1,7 +1,15 @@
 import { __ } from '@wordpress/i18n';
 import { useState } from '@wordpress/element';
 import { Button, Label } from '@bsf/force-ui';
-import { CircleCheck, TriangleAlert, ChevronUp, ChevronDown } from 'lucide-react';
+import {
+	CircleCheck,
+	TriangleAlert,
+	ChevronUp,
+	ChevronDown,
+	Check,
+	Copy,
+	X,
+} from 'lucide-react';
 
 /**
  * Dashboard panel listing what SureForms has checked on this site.
@@ -31,6 +39,10 @@ const ICONS = {
 export default () => {
 	const [ dismissed, setDismissed ] = useState( [] );
 	const [ open, setOpen ] = useState( true );
+	// The item whose details are being read, or null. Holds the item rather than a
+	// boolean so the dialog keeps rendering the right one while it closes.
+	const [ details, setDetails ] = useState( null );
+	const [ copied, setCopied ] = useState( false );
 
 	const items = ( srfm_admin?.action_items || [] ).filter(
 		( item ) => ! dismissed.includes( item.id )
@@ -91,15 +103,38 @@ export default () => {
 					name: item.cta_action,
 					label: item.cta_label,
 					url: item.cta_url,
-					// Contact Support is a Gmail compose URL, so it opens in a new
-					// tab like any other link. The mailto check stays because
-					// srfm_action_items is public and a third party can still
-					// contribute one, which must go to the mail client instead.
+					// An item carrying details opens them here rather than
+					// navigating: the point is to read the diagnostics before
+					// sending them anywhere. cta_url stays as the fallback the
+					// classic wp-admin notice uses, since it cannot open a dialog.
+					dialog: !! item.details,
+					// A mailto must reach the mail client, not a browser tab.
+					// srfm_action_items is public, so one can still arrive that way.
 					external: ! item.cta_url?.startsWith( 'mailto:' ),
 				},
 			  ]
 			: [] ),
 	];
+
+	const handleCopy = ( item ) => async () => {
+		try {
+			await navigator.clipboard.writeText( item.details || '' );
+			setCopied( true );
+			// Reverts on its own: a button stuck on "Copied" says nothing about the
+			// next click.
+			setTimeout( () => setCopied( false ), 2000 );
+		} catch ( e ) {
+			// Clipboard access can be refused outright (an insecure origin, a
+			// permission policy). The text is on screen and selectable, so there is
+			// nothing to recover -- just do not claim it was copied.
+			setCopied( false );
+		}
+
+		post( 'srfm_notice_response', srfm_admin?.notice_response_nonce, {
+			notice_id: item.id,
+			button: 'copy_details',
+		} );
+	};
 
 	// The support link carries the log in its body, so the click just opens a
 	// composed message -- no download to trigger, nothing to intercept.
@@ -183,16 +218,34 @@ export default () => {
 												key={ action.name }
 												variant="link"
 												size="xs"
-												tag="a"
-												href={ action.url }
-												{ ...( action.external && {
-													target: '_blank',
-													rel: 'noopener noreferrer',
-												} ) }
-												onClick={ handleFix(
-													item,
-													action.name
-												) }
+												{ ...( action.dialog
+													? {
+														onClick: ( e ) => {
+															e.preventDefault();
+															setCopied(
+																false
+															);
+															setDetails(
+																item
+															);
+															handleFix(
+																item,
+																action.name
+															)();
+														},
+													  }
+													: {
+														tag: 'a',
+														href: action.url,
+														onClick: handleFix(
+															item,
+															action.name
+														),
+														...( action.external && {
+															target: '_blank',
+															rel: 'noopener noreferrer',
+														} ),
+													  } ) }
 												className={ `font-medium focus:outline-none focus:[box-shadow:none] [&>span]:px-0${
 													index > 0
 														? ' text-text-secondary'
@@ -207,6 +260,91 @@ export default () => {
 							) }
 						</div>
 					) ) }
+				</div>
+			) }
+			{ /* Read before send: the same text a support request needs, so it can
+			     be pasted rather than described.
+
+			     A plain overlay rather than force-ui's Dialog because the identical
+			     modal has to exist for the classic wp-admin notices, which have no
+			     React. One implementation, one behaviour, nothing to keep in step. */ }
+			{ !! details && (
+				<div
+					className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/50 p-4"
+					role="presentation"
+					onClick={ ( e ) => {
+						// Backdrop only. A click inside the panel must not close it
+						// while someone is selecting the text.
+						if ( e.target === e.currentTarget ) {
+							setDetails( null );
+						}
+					} }
+				>
+					<div
+						className="w-full max-w-2xl rounded-lg bg-background-primary p-4 shadow-lg"
+						role="dialog"
+						aria-modal="true"
+						aria-label={ __( 'Details', 'sureforms' ) }
+					>
+						<div className="flex items-start justify-between gap-2">
+							<Label size="sm" className="font-semibold">
+								{ __( 'Details', 'sureforms' ) }
+							</Label>
+							<button
+								type="button"
+								onClick={ () => setDetails( null ) }
+								aria-label={ __( 'Close', 'sureforms' ) }
+								className="flex items-center bg-transparent border-0 p-0.5 cursor-pointer text-icon-secondary hover:text-icon-primary"
+							>
+								<X className="size-4" />
+							</button>
+						</div>
+						<Label
+							size="xs"
+							variant="help"
+							className="font-normal block pt-1"
+						>
+							{ __(
+								'What we recorded about this problem. Copy it into your support request so we can start from the cause rather than a description of it.',
+								'sureforms'
+							) }
+						</Label>
+						{ /* Selectable and scrollable: clipboard access can be
+						     refused, and then selecting by hand is the only way
+						     through. */ }
+						<pre className="mt-3 mb-0 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background-secondary p-3 text-xs text-text-secondary">
+							{ details.details || '' }
+						</pre>
+						<div className="flex items-center justify-end gap-2 pt-3">
+							<Button
+								variant="outline"
+								size="sm"
+								icon={
+									copied ? (
+										<Check className="size-4" />
+									) : (
+										<Copy className="size-4" />
+									)
+								}
+								onClick={ handleCopy( details ) }
+							>
+								{ copied
+									? __( 'Copied', 'sureforms' )
+									: __( 'Copy details', 'sureforms' ) }
+							</Button>
+							<Button
+								variant="primary"
+								size="sm"
+								tag="a"
+								href={ details.support_url }
+								target="_blank"
+								rel="noopener noreferrer"
+								onClick={ handleFix( details, 'contact_support' ) }
+							>
+								{ __( 'Contact Support', 'sureforms' ) }
+							</Button>
+						</div>
+					</div>
 				</div>
 			) }
 		</div>

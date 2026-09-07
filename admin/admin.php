@@ -97,6 +97,17 @@ class Admin {
 	 *
 	 * @since 2.12.6
 	 */
+	/**
+	 * Where the dialog's Contact Support button goes.
+	 *
+	 * A form rather than an inbox: it collects the licence and site details support
+	 * would otherwise have to ask for, and the diagnostics are already on the
+	 * clipboard by the time someone gets here.
+	 *
+	 * @since 2.12.6
+	 */
+	private const SUPPORT_CONTACT_URL = 'https://sureforms.com/contact/';
+
 	private const GMAIL_COMPOSE_URL = 'https://mail.google.com/mail/';
 
 	/**
@@ -2798,6 +2809,16 @@ JS;
 					/* translators: 1: current position, 2: total notices. */
 					'counter'  => __( '%1$d of %2$d', 'sureforms' ),
 				],
+				// Details modal chrome, translated here so the script carries no
+				// user-facing English of its own.
+				'details'  => [
+					'title'       => __( 'Details', 'sureforms' ),
+					'description' => __( 'What we recorded about this problem. Copy it into your support request so we can start from the cause rather than a description of it.', 'sureforms' ),
+					'copy'        => __( 'Copy details', 'sureforms' ),
+					'copied'      => __( 'Copied', 'sureforms' ),
+					'contact'     => __( 'Contact Support', 'sureforms' ),
+					'close'       => __( 'Close', 'sureforms' ),
+				],
 			]
 		);
 	}
@@ -2846,15 +2867,21 @@ JS;
 			],
 			// The "Finish setting up" prompt (#3030): three CTAs, plus the ✕.
 			'form_submission_error'       => [
+				'view_details'    => 'submission_failure_notice_view',
+				'copy_details'    => 'submission_failure_notice_copy',
 				'contact_support' => 'submission_failure_notice_cta',
 				'dismissed'       => 'submission_failure_notice_dismiss',
 			],
 			'notification_error'          => [
+				'view_details'    => 'notification_failure_notice_view',
+				'copy_details'    => 'notification_failure_notice_copy',
 				'contact_support' => 'notification_failure_notice_cta',
 				'help_me_fix'     => 'notification_failure_notice_guide',
 				'dismissed'       => 'notification_failure_notice_dismiss',
 			],
 			'integration_error'           => [
+				'view_details'    => 'integration_failure_notice_view',
+				'copy_details'    => 'integration_failure_notice_copy',
 				'contact_support' => 'integration_failure_notice_cta',
 				'dismissed'       => 'integration_failure_notice_dismiss',
 			],
@@ -3485,7 +3512,16 @@ JS;
 						class="<?php echo $has_guide ? 'button' : 'button button-primary'; ?>"
 						data-srfm-notice-id="<?php echo esc_attr( Helper::get_string_value( $item['id'] ) ); ?>"
 						data-srfm-button="<?php echo esc_attr( Helper::get_string_value( $item['cta_action'] ?? '' ) ); ?>"
-						<?php echo 0 === strpos( Helper::get_string_value( $item['cta_url'] ), 'mailto:' ) ? '' : 'target="_blank" rel="noopener noreferrer"'; ?>
+						<?php
+						// With details to show, the click opens them here instead of
+						// following the href. The href stays as the no-JS path: it
+						// goes to the dashboard, where the same details are readable.
+						if ( ! empty( $item['details'] ) ) {
+							echo 'data-srfm-details-for="' . esc_attr( Helper::get_string_value( $item['id'] ) ) . '"';
+						} elseif ( 0 !== strpos( Helper::get_string_value( $item['cta_url'] ), 'mailto:' ) ) {
+							echo 'target="_blank" rel="noopener noreferrer"';
+						}
+						?>
 					>
 						<?php echo esc_html( $item['cta_label'] ); ?>
 					</a>
@@ -3495,6 +3531,20 @@ JS;
 						</a>
 					<?php } ?>
 				</p>
+				<?php if ( ! empty( $item['details'] ) ) { ?>
+					<?php
+					// Carried in the page rather than fetched: it is already computed
+					// for this render, and a modal that has to make a request can fail
+					// at the moment someone is trying to report a failure. Hidden, and
+					// read as textContent -- never parsed as HTML.
+					?>
+					<div
+						class="srfm-notice-details"
+						data-srfm-details-id="<?php echo esc_attr( Helper::get_string_value( $item['id'] ) ); ?>"
+						data-srfm-support-url="<?php echo esc_url( Helper::get_string_value( $item['support_url'] ?? '' ) ); ?>"
+						hidden
+					><?php echo esc_html( Helper::get_string_value( $item['details'] ) ); ?></div>
+				<?php } ?>
 			</div>
 			<?php
 		}
@@ -3632,9 +3682,20 @@ JS;
 					? sprintf( $copy['title'], $form_title )
 					: $copy['generic'],
 				'message'     => $copy['message'],
-				'cta_label'   => __( 'Contact Support', 'sureforms' ),
-				'cta_url'     => $this->get_support_email_url( $category, $form_title ),
-				'cta_action'  => 'contact_support',
+				// Shows what would be sent before anything is sent. Someone reporting
+				// a fault on their own site is entitled to read the diagnostics and
+				// the log first, and a support agent gets a cleaner paste than a
+				// screenshot of a notice.
+				'cta_label'   => __( 'View details', 'sureforms' ),
+				// Where the classic wp-admin notice sends people, since it cannot open
+				// the panel's dialog. The dashboard is where the details are readable.
+				'cta_url'     => admin_url( 'admin.php?page=sureforms_menu' ),
+				'cta_action'  => 'view_details',
+				// The dialog's own contents. Plain text: it is rendered inside a <pre>
+				// and copied verbatim, so any markup here would be read as characters.
+				'details'     => $this->get_support_message( $category, $form_title )
+					. "\r\n\r\n" . $this->get_support_log_block(),
+				'support_url' => self::SUPPORT_CONTACT_URL,
 				'dismissible' => false,
 			];
 
@@ -4355,6 +4416,42 @@ JS;
 	}
 
 	/**
+	 * The log tail, formatted for pasting.
+	 *
+	 * Shared by the support URL and the dialog, so the text someone reads before
+	 * sending is the text that gets sent. They used to be built separately, which
+	 * is how a "details" view drifts from what it claims to show.
+	 *
+	 * @since 2.12.6
+	 * @return string
+	 */
+	private function get_support_log_block() {
+		$log   = Client_Logger::get_tail();
+		$block = '---' . "\r\n";
+
+		if ( '' === $log['text'] ) {
+			return $block . __( 'Debug log: no entries recorded.', 'sureforms' );
+		}
+
+		$block .= sprintf(
+			/* translators: 1: entries shown, 2: entries recorded. */
+			__( 'Debug log (most recent %1$d of %2$d entries)', 'sureforms' ),
+			$log['shown'],
+			$log['total']
+		) . "\r\n";
+
+		// Fenced so it survives a reply and reads as data rather than prose wherever
+		// Markdown is rendered.
+		$block .= '```' . "\r\n" . str_replace( "\n", "\r\n", $log['text'] ) . "\r\n" . '```';
+
+		if ( $log['shown'] < $log['total'] ) {
+			$block .= "\r\n\r\n" . __( 'Older entries were left out to keep this within the length a mail client accepts. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
+		}
+
+		return $block;
+	}
+
+	/**
 	 * Pre-addressed support email for one kind of failure.
 	 *
 	 * Carries the details support would otherwise have to ask for, so the first
@@ -4397,28 +4494,8 @@ JS;
 			Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) )
 		);
 
-		$log   = Client_Logger::get_tail();
-		$body  = $this->get_support_message( $category, $form_title );
-		$body .= "\r\n\r\n" . '---' . "\r\n";
-
-		if ( '' === $log['text'] ) {
-			$body .= __( 'Debug log: no entries recorded.', 'sureforms' );
-		} else {
-			$body .= sprintf(
-				/* translators: 1: entries shown, 2: entries recorded. */
-				__( 'Debug log (most recent %1$d of %2$d entries)', 'sureforms' ),
-				$log['shown'],
-				$log['total']
-			) . "\r\n";
-
-			// Fenced so it survives a reply and reads as data rather than prose in
-			// clients that render Markdown.
-			$body .= '```' . "\r\n" . str_replace( "\n", "\r\n", $log['text'] ) . "\r\n" . '```';
-
-			if ( $log['shown'] < $log['total'] ) {
-				$body .= "\r\n\r\n" . __( 'Older entries were left out to keep this email within the length a mail client accepts. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
-			}
-		}
+		$body = $this->get_support_message( $category, $form_title )
+			. "\r\n\r\n" . $this->get_support_log_block();
 
 		/**
 		 * Filter the support address the Contact Support action writes to.

@@ -193,4 +193,166 @@
 	} else {
 		buildNoticeCarousel();
 	}
+
+	// ------------------------------------------------------------------
+	// Details modal
+	// ------------------------------------------------------------------
+
+	/**
+	 * Show what would be sent to support, before anything is sent.
+	 *
+	 * The text is already in the page, hidden next to its notice, so opening this
+	 * makes no request -- a modal that has to fetch can fail at the exact moment
+	 * someone is trying to report a failure.
+	 *
+	 * Read with textContent and written with textContent, never innerHTML: the log
+	 * contains whatever a server or a browser put in an error message, and that is
+	 * not markup to be trusted.
+	 *
+	 * @param {string} noticeId Item id, matched against the hidden payload's
+	 *                          data-srfm-details-id.
+	 * @return {boolean} Whether the payload was found and the modal opened.
+	 */
+	function openDetails( noticeId ) {
+		const source = document.querySelector(
+			'.srfm-notice-details[data-srfm-details-id="' + noticeId + '"]'
+		);
+
+		if ( ! source ) {
+			return false;
+		}
+
+		const labels = ( srfmNoticeResponse && srfmNoticeResponse.details ) || {};
+		const text = source.textContent || '';
+		const supportUrl = source.getAttribute( 'data-srfm-support-url' ) || '';
+
+		const overlay = document.createElement( 'div' );
+		overlay.style.cssText =
+			'position:fixed;inset:0;z-index:100000;display:flex;align-items:center;' +
+			'justify-content:center;background:rgba(0,0,0,.5);padding:16px;';
+
+		const panel = document.createElement( 'div' );
+		panel.setAttribute( 'role', 'dialog' );
+		panel.setAttribute( 'aria-modal', 'true' );
+		panel.setAttribute( 'aria-label', labels.title || 'Details' );
+		panel.style.cssText =
+			'background:#fff;border-radius:8px;padding:16px;width:100%;' +
+			'max-width:720px;box-shadow:0 10px 30px rgba(0,0,0,.2);';
+
+		const heading = document.createElement( 'h2' );
+		heading.textContent = labels.title || 'Details';
+		heading.style.cssText = 'margin:0 0 4px;font-size:14px;';
+
+		const description = document.createElement( 'p' );
+		description.textContent = labels.description || '';
+		description.style.cssText = 'margin:0 0 12px;color:#50575e;';
+
+		// Selectable and scrollable, because clipboard access can be refused and
+		// then selecting by hand is the only way through.
+		const pre = document.createElement( 'pre' );
+		pre.textContent = text;
+		pre.style.cssText =
+			'margin:0;max-height:320px;overflow:auto;white-space:pre-wrap;' +
+			'word-break:break-word;background:#f6f7f7;padding:12px;' +
+			'border-radius:6px;font-size:12px;';
+
+		const actions = document.createElement( 'p' );
+		actions.style.cssText =
+			'display:flex;gap:8px;justify-content:flex-end;margin:12px 0 0;';
+
+		const copy = document.createElement( 'button' );
+		copy.type = 'button';
+		copy.className = 'button';
+		copy.textContent = labels.copy || 'Copy details';
+
+		const contact = document.createElement( 'a' );
+		contact.className = 'button button-primary';
+		contact.href = supportUrl;
+		contact.target = '_blank';
+		contact.rel = 'noopener noreferrer';
+		contact.textContent = labels.contact || 'Contact Support';
+
+		const close = document.createElement( 'button' );
+		close.type = 'button';
+		close.className = 'button-link';
+		close.textContent = labels.close || 'Close';
+		close.setAttribute( 'aria-label', labels.close || 'Close' );
+
+		function dismiss() {
+			document.removeEventListener( 'keydown', onKey );
+			overlay.remove();
+		}
+
+		function onKey( e ) {
+			if ( e.key === 'Escape' ) {
+				dismiss();
+			}
+		}
+
+		copy.addEventListener( 'click', function () {
+			const done = function () {
+				copy.textContent = labels.copied || 'Copied';
+				// Reverts on its own: a button stuck on "Copied" says nothing about
+				// the next click.
+				window.setTimeout( function () {
+					copy.textContent = labels.copy || 'Copy details';
+				}, 2000 );
+				sendResponse( noticeId, 'copy_details' );
+			};
+
+			if ( navigator.clipboard && navigator.clipboard.writeText ) {
+				navigator.clipboard.writeText( text ).then( done, function () {
+					// Refused (insecure origin, permission policy). The text is on
+					// screen and selectable, so say nothing rather than claim it
+					// was copied.
+				} );
+				return;
+			}
+
+			pre.focus();
+		} );
+
+		contact.addEventListener( 'click', function () {
+			sendResponse( noticeId, 'contact_support' );
+		} );
+
+		close.addEventListener( 'click', dismiss );
+		overlay.addEventListener( 'click', function ( e ) {
+			// Backdrop only: a click inside the panel must not close it while
+			// someone is selecting the text.
+			if ( e.target === overlay ) {
+				dismiss();
+			}
+		} );
+		document.addEventListener( 'keydown', onKey );
+
+		actions.appendChild( close );
+		actions.appendChild( copy );
+		actions.appendChild( contact );
+		panel.appendChild( heading );
+		panel.appendChild( description );
+		panel.appendChild( pre );
+		panel.appendChild( actions );
+		overlay.appendChild( panel );
+		document.body.appendChild( overlay );
+
+		copy.focus();
+
+		return true;
+	}
+
+	document.addEventListener( 'click', function ( e ) {
+		const trigger = e.target.closest( '[data-srfm-details-for]' );
+
+		if ( ! trigger ) {
+			return;
+		}
+
+		// Only swallow the navigation if the modal actually opened. If the payload
+		// is missing the href still goes to the dashboard, which is where the same
+		// details are readable.
+		if ( openDetails( trigger.getAttribute( 'data-srfm-details-for' ) ) ) {
+			e.preventDefault();
+		}
+	} );
 }() );
