@@ -1308,6 +1308,41 @@ class Test_Admin extends TestCase {
 	}
 
 	/**
+	 * The body uses bare LF, so Gmail keeps the line breaks.
+	 *
+	 * CRLF is the mailto convention and correct when a mail client parses the URL,
+	 * but Gmail's compose window ignores the carriage returns and runs the whole
+	 * body together as one paragraph -- the diagnostics and the log arrive as a wall
+	 * of text. Nothing parses this as a mail header any more, so CRLF has no
+	 * consumer left.
+	 */
+	public function test_get_support_email_url_keeps_line_breaks_gmail_will_honour() {
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::clear();
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
+
+		$method = new ReflectionMethod( Admin::class, 'get_support_email_url' );
+		$method->setAccessible( true );
+		$url = $method->invoke( Admin::get_instance(), 'notification', 'Contact Form' );
+
+		$this->assertStringNotContainsString(
+			'%0D%0A',
+			$url,
+			'A carriage return collapses the body to one paragraph in Gmail.'
+		);
+		$this->assertStringContainsString( '%0A', $url, 'The body must still be broken into lines.' );
+
+		parse_str( (string) wp_parse_url( $url, PHP_URL_QUERY ), $query );
+
+		$this->assertStringNotContainsString( "\r", $query['body'] );
+		$this->assertGreaterThan(
+			5,
+			substr_count( $query['body'], "\n" ),
+			'The diagnostics block is several lines; one long line means the breaks were lost.'
+		);
+	}
+
+	/**
 	 * The URL stays inside a length Gmail will not silently truncate.
 	 *
 	 * Gmail drops the overflow of a long body without a word, and the overflow is

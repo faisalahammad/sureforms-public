@@ -3694,7 +3694,7 @@ JS;
 				// The dialog's own contents. Plain text: it is rendered inside a <pre>
 				// and copied verbatim, so any markup here would be read as characters.
 				'details'     => $this->get_support_message( $category, $form_title )
-					. "\r\n\r\n" . $this->get_support_log_block(),
+					. "\n\n" . $this->get_support_log_block(),
 				'support_url' => self::SUPPORT_CONTACT_URL,
 				'dismissible' => false,
 			];
@@ -4427,7 +4427,7 @@ JS;
 	 */
 	private function get_support_log_block() {
 		$log   = Client_Logger::get_tail();
-		$block = '---' . "\r\n";
+		$block = '---' . "\n";
 
 		if ( '' === $log['text'] ) {
 			return $block . __( 'Debug log: no entries recorded.', 'sureforms' );
@@ -4438,14 +4438,14 @@ JS;
 			__( 'Debug log (most recent %1$d of %2$d entries)', 'sureforms' ),
 			$log['shown'],
 			$log['total']
-		) . "\r\n";
+		) . "\n";
 
 		// Fenced so it survives a reply and reads as data rather than prose wherever
 		// Markdown is rendered.
-		$block .= '```' . "\r\n" . str_replace( "\n", "\r\n", $log['text'] ) . "\r\n" . '```';
+		$block .= '```' . "\n" . $log['text'] . "\n" . '```';
 
 		if ( $log['shown'] < $log['total'] ) {
-			$block .= "\r\n\r\n" . __( 'Older entries were left out to keep this within the length a mail client accepts. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
+			$block .= "\n\n" . __( 'Older entries were left out to keep this within the length a mail client accepts. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
 		}
 
 		return $block;
@@ -4495,7 +4495,7 @@ JS;
 		);
 
 		$body = $this->get_support_message( $category, $form_title )
-			. "\r\n\r\n" . $this->get_support_log_block();
+			. "\n\n" . $this->get_support_log_block();
 
 		/**
 		 * Filter the support address the Contact Support action writes to.
@@ -4529,7 +4529,7 @@ JS;
 			// land inside a percent-escape and produce a malformed URL.
 			$budget = max( 0, (int) floor( $room / 3 ) );
 			$body   = mb_substr( $body, 0, $budget );
-			$body  .= "\r\n\r\n" . __( 'This log was shortened to fit. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
+			$body  .= "\n\n" . __( 'This log was shortened to fit. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
 		}
 
 		return $base . rawurlencode( $body );
@@ -4649,7 +4649,7 @@ JS;
 			]
 		);
 
-		return implode( "\r\n", $lines );
+		return implode( "\n", $lines );
 	}
 
 	/**
