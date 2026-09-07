@@ -91,15 +91,18 @@ export default () => {
 					name: item.cta_action,
 					label: item.cta_label,
 					url: item.cta_url,
-					// A mailto: must open in the mail client, not a new tab.
+					// Contact Support is a Gmail compose URL, so it opens in a new
+					// tab like any other link. The mailto check stays because
+					// srfm_action_items is public and a third party can still
+					// contribute one, which must go to the mail client instead.
 					external: ! item.cta_url?.startsWith( 'mailto:' ),
 				},
 			  ]
 			: [] ),
 	];
 
-	// The mailto now carries the log in its body, so the link just works -- no
-	// download to trigger, nothing to intercept.
+	// The support link carries the log in its body, so the click just opens a
+	// composed message -- no download to trigger, nothing to intercept.
 	const handleFix = ( item, action ) => () =>
 		post( 'srfm_notice_response', srfm_admin?.notice_response_nonce, {
 			notice_id: item.id,

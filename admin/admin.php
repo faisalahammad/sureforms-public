@@ -89,6 +89,28 @@ class Admin {
 	public const THANKYOU_PROMPT_NOTICE_ID = 'srfm-thankyou-prompt';
 
 	/**
+	 * Gmail's compose endpoint, used by the Contact Support action.
+	 *
+	 * No `/u/0/`: that pins the first signed-in account, which on a machine with
+	 * several is often the wrong one. Without it Gmail composes from whichever
+	 * account is active.
+	 *
+	 * @since 2.12.6
+	 */
+	private const GMAIL_COMPOSE_URL = 'https://mail.google.com/mail/';
+
+	/**
+	 * Ceiling for the generated support URL, in characters.
+	 *
+	 * Gmail truncates a long `body` without saying so, and browsers have their own
+	 * limits. 2000 is the length every current browser handles, and it leaves the
+	 * diagnostics block plus roughly the most recent few log entries.
+	 *
+	 * @since 2.12.6
+	 */
+	private const SUPPORT_URL_BUDGET = 2000;
+
+	/**
 	 * Dashboard widget entries data.
 	 *
 	 * @var array
@@ -2764,8 +2786,18 @@ JS;
 			'srfm-notice-response',
 			'srfmNoticeResponse',
 			[
-				'ajaxurl' => admin_url( 'admin-ajax.php' ),
-				'nonce'   => wp_create_nonce( 'srfm_notice_response' ),
+				'ajaxurl'  => admin_url( 'admin-ajax.php' ),
+				'nonce'    => wp_create_nonce( 'srfm_notice_response' ),
+				// Carousel chrome. Built in the browser rather than printed here so
+				// that with JavaScript off every notice simply stays visible, which
+				// is the behaviour this replaced -- controls that cannot work must
+				// not be what hides a warning.
+				'carousel' => [
+					'previous' => __( 'Previous notice', 'sureforms' ),
+					'next'     => __( 'Next notice', 'sureforms' ),
+					/* translators: 1: current position, 2: total notices. */
+					'counter'  => __( '%1$d of %2$d', 'sureforms' ),
+				],
 			]
 		);
 	}
@@ -3426,7 +3458,7 @@ JS;
 			// but they are not the same kind of message and should not look alike.
 			$class = 'error' === $status ? 'notice-error' : 'notice-warning';
 			?>
-			<div class="notice <?php echo esc_attr( $class ); ?>">
+			<div class="notice srfm-action-item-notice <?php echo esc_attr( $class ); ?>">
 				<p><strong><?php echo esc_html( $item['title'] ); ?></strong></p>
 				<p><?php echo esc_html( $item['message'] ); ?></p>
 				<?php
@@ -3601,7 +3633,7 @@ JS;
 					: $copy['generic'],
 				'message'     => $copy['message'],
 				'cta_label'   => __( 'Contact Support', 'sureforms' ),
-				'cta_url'     => $this->get_support_mailto_url( $category, $form_title ),
+				'cta_url'     => $this->get_support_email_url( $category, $form_title ),
 				'cta_action'  => 'contact_support',
 				'dismissible' => false,
 			];
@@ -4334,10 +4366,21 @@ JS;
 	 * ticket titled "form submissions are failing" and a count that belonged to a
 	 * different counter -- wrong at a glance and routed to the wrong place.
 	 *
-	 * The log is pasted into the body rather than attached because mailto has no
-	 * attachment parameter -- browsers drop any attempt to add one -- and it is a
-	 * tail rather than the whole file because a megabyte of JSON would exceed the
-	 * URL length every mail client enforces.
+	 * Opens Gmail's compose window rather than handing off to `mailto:`. A mailto
+	 * goes to whatever the machine has registered as its mail handler, which on a
+	 * machine with none configured opens nothing at all; this always lands
+	 * somewhere the person can see and send.
+	 *
+	 * The trade is that someone who does not use Gmail on the web gets a compose
+	 * window for an account they may not want. They can still copy the message out
+	 * of it, and it is a visible window rather than a link that appears to do
+	 * nothing.
+	 *
+	 * The log is pasted into the body rather than attached because neither a mailto
+	 * nor a compose URL can carry an attachment, and it is a tail rather than the
+	 * whole file because a megabyte of JSON would exceed any URL length. Gmail
+	 * truncates a long `body` silently, so the log is trimmed to a budget below --
+	 * losing the oldest entries visibly beats losing the newest without saying so.
 	 *
 	 * @param string $category   One of Client_Logger::CATEGORIES. Unknown or absent
 	 *                           gets neutral wording rather than a specific claim.
@@ -4345,7 +4388,7 @@ JS;
 	 * @since 2.12.6
 	 * @return string
 	 */
-	private function get_support_mailto_url( $category = '', $form_title = '' ) {
+	private function get_support_email_url( $category = '', $form_title = '' ) {
 		$copy = $this->get_support_copy( $category );
 
 		$subject = sprintf(
@@ -4377,15 +4420,42 @@ JS;
 			}
 		}
 
-		return 'mailto:support@sureforms.com?' . http_build_query(
+		/**
+		 * Filter the support address the Contact Support action writes to.
+		 *
+		 * @since 2.12.6
+		 *
+		 * @param string $address Support inbox.
+		 */
+		$address = Helper::get_string_value( apply_filters( 'srfm_support_email_address', 'support@sureforms.com' ) );
+
+		// Budget for the whole URL. Gmail drops the overflow of an over-long body
+		// without a word, and the overflow is the end of the log -- the newest
+		// entries, the ones describing the failure being reported. Trimming here
+		// instead means the oldest go first and the note below says so.
+		$base = self::GMAIL_COMPOSE_URL . '?' . http_build_query(
 			[
-				'subject' => $subject,
-				'body'    => $body,
+				'view' => 'cm',
+				'fs'   => '1',
+				'to'   => $address,
+				'su'   => $subject,
 			],
 			'',
 			'&',
 			PHP_QUERY_RFC3986
-		);
+		) . '&body=';
+
+		$room = self::SUPPORT_URL_BUDGET - strlen( $base );
+
+		if ( strlen( rawurlencode( $body ) ) > $room ) {
+			// Cut on the raw string, then re-encode: slicing an encoded string can
+			// land inside a percent-escape and produce a malformed URL.
+			$budget = max( 0, (int) floor( $room / 3 ) );
+			$body   = mb_substr( $body, 0, $budget );
+			$body  .= "\r\n\r\n" . __( 'This log was shortened to fit. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
+		}
+
+		return $base . rawurlencode( $body );
 	}
 
 	/**

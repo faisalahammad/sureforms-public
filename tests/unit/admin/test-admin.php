@@ -1251,14 +1251,14 @@ class Test_Admin extends TestCase {
 	 * carrying a count read from the submission counter -- often zero, and always
 	 * about something else. Wrong at a glance, and routed to the wrong queue.
 	 */
-	public function test_get_support_mailto_url_describes_the_failure_that_happened() {
+	public function test_get_support_email_url_describes_the_failure_that_happened() {
 		delete_option( Client_Logger::FAILURES_OPTION );
 		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
 		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
 		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
 		Client_Logger::record_failure( 'integration', 43, 'Job Application' );
 
-		$method = new ReflectionMethod( Admin::class, 'get_support_mailto_url' );
+		$method = new ReflectionMethod( Admin::class, 'get_support_email_url' );
 		$method->setAccessible( true );
 
 		$parts = static function ( $url ) {
@@ -1272,11 +1272,11 @@ class Test_Admin extends TestCase {
 
 		// Three distinct subjects. Asserted against each other as well as their own
 		// text, because the failure mode here was one subject serving all three.
-		$this->assertStringContainsString( 'form submissions are failing', $submission['subject'] );
-		$this->assertStringContainsString( 'notification emails are not being sent', $notification['subject'] );
-		$this->assertStringContainsString( 'integration is not receiving entries', $integration['subject'] );
-		$this->assertNotSame( $submission['subject'], $notification['subject'] );
-		$this->assertNotSame( $notification['subject'], $integration['subject'] );
+		$this->assertStringContainsString( 'form submissions are failing', $submission['su'] );
+		$this->assertStringContainsString( 'notification emails are not being sent', $notification['su'] );
+		$this->assertStringContainsString( 'integration is not receiving entries', $integration['su'] );
+		$this->assertNotSame( $submission['su'], $notification['su'] );
+		$this->assertNotSame( $notification['su'], $integration['su'] );
 
 		// The body must not claim submissions are failing when they are not.
 		$this->assertStringNotContainsString(
@@ -1293,6 +1293,58 @@ class Test_Admin extends TestCase {
 
 		// The form is named, which is the first thing support asks for.
 		$this->assertStringContainsString( 'Job Application', $integration['body'] );
+
+		// Gmail, not a mailto. A mailto goes to whatever the machine registered as
+		// its mail handler, and on one with none configured it opens nothing.
+		$url = $method->invoke( Admin::get_instance(), 'submission', 'Contact Form' );
+		$this->assertStringStartsWith( 'https://mail.google.com/mail/', $url );
+		$this->assertStringNotContainsString( 'mailto:', $url );
+		$this->assertStringContainsString( 'view=cm', $url );
+		$this->assertStringContainsString( 'to=support%40sureforms.com', $url );
+	}
+
+	/**
+	 * The URL stays inside a length Gmail will not silently truncate.
+	 *
+	 * Gmail drops the overflow of a long body without a word, and the overflow is
+	 * the end of the log -- the newest entries, the ones describing the failure
+	 * being reported. Trimmed here instead, oldest first, with a line saying so.
+	 */
+	public function test_get_support_email_url_stays_within_the_length_gmail_accepts() {
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::clear();
+		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
+
+		// Far more log than can fit, so the trim has to engage.
+		for ( $i = 0; $i < 40; $i++ ) {
+			Client_Logger::append(
+				[
+					'type'        => 'network',
+					'status'      => 500,
+					'form_id'     => 42,
+					'form_title'  => 'Contact Form',
+					'message'     => 'Submission responded 500 (text/html): a long server failure message repeated to fill the log ' . $i,
+					'duration_ms' => 900,
+				]
+			);
+		}
+
+		$method = new ReflectionMethod( Admin::class, 'get_support_email_url' );
+		$method->setAccessible( true );
+		$url = $method->invoke( Admin::get_instance(), 'submission', 'Contact Form' );
+
+		$this->assertLessThanOrEqual(
+			2000,
+			strlen( $url ),
+			'A longer URL is truncated by Gmail, and what it drops is the newest log entries.'
+		);
+
+		// Still a usable email, not a stub: the subject and the diagnostics survive.
+		parse_str( (string) wp_parse_url( $url, PHP_URL_QUERY ), $query );
+		$this->assertStringContainsString( 'form submissions are failing', $query['su'] );
+		$this->assertStringContainsString( 'Hello SureForms support', $query['body'] );
+
+		Client_Logger::clear();
 	}
 
 	/**
@@ -1364,10 +1416,10 @@ class Test_Admin extends TestCase {
 	 * srfm_action_items is public, so an item can arrive with no category at all.
 	 * Defaulting to the submission copy would state something that may not be true.
 	 */
-	public function test_get_support_mailto_url_stays_neutral_without_a_category() {
+	public function test_get_support_email_url_stays_neutral_without_a_category() {
 		delete_option( Client_Logger::FAILURES_OPTION );
 
-		$method = new ReflectionMethod( Admin::class, 'get_support_mailto_url' );
+		$method = new ReflectionMethod( Admin::class, 'get_support_email_url' );
 		$method->setAccessible( true );
 
 		parse_str(
@@ -1375,8 +1427,8 @@ class Test_Admin extends TestCase {
 			$query
 		);
 
-		$this->assertStringContainsString( 'a problem with the forms on', $query['subject'] );
-		$this->assertStringNotContainsString( 'form submissions are failing', $query['subject'] );
+		$this->assertStringContainsString( 'a problem with the forms on', $query['su'] );
+		$this->assertStringNotContainsString( 'form submissions are failing', $query['su'] );
 		$this->assertStringNotContainsString( 'form submission that could not', $query['body'] );
 	}
 
