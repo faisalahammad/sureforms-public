@@ -329,12 +329,30 @@
 		copy.className = 'button';
 		copy.textContent = labels.copy || 'Copy details';
 
+		// Locked until the details are on the clipboard. The support form asks for
+		// them, and arriving with nothing to paste means describing the failure from
+		// memory.
+		//
+		// No href while it is locked, and a click guard behind that: `disabled` on
+		// an <a> does nothing at all -- it still navigates -- so removing the
+		// destination is what actually locks it.
 		const contact = document.createElement( 'a' );
 		contact.className = 'button button-primary';
-		contact.href = supportUrl;
 		contact.target = '_blank';
 		contact.rel = 'noopener noreferrer';
 		contact.textContent = labels.contact || 'Contact Support';
+		contact.setAttribute( 'aria-disabled', 'true' );
+		contact.title = labels.copyFirst || '';
+		contact.style.opacity = '0.6';
+		contact.style.pointerEvents = 'none';
+
+		function unlockContact() {
+			contact.href = supportUrl;
+			contact.removeAttribute( 'aria-disabled' );
+			contact.removeAttribute( 'title' );
+			contact.style.opacity = '';
+			contact.style.pointerEvents = '';
+		}
 
 		const close = document.createElement( 'button' );
 		close.type = 'button';
@@ -357,16 +375,22 @@
 			copyDetails( text, function () {
 				copy.textContent = labels.copied || 'Copied';
 				// Reverts on its own: a button stuck on "Copied" says nothing about
-				// the next click.
+				// the next click. The unlock does not revert with it -- having the
+				// clipboard stays true after the label has gone back.
 				window.setTimeout( function () {
 					copy.textContent = labels.copy || 'Copy details';
 				}, 2000 );
+				// Only on success. A refused clipboard leaves the form locked rather
+				// than sending someone to it with nothing to paste.
+				unlockContact();
 				sendResponse( noticeId, 'copy_details' );
 			} );
 		} );
 
 		contact.addEventListener( 'click', function () {
 			sendResponse( noticeId, 'contact_support' );
+			// The form opens in its own tab, so the dialog has nothing left to show.
+			dismiss();
 		} );
 
 		close.addEventListener( 'click', dismiss );

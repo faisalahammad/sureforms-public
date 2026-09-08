@@ -2818,6 +2818,9 @@ JS;
 					'copied'      => __( 'Copied', 'sureforms' ),
 					'contact'     => __( 'Contact Support', 'sureforms' ),
 					'close'       => __( 'Close', 'sureforms' ),
+					// Shown on the locked Contact Support button, so the reason it
+					// cannot be clicked yet is readable rather than guessed at.
+					'copyFirst'   => __( 'Copy the details first, so you have them to paste.', 'sureforms' ),
 				],
 			]
 		);
