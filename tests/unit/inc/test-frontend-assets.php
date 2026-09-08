@@ -21,6 +21,31 @@ class Test_Frontend_Assets extends TestCase {
 	protected $frontend_assets;
 
 	/**
+	 * Posts to remove after each test.
+	 *
+	 * This suite uses Yoast's TestCase rather than WP_UnitTestCase, so there is
+	 * no per-test rollback -- a failed assertion would otherwise leak a
+	 * published post into the rest of the run.
+	 *
+	 * @var array<int>
+	 */
+	protected $created_posts = [];
+
+	/**
+	 * Query state to restore, so one test cannot leak a view into the next.
+	 *
+	 * @var array<string,mixed>
+	 */
+	protected $previous_query = [];
+
+	/**
+	 * Whether this test faked a wp_head() having already fired.
+	 *
+	 * @var bool
+	 */
+	protected $faked_wp_head = false;
+
+	/**
 	 * Set up test fixtures.
 	 */
 	protected function setUp(): void {
@@ -162,5 +187,219 @@ class Test_Frontend_Assets extends TestCase {
 		$this->assertTrue( wp_style_is( SRFM_SLUG . '-common', 'enqueued' ), 'SureForms stylesheets should be enqueued by default.' );
 		$this->assertTrue( wp_style_is( SRFM_SLUG . '-frontend-default', 'enqueued' ), 'SureForms stylesheets should be enqueued by default.' );
 		$this->assertTrue( wp_style_is( SRFM_SLUG . '-form', 'enqueued' ), 'SureForms stylesheets should be enqueued by default.' );
+	}
+
+	/**
+	 * On a single form, assets a discarded render already claimed are forgotten.
+	 *
+	 * A page builder that renders the whole page through its own
+	 * `template_include` filter runs `wp_head()`/`wp_footer()` inside a buffer
+	 * that page_template() then discards, leaving every handle in
+	 * `WP_Styles::$done` / `WP_Scripts::$done`. Without the reset the Instant
+	 * Form template's own wp_head()/wp_footer() print nothing -- no stylesheets,
+	 * and no footer-registered `srfm-form-submit`, so the form cannot submit.
+	 *
+	 * The style and script handles here are asserted separately: the styles are
+	 * the reported symptom, the footer script is the one that stops the form
+	 * working, and a reset that covered only one registry would leave the other
+	 * broken.
+	 */
+	public function test_page_template_clears_assets_claimed_by_a_discarded_render() {
+		$form_id = $this->make_form();
+		$this->make_singular( $form_id );
+
+		wp_register_style( 'srfm-test-style', 'https://example.org/s.css', [], '1' );
+		wp_register_script( 'srfm-test-footer-script', 'https://example.org/s.js', [], '1', true );
+
+		// The state a discarded builder render leaves behind.
+		$this->mark_wp_head_as_fired();
+		wp_styles()->done  = [ 'srfm-test-style' ];
+		wp_scripts()->done = [ 'srfm-test-footer-script' ];
+
+		$this->frontend_assets->page_template( 'irrelevant-builder-relay.php' );
+
+		$this->assertFalse(
+			wp_style_is( 'srfm-test-style', 'done' ),
+			'A stylesheet claimed by the discarded render must be printable again.'
+		);
+		$this->assertFalse(
+			wp_script_is( 'srfm-test-footer-script', 'done' ),
+			'A footer script claimed by the discarded render must be printable again, or the form cannot submit.'
+		);
+	}
+
+	/**
+	 * With no earlier render, page_template() leaves the registries untouched.
+	 *
+	 * This is the ordinary path on the overwhelming majority of installs, which
+	 * have no page builder taking over `template_include` at all. Nothing has
+	 * been printed yet, so there is nothing to forget and the reset must be
+	 * inert -- asserted on the specific handle rather than on the array being
+	 * empty, since other tests in this suite leave handles behind.
+	 */
+	public function test_page_template_keeps_printed_assets_without_an_earlier_render() {
+		$form_id = $this->make_form();
+		$this->make_singular( $form_id );
+
+		wp_register_style( 'srfm-test-style', 'https://example.org/s.css', [], '1' );
+		wp_styles()->done = [ 'srfm-test-style' ];
+
+		// Deliberately do NOT mark wp_head as fired.
+		$this->frontend_assets->page_template( 'irrelevant.php' );
+
+		$this->assertTrue(
+			wp_style_is( 'srfm-test-style', 'done' ),
+			'Without a discarded render there is nothing to reset, so done must be left alone.'
+		);
+	}
+
+	/**
+	 * On any other page, page_template() touches neither the template nor assets.
+	 *
+	 * A page built in the site's page builder must keep both its own template and
+	 * its printed assets. Getting this wrong would strip the layout from every
+	 * page on the site, which is far worse than the bug being fixed, so the
+	 * negative is asserted as carefully as the positive.
+	 */
+	public function test_page_template_leaves_other_pages_alone() {
+		$page_id = wp_insert_post(
+			[
+				'post_title'  => 'An Ordinary Page',
+				'post_type'   => 'page',
+				'post_status' => 'publish',
+			]
+		);
+		$this->assertIsInt( $page_id, 'Test setup: the page fixture must insert.' );
+		$this->created_posts[] = $page_id;
+
+		$this->make_singular( $page_id );
+		$this->assertFalse( is_singular( SRFM_FORMS_POST_TYPE ), 'Test setup: this must not be a form page.' );
+
+		wp_register_style( 'srfm-test-style', 'https://example.org/s.css', [], '1' );
+		$this->mark_wp_head_as_fired();
+		wp_styles()->done = [ 'srfm-test-style' ];
+
+		$builder_template = 'builder-relay.php';
+
+		$this->assertSame(
+			$builder_template,
+			$this->frontend_assets->page_template( $builder_template ),
+			'Another plugin\'s template must be returned untouched off a form page.'
+		);
+		$this->assertTrue(
+			wp_style_is( 'srfm-test-style', 'done' ),
+			'Assets already printed on a page SureForms does not own must stay printed.'
+		);
+	}
+
+	/**
+	 * On a single form, the Instant Form template replaces whatever was passed in.
+	 *
+	 * Pins the behaviour the reset depends on: the incoming template really is
+	 * discarded, which is why the registry state it produced has to be discarded
+	 * with it.
+	 */
+	public function test_page_template_returns_the_instant_form_template() {
+		$form_id = $this->make_form();
+		$this->make_singular( $form_id );
+
+		$resolved = $this->frontend_assets->page_template( 'builder-relay.php' );
+
+		$this->assertNotSame( 'builder-relay.php', $resolved, 'The incoming template must not survive on a form page.' );
+		$this->assertStringEndsWith( 'single-form.php', $resolved, 'A single form must resolve to the Instant Form template.' );
+	}
+
+	/**
+	 * Create a published form fixture.
+	 *
+	 * @return int
+	 */
+	protected function make_form() {
+		$form_id = wp_insert_post(
+			[
+				'post_title'  => 'Instant Form Assets',
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_status' => 'publish',
+			]
+		);
+
+		$this->assertIsInt( $form_id, 'Test setup: the form fixture must insert.' );
+		$this->created_posts[] = $form_id;
+
+		return $form_id;
+	}
+
+	/**
+	 * Put the main query on a singular view of the given post.
+	 *
+	 * go_to() belongs to WP_UnitTestCase and this suite uses Yoast's TestCase, so
+	 * the query globals are driven directly -- the same approach as
+	 * Test_Generate_Form_Markup.
+	 *
+	 * @param int $post_id Post to be the queried object.
+	 * @return void
+	 */
+	protected function make_singular( $post_id ) {
+		global $wp_query;
+
+		$this->previous_query = [
+			'is_singular'       => $wp_query->is_singular,
+			'queried_object'    => $wp_query->get_queried_object(),
+			'queried_object_id' => $wp_query->get_queried_object_id(),
+		];
+
+		$wp_query->is_singular       = true;
+		$wp_query->queried_object    = get_post( $post_id );
+		$wp_query->queried_object_id = $post_id;
+	}
+
+	/**
+	 * Make did_action( 'wp_head' ) report a completed head pass.
+	 *
+	 * The action counter is driven directly rather than firing `wp_head` for
+	 * real: doing that would run every registered head callback and echo a
+	 * document head into the test output. This is the one piece of state
+	 * `reset_printed_assets()` reads, so it is the only piece worth faking.
+	 *
+	 * @return void
+	 */
+	protected function mark_wp_head_as_fired() {
+		if ( did_action( 'wp_head' ) ) {
+			return;
+		}
+
+		$GLOBALS['wp_actions']['wp_head'] = 1;
+		$this->faked_wp_head              = true;
+	}
+
+	/**
+	 * Undo everything a test registered.
+	 */
+	protected function tearDown(): void {
+		wp_styles()->done  = [];
+		wp_scripts()->done = [];
+
+		wp_deregister_style( 'srfm-test-style' );
+		wp_deregister_script( 'srfm-test-footer-script' );
+
+		if ( $this->faked_wp_head ) {
+			unset( $GLOBALS['wp_actions']['wp_head'] );
+			$this->faked_wp_head = false;
+		}
+
+		if ( ! empty( $this->previous_query ) ) {
+			global $wp_query;
+			$wp_query->is_singular       = $this->previous_query['is_singular'];
+			$wp_query->queried_object    = $this->previous_query['queried_object'];
+			$wp_query->queried_object_id = $this->previous_query['queried_object_id'];
+			$this->previous_query        = [];
+		}
+
+		foreach ( $this->created_posts as $post_id ) {
+			wp_delete_post( $post_id, true );
+		}
+		$this->created_posts = [];
+
+		parent::tearDown();
 	}
 }
