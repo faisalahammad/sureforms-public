@@ -3698,7 +3698,7 @@ JS;
 				// and copied verbatim, so any markup here would be read as characters.
 				'details'     => $this->get_support_message( $category, $form_title )
 					. "\n\n" . $this->get_support_log_block(),
-				'support_url' => self::SUPPORT_CONTACT_URL,
+				'support_url' => $this->get_support_contact_url( $category ),
 				'dismissible' => false,
 			];
 
@@ -4416,6 +4416,38 @@ JS;
 		if ( $changed ) {
 			Helper::update_srfm_option( 'action_item_impressions', $counts );
 		}
+	}
+
+	/**
+	 * The contact form's address, tagged with where the click came from.
+	 *
+	 * One campaign, tagged per failure, so the report answers which check actually
+	 * sends people to support rather than only how many arrive. A submission
+	 * failure and a caching advisory are different problems and it is worth knowing
+	 * which one drives the tickets.
+	 *
+	 * Built with add_query_arg rather than string concatenation, so it stays
+	 * correct if the constant ever gains a query string of its own.
+	 *
+	 * @param string $category One of Client_Logger::CATEGORIES, naming the failure
+	 *                         the visitor is reporting.
+	 * @since 2.12.6
+	 * @return string
+	 */
+	private function get_support_contact_url( $category ) {
+		return esc_url_raw(
+			add_query_arg(
+				[
+					'utm_source'   => 'sureforms',
+					'utm_medium'   => 'form_checks',
+					'utm_campaign' => 'contact_support',
+					// Which check sent them. The one part that differs per button,
+					// and the reason for tagging at all.
+					'utm_content'  => $category,
+				],
+				self::SUPPORT_CONTACT_URL
+			)
+		);
 	}
 
 	/**
