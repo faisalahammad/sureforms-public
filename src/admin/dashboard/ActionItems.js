@@ -378,6 +378,10 @@ export default () => {
 								target="_blank"
 								rel="noopener noreferrer"
 								onClick={ handleFix( details, 'contact_support' ) }
+								// It is a button, not a link in prose. Rendering it as
+								// an anchor is what brought the underline with it, and
+								// wp-admin's own anchor styles reach inside.
+								className="no-underline hover:no-underline"
 							>
 								{ __( 'Contact Support', 'sureforms' ) }
 							</Button>
