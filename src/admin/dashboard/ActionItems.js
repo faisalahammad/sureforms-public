@@ -43,6 +43,11 @@ export default () => {
 	// boolean so the dialog keeps rendering the right one while it closes.
 	const [ details, setDetails ] = useState( null );
 	const [ copied, setCopied ] = useState( false );
+	// Separate from `copied`, which reverts after a couple of seconds so the button
+	// stops claiming "Copied". This one does not revert: the support form is only
+	// useful to someone who has the diagnostics on their clipboard, and that stays
+	// true after the label has gone back.
+	const [ copiedOnce, setCopiedOnce ] = useState( false );
 
 	const items = ( srfm_admin?.action_items || [] ).filter(
 		( item ) => ! dismissed.includes( item.id )
@@ -150,6 +155,9 @@ export default () => {
 			}
 
 			setCopied( true );
+			// Only on success. A refused clipboard must not unlock the support form,
+			// or someone arrives at it with nothing to paste.
+			setCopiedOnce( true );
 			// Reverts on its own: a button stuck on "Copied" says nothing about the
 			// next click.
 			setTimeout( () => setCopied( false ), 2000 );
@@ -255,6 +263,10 @@ export default () => {
 												type="button"
 												onClick={ () => {
 													setCopied( false );
+													// Each failure is its own report,
+													// so the copy has to be made again
+													// for this one.
+													setCopiedOnce( false );
 													setDetails( item );
 													handleFix(
 														item,
@@ -370,21 +382,46 @@ export default () => {
 									? __( 'Copied', 'sureforms' )
 									: __( 'Copy details', 'sureforms' ) }
 							</Button>
-							<Button
-								variant="primary"
-								size="sm"
-								tag="a"
-								href={ details.support_url }
-								target="_blank"
-								rel="noopener noreferrer"
-								onClick={ handleFix( details, 'contact_support' ) }
-								// It is a button, not a link in prose. Rendering it as
-								// an anchor is what brought the underline with it, and
-								// wp-admin's own anchor styles reach inside.
-								className="no-underline hover:no-underline"
-							>
-								{ __( 'Contact Support', 'sureforms' ) }
-							</Button>
+							{ /* Locked until the details are on the clipboard. The
+							     support form asks for them, and arriving with nothing
+							     to paste means describing the failure from memory.
+
+							     Not an anchor while it is locked: `disabled` on an
+							     <a> does nothing at all -- it still navigates -- so
+							     the href only exists once the copy has been made. */ }
+							{ copiedOnce ? (
+								<Button
+									variant="primary"
+									size="sm"
+									tag="a"
+									href={ details.support_url }
+									target="_blank"
+									rel="noopener noreferrer"
+									onClick={ handleFix(
+										details,
+										'contact_support'
+									) }
+									// It is a button, not a link in prose. Rendering
+									// it as an anchor is what brings the underline
+									// with it, and wp-admin's own anchor styles reach
+									// inside.
+									className="no-underline hover:no-underline"
+								>
+									{ __( 'Contact Support', 'sureforms' ) }
+								</Button>
+							) : (
+								<Button
+									variant="primary"
+									size="sm"
+									disabled
+									title={ __(
+										'Copy the details first, so you have them to paste.',
+										'sureforms'
+									) }
+								>
+									{ __( 'Contact Support', 'sureforms' ) }
+								</Button>
+							) }
 						</div>
 					</div>
 				</div>
