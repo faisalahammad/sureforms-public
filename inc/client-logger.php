@@ -83,7 +83,7 @@ class Client_Logger {
 	 * Option holding per-category failure state, keyed by category.
 	 *
 	 * Shape: [ category => [ 'count' => int, 'form_id' => int, 'form_title' => string,
-	 * 'at' => int, 'acked' => int ] ].
+	 * 'at' => int, 'acked' => int, 'acked_at' => int ] ].
 	 *
 	 * Kept per category because the three read completely differently to a site
 	 * owner: submissions failing means visitors cannot reach you, a notification
@@ -196,6 +196,11 @@ class Client_Logger {
 			// Preserved: a report already made still stands until this new count
 			// overtakes it, which is what get_open_failures() compares.
 			'acked'      => Helper::get_integer_value( $existing['acked'] ?? 0 ),
+			// Carried forward too. This array is rebuilt from a fixed set of keys, so
+			// anything not named here is dropped -- and "when did I last report
+			// this" quietly disappearing on the next failure is exactly the kind of
+			// loss nobody notices until support asks.
+			'acked_at'   => Helper::get_integer_value( $existing['acked_at'] ?? 0 ),
 		];
 
 		update_option( self::FAILURES_OPTION, $failures, false );
@@ -253,6 +258,16 @@ class Client_Logger {
 		}
 
 		$failures[ $category ]['acked'] = Helper::get_integer_value( $failures[ $category ]['count'] ?? 0 );
+
+		// Recorded for the report -- "you told us at 14:12" is worth having when
+		// support reads the ticket -- but deliberately not what decides whether the
+		// notice comes back. The count does that.
+		//
+		// A timestamp cannot: it is written to the second, so a failure recorded in
+		// the same second as the acknowledgement compares equal and gets swallowed.
+		// That is the one moment it matters most, because a fault arriving as
+		// someone reports the last one is a fault still happening.
+		$failures[ $category ]['acked_at'] = time();
 
 		update_option( self::FAILURES_OPTION, $failures, false );
 	}

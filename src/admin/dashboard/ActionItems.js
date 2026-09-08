@@ -397,10 +397,20 @@ export default () => {
 									href={ details.support_url }
 									target="_blank"
 									rel="noopener noreferrer"
-									onClick={ handleFix(
-										details,
-										'contact_support'
-									) }
+									onClick={ () => {
+										// Records the click, which is also what
+										// stands the notice down until something
+										// new fails.
+										handleFix(
+											details,
+											'contact_support'
+										)();
+										// The form opens in its own tab, so the
+										// dialog has nothing left to show. Leaving
+										// it up means coming back to a panel still
+										// asking to be dealt with.
+										setDetails( null );
+									} }
 									// It is a button, not a link in prose. Rendering
 									// it as an anchor is what brings the underline
 									// with it, and wp-admin's own anchor styles reach
