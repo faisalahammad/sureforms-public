@@ -585,7 +585,7 @@ class Frontend_Assets {
 	 * Guarded on `wp_head` having already fired, so this is inert on the ordinary
 	 * path where no builder rendered first and nothing has been printed yet.
 	 *
-	 * @since 2.12.7
+	 * @since x.x.x
 	 * @return void
 	 */
 	private static function reset_printed_assets() {
