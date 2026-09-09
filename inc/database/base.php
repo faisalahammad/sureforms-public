@@ -829,8 +829,10 @@ abstract class Base {
 		$query = rtrim( trim( $query ), ';' ) . ';';
 
 		$cached_results = $this->cache_get( $query );
-		if ( $cached_results ) {
-			// Return the cached data if exists.
+		if ( null !== $cached_results ) {
+			// Return the cached data if exists. Tested against null rather than
+			// truthiness: an empty result set is a real answer, and re-running the
+			// query for it means every no-match lookup runs once per caller.
 			return Helper::get_array_value( $cached_results );
 		}
 
@@ -918,8 +920,10 @@ abstract class Base {
 		$query = rtrim( trim( $query ), ';' ) . ';';
 
 		$cached_results = $this->cache_get( $query );
-		if ( $cached_results ) {
-			// Return the cached data if exists.
+		if ( null !== $cached_results ) {
+			// Return the cached data if exists. Tested against null rather than
+			// truthiness: a count of zero is a real answer, and the editor exclusion
+			// makes zero the common case rather than the exception.
 			return Helper::get_integer_value( $cached_results );
 		}
 
@@ -1053,7 +1057,7 @@ abstract class Base {
 	 * }
 	 *
 	 * @since 1.1.1 -- Added support for "IN" compare.
-	 * @since 2.12.6 -- Added support for "NOT IN" compare.
+	 * @since x.x.x -- Added support for "NOT IN" compare.
 	 * @since 0.0.13
 	 * @return string The prepared SQL WHERE clause with placeholders, or an empty string if no clauses were provided.
 	 */
@@ -1104,10 +1108,15 @@ abstract class Base {
 								case 'NOT IN':
 									// An empty list cannot be interpolated: "col IN ()" is a syntax
 									// error that fails the whole query, listing and COUNT alike.
-									// Emit the constant the empty set actually means instead, so
-									// neither operator can silently widen to match everything.
+									// An empty IN matches nothing, so '1 = 0' says that in any
+									// relation. An empty NOT IN excludes nothing, but a literal
+									// would be '1 = 1', and that makes an enclosing OR group
+									// unconditionally true. Dropping the condition means the same
+									// thing under AND and stays fail-closed under OR.
 									if ( ! is_array( $_value['value'] ) || [] === $_value['value'] ) {
-										$clause_parts[] = 'IN' === $_value['compare'] ? '1 = 0' : '1 = 1';
+										if ( 'IN' === $_value['compare'] ) {
+											$clause_parts[] = '1 = 0';
+										}
 										break;
 									}
 
@@ -1145,6 +1154,14 @@ abstract class Base {
 			}
 
 			$where = ' WHERE ' . implode( ' AND ', $groups );
+
+			if ( [] === $values ) {
+				// Every branch that builds a placeholder also pushes a value, so an
+				// empty list here means the only conditions were constant ones. There
+				// is nothing for prepare() to fill, and calling it with no placeholder
+				// trips _doing_it_wrong.
+				return $where;
+			}
 
 			// Prepare the query with placeholders.
 			// @phpstan-ignore-next-line -- We are already assigning non-literal string above using "get_format_by_datatype" methods.

@@ -1287,8 +1287,17 @@ class Payments extends Base {
 
 			if ( in_array( $operator, [ 'IN', 'NOT IN' ], true ) && is_array( $condition['value'] ) ) {
 				$ids = array_map( 'absint', $condition['value'] );
-				if ( empty( $ids ) ) {
-					$ids = [ 0 ];
+				if ( [] === $ids ) {
+					// Same empty-list handling as Base::prepare_where_clauses(), so the
+					// two builders cannot disagree. An empty IN matches nothing. An
+					// empty NOT IN excludes nothing, and is dropped rather than written
+					// as a literal, because a literal true would make an enclosing OR
+					// group -- such as the customer filter this shortcode builds --
+					// match every row.
+					if ( 'IN' === $operator ) {
+						$sub_clauses[] = '1 = 0';
+					}
+					continue;
 				}
 				$placeholders  = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
 				$sub_clauses[] = "{$column} {$operator} ({$placeholders})";

@@ -543,7 +543,7 @@ class Entries extends Base {
 	 * @return array<int> An array of form IDs.
 	 */
 	public static function get_form_ids_by_entries( $entry_ids ) {
-		if ( empty( $entry_ids ) && ! is_array( $entry_ids ) ) {
+		if ( empty( $entry_ids ) || ! is_array( $entry_ids ) ) {
 			return [];
 		}
 

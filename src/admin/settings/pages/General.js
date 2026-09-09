@@ -233,9 +233,25 @@ const FormViewsTrackingContent = ( {
 					'Show views and conversion rate',
 					'sureforms'
 				),
-				description: __(
-					'Adds the Views and Conversion Rate columns to the Forms list. A view is counted once per page visit when the form appears on screen, and the conversion rate is the share of those views that ended in a submission. Logged-out visitors are counted, and so are logged-in users who cannot edit the site, such as subscribers and customers. Views and submissions by anyone who can edit the site, including you, are left out, so testing your own forms does not change the figures. Counting starts the first time you turn this on, so submissions received before then are not counted towards the rate. Turning it off afterwards only hides the columns. Counting keeps running, so the figures are up to date if you switch it back on.',
-					'sureforms'
+				description: (
+					<>
+						{ /* Kept verbatim from 2.12.6: all seven shipped locales
+						     already translate this msgid, and re-punctuating it
+						     to add the sentence below would orphan every one of
+						     them. New copy goes in its own __() call. */ }
+						<span className="block">
+							{ __(
+								'Adds the Views and Conversion Rate columns to the Forms list. A view is counted once per page visit when the form appears on screen, and the conversion rate is the share of those views that ended in a submission. Counting starts the first time you turn this on, so submissions received before then are not counted towards the rate. Turning it off afterwards only hides the columns — counting continues, so the figures are up to date if you switch it back on.',
+								'sureforms'
+							) }
+						</span>
+						<span className="block mt-1">
+							{ __(
+								'Views and submissions by anyone who can edit the site are left out, so testing your own forms does not change these figures.',
+								'sureforms'
+							) }
+						</span>
+					</>
 				),
 			} }
 			value={ generalTabOptions.srfm_form_views_tracking }

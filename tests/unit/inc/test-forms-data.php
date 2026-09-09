@@ -16,6 +16,22 @@ class Test_Forms_Data extends TestCase {
 
 	protected function setUp(): void {
 		$this->forms_data = new Forms_Data();
+		$this->reset_editing_cache();
+	}
+
+	protected function tearDown(): void {
+		// The list is memoised for the request, and a test process is one request.
+		// Left behind it holds ids of users a later test has already deleted.
+		$this->reset_editing_cache();
+	}
+
+	/**
+	 * Clear Forms_Data's per-request editor cache.
+	 */
+	private function reset_editing_cache(): void {
+		$cache = new ReflectionProperty( Forms_Data::class, 'editing_user_ids' );
+		$cache->setAccessible( true );
+		$cache->setValue( null, null );
 	}
 
 	public function test_get_form_permissions_check_admin() {
@@ -64,9 +80,6 @@ class Test_Forms_Data extends TestCase {
 	// ---------------------------------------------------------------
 
 	/**
-	 * Helper: create an admin user, set as current, and return the user ID.
-	 */
-	/**
 	 * Create a user with the given role. Not set as the current user.
 	 */
 	private function make_user( string $role ): int {
@@ -79,6 +92,9 @@ class Test_Forms_Data extends TestCase {
 		);
 	}
 
+	/**
+	 * Helper: create an admin user, set as current, and return the user ID.
+	 */
 	private function set_admin_user(): int {
 		$user_id = wp_insert_user(
 			[
@@ -326,9 +342,7 @@ class Test_Forms_Data extends TestCase {
 
 		// The list is cached per request, and these users were created after
 		// earlier tests in this class already warmed it.
-		$cache = new ReflectionProperty( Forms_Data::class, 'editing_user_ids' );
-		$cache->setAccessible( true );
-		$cache->setValue( null, null );
+		$this->reset_editing_cache();
 
 		$form_id = $this->make_tracked_form( 10 );
 
@@ -373,6 +387,70 @@ class Test_Forms_Data extends TestCase {
 		wp_delete_post( $form_id, true );
 		wp_delete_user( $editor );
 		wp_delete_user( $subscriber );
+		delete_option( 'srfm_general_settings_options' );
+		delete_option( \SRFM\Inc\Form_Views::TRACKING_STARTED_OPTION );
+	}
+
+	/**
+	 * Past the submitter ceiling the exclusion is skipped, and says so.
+	 *
+	 * Testing every in-window submitter for edit access is bounded work per
+	 * submitter, so a site where most submissions are made while logged in needs a
+	 * stop. The exclusion is dropped whole rather than truncated: a partial list
+	 * reports a rate that is wrong in a way nobody can see, while no list at least
+	 * reproduces the behaviour that shipped before it existed.
+	 */
+	public function test_calculate_form_metrics_skips_the_exclusion_past_the_submitter_ceiling() {
+		delete_option( \SRFM\Inc\Form_Views::TRACKING_STARTED_OPTION );
+		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => true ] );
+
+		$editor_one = $this->make_user( 'editor' );
+		$editor_two = $this->make_user( 'editor' );
+
+		$this->reset_editing_cache();
+
+		$form_id = $this->make_tracked_form( 10 );
+
+		foreach ( [ $editor_one, $editor_two ] as $user_id ) {
+			Entries::add(
+				[
+					'form_id'   => $form_id,
+					'user_id'   => $user_id,
+					'form_data' => [],
+				]
+			);
+		}
+
+		$announced = 0;
+		$reported  = null;
+		$listener  = static function ( $count, $limit ) use ( &$announced, &$reported ) {
+			$announced++;
+			$reported = [ $count, $limit ];
+		};
+
+		$ceiling = static function () {
+			return 1;
+		};
+
+		add_filter( 'srfm_forms_metric_submitter_limit', $ceiling );
+		add_action( 'srfm_forms_metric_submitter_limit_exceeded', $listener, 10, 2 );
+
+		$metrics = $this->call_private( 'calculate_form_metrics', [ $form_id ] );
+
+		remove_action( 'srfm_forms_metric_submitter_limit_exceeded', $listener, 10 );
+		remove_filter( 'srfm_forms_metric_submitter_limit', $ceiling );
+
+		$this->assertSame( 1, $announced, 'Skipping the exclusion must be announced, not silent.' );
+		$this->assertSame( [ 2, 1 ], $reported, 'The action reports the count found and the ceiling in force.' );
+		$this->assertSame(
+			20.0,
+			$metrics['conversion_rate'],
+			'Past the ceiling both editor entries count, which is the pre-exclusion behaviour.'
+		);
+
+		wp_delete_post( $form_id, true );
+		wp_delete_user( $editor_one );
+		wp_delete_user( $editor_two );
 		delete_option( 'srfm_general_settings_options' );
 		delete_option( \SRFM\Inc\Form_Views::TRACKING_STARTED_OPTION );
 	}

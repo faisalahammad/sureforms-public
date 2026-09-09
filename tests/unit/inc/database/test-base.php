@@ -420,11 +420,10 @@ class Test_Database_Base extends TestCase {
 	 * An empty list must not be interpolated into "col IN ()".
 	 *
 	 * That is a syntax error, and it fails the whole query rather than the one
-	 * condition, taking out the listing and its COUNT together. Each operator
-	 * collapses to the constant the empty set actually means, so neither can widen
-	 * to match everything.
+	 * condition, taking out the listing and its COUNT together. An empty IN matches
+	 * nothing, so it collapses to a constant that says so.
 	 */
-	public function test_prepare_where_clauses_empty_list_does_not_emit_invalid_sql() {
+	public function test_prepare_where_clauses_empty_in_matches_nothing() {
 		$in = $this->prepare(
 			[
 				[
@@ -439,7 +438,18 @@ class Test_Database_Base extends TestCase {
 
 		$this->assertStringNotContainsString( 'IN ()', $in );
 		$this->assertStringContainsString( '1 = 0', $in, 'An empty IN matches nothing.' );
+	}
 
+	/**
+	 * An empty NOT IN is dropped, never written as a constant.
+	 *
+	 * It excludes nothing, and the constant that says so is a literal true. Under
+	 * AND that is a no-op, but the same clause list also builds OR groups, where a
+	 * literal true makes the whole group match every row and neutralises the
+	 * sibling conditions. Dropping the condition means the same thing under AND and
+	 * narrows rather than widens under OR.
+	 */
+	public function test_prepare_where_clauses_empty_not_in_is_dropped() {
 		$not_in = $this->prepare(
 			[
 				[
@@ -453,34 +463,38 @@ class Test_Database_Base extends TestCase {
 		);
 
 		$this->assertStringNotContainsString( 'IN ()', $not_in );
-		$this->assertStringContainsString( '1 = 1', $not_in, 'An empty NOT IN excludes nothing.' );
+		$this->assertStringNotContainsString( '1 = 1', $not_in, 'An empty NOT IN must not emit a literal true.' );
+		$this->assertStringNotContainsString( 'NOT IN', $not_in, 'The condition is dropped, not built.' );
 	}
 
-	// ---------------------------------------------------------------
-	// cache_reset
-	// ---------------------------------------------------------------
-
 	/**
-	 * cache_reset() empties the per-instance query cache.
+	 * An empty NOT IN beside an OR sibling must not widen the group.
+	 *
+	 * This is the shape that matters: a group whose siblings are the only thing
+	 * keeping a query narrow. The surviving clause must still be the sibling alone.
 	 */
-	public function test_cache_reset() {
-		$set   = new ReflectionMethod( $this->entries_table, 'cache_set' );
-		$get   = new ReflectionMethod( $this->entries_table, 'cache_get' );
-		$reset = new ReflectionMethod( $this->entries_table, 'cache_reset' );
-
-		foreach ( [ $set, $get, $reset ] as $method ) {
-			$method->setAccessible( true );
-		}
-
-		$set->invoke( $this->entries_table, 'srfm_cache_reset_probe', 'stored' );
-		$this->assertSame( 'stored', $get->invoke( $this->entries_table, 'srfm_cache_reset_probe' ) );
-
-		$reset->invoke( $this->entries_table );
-
-		$this->assertNull(
-			$get->invoke( $this->entries_table, 'srfm_cache_reset_probe' ),
-			'The cached value must be gone after a reset.'
+	public function test_prepare_where_clauses_empty_not_in_does_not_widen_an_or_group() {
+		$result = $this->prepare(
+			[
+				[
+					[
+						'key'     => 'form_id',
+						'compare' => '=',
+						'value'   => 7,
+					],
+					[
+						'key'     => 'user_id',
+						'compare' => 'NOT IN',
+						'value'   => [],
+					],
+					'RELATION' => 'OR',
+				],
+			]
 		);
+
+		$this->assertStringContainsString( 'form_id', $result, 'The sibling condition survives.' );
+		$this->assertStringNotContainsString( '1 = 1', $result );
+		$this->assertStringNotContainsString( ' OR ', $result, 'Nothing is left to OR the sibling against.' );
 	}
 
 	// ---------------------------------------------------------------
@@ -695,5 +709,32 @@ class Test_Database_Base extends TestCase {
 
 		$this->assertFalse( $missing );
 		$this->assertTrue( $this->entries_table->table_exists() );
+	}
+
+	// ---------------------------------------------------------------
+	// cache_reset
+	// ---------------------------------------------------------------
+
+	/**
+	 * cache_reset() empties the per-instance query cache.
+	 */
+	public function test_cache_reset() {
+		$set   = new ReflectionMethod( $this->entries_table, 'cache_set' );
+		$get   = new ReflectionMethod( $this->entries_table, 'cache_get' );
+		$reset = new ReflectionMethod( $this->entries_table, 'cache_reset' );
+
+		foreach ( [ $set, $get, $reset ] as $method ) {
+			$method->setAccessible( true );
+		}
+
+		$set->invoke( $this->entries_table, 'srfm_cache_reset_probe', 'stored' );
+		$this->assertSame( 'stored', $get->invoke( $this->entries_table, 'srfm_cache_reset_probe' ) );
+
+		$reset->invoke( $this->entries_table );
+
+		$this->assertNull(
+			$get->invoke( $this->entries_table, 'srfm_cache_reset_probe' ),
+			'The cached value must be gone after a reset.'
+		);
 	}
 }
