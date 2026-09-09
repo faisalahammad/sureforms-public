@@ -127,10 +127,34 @@
 		// rather than being moved to the end of the screen.
 		const wrap = document.createElement( 'div' );
 		wrap.className = 'srfm-action-item-carousel';
-		cards[ 0 ].parentNode.insertBefore( wrap, cards[ 0 ] );
-		cards.forEach( function ( notice ) {
-			wrap.appendChild( notice );
-		} );
+
+		/**
+		 * Put the cards inside the wrapper, wherever they currently are.
+		 *
+		 * WordPress core relocates every `.notice` into `div.wrap` on jQuery ready,
+		 * and that runs after this file's DOMContentLoaded handler -- so wrapping
+		 * once at build time left the wrapper behind, empty and zero-height, with
+		 * the controls positioned against it off the side of the screen and the
+		 * reserved padding matching nothing. Re-checking is cheap, only moves
+		 * anything when something else has moved it, and also survives a plugin
+		 * that relocates notices later.
+		 */
+		function adopt() {
+			if (
+				cards.every( function ( notice ) {
+					return notice.parentNode === wrap;
+				} )
+			) {
+				return;
+			}
+
+			cards[ 0 ].parentNode.insertBefore( wrap, cards[ 0 ] );
+			cards.forEach( function ( notice ) {
+				wrap.appendChild( notice );
+			} );
+		}
+
+		adopt();
 
 		// Positioning and spacing live in the stylesheet the renderer prints, so
 		// an RTL sheet can override them and nothing here is a magic number.
@@ -162,6 +186,8 @@
 		counter.setAttribute( 'aria-live', 'polite' );
 
 		function render() {
+			adopt();
+
 			cards.forEach( function ( notice, i ) {
 				notice.hidden = i !== index;
 			} );
@@ -180,6 +206,23 @@
 			};
 		}
 
+		/**
+		 * Reserve exactly the room the controls take, measured rather than assumed.
+		 *
+		 * A translated counter is wider than "1 of 4", and a fixed padding lets a
+		 * long form title run underneath the buttons.
+		 */
+		function measure() {
+			const width = Math.ceil( nav.getBoundingClientRect().width );
+
+			if ( width > 0 ) {
+				wrap.style.setProperty(
+					'--srfm-carousel-reserve',
+					width + 24 + 'px'
+				);
+			}
+		}
+
 		prev.addEventListener( 'click', step( -1 ) );
 		next.addEventListener( 'click', step( 1 ) );
 
@@ -189,14 +232,15 @@
 		wrap.appendChild( nav );
 
 		render();
+		measure();
 
-		// Reserve exactly the room the controls take, measured rather than assumed:
-		// a translated counter is wider than "1 of 4" and a fixed padding lets a
-		// long form title run underneath the buttons.
-		wrap.style.setProperty(
-			'--srfm-carousel-reserve',
-			Math.ceil( nav.getBoundingClientRect().width ) + 24 + 'px'
-		);
+		// Core has not finished moving notices when DOMContentLoaded handlers run,
+		// so re-run once the queue has drained. render() re-adopts; this only has
+		// to re-measure, because the controls have a box again by then.
+		window.setTimeout( function () {
+			render();
+			measure();
+		}, 0 );
 	}
 
 	if ( document.readyState === 'loading' ) {
