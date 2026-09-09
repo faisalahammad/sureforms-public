@@ -712,6 +712,53 @@ class Test_Database_Base extends TestCase {
 	}
 
 	// ---------------------------------------------------------------
+	// get_results
+	// ---------------------------------------------------------------
+
+	/**
+	 * An empty result set is a cached answer, not a cache miss.
+	 *
+	 * The cache was read for truthiness, so `[]` looked like "nothing stored" and
+	 * the query ran again for every caller. That was rare while every lookup
+	 * matched something; the editor exclusion makes an empty windowed lookup the
+	 * common case, so the dead-cache path starts firing on most rows.
+	 *
+	 * Asserted on the query count, because the return value is the same either way
+	 * -- which is exactly why this was invisible.
+	 */
+	public function test_get_results_caches_an_empty_result_set() {
+		global $wpdb;
+
+		$where = [
+			[
+				[
+					'key'     => 'form_id',
+					'compare' => '=',
+					// An id nothing can match, so the result is genuinely empty.
+					'value'   => 987654321,
+				],
+			],
+		];
+
+		$reset = new ReflectionMethod( $this->entries_table, 'cache_reset' );
+		$reset->setAccessible( true );
+		$reset->invoke( $this->entries_table );
+
+		$first = $this->entries_table->get_results( $where );
+		$this->assertSame( [], $first, 'Precondition: this lookup matches nothing.' );
+
+		$after = $wpdb->num_queries;
+		$again = $this->entries_table->get_results( $where );
+
+		$this->assertSame( [], $again );
+		$this->assertSame(
+			$after,
+			$wpdb->num_queries,
+			'The second identical lookup must come from the cache, not the database.'
+		);
+	}
+
+	// ---------------------------------------------------------------
 	// cache_reset
 	// ---------------------------------------------------------------
 
