@@ -1176,6 +1176,18 @@ async function handleFormSubmission(
 
 		const formStatus = await submitFormData( form );
 		if ( formStatus?.success ) {
+			// Dispatched first, before anything below can navigate away. The
+			// 'different page' and 'custom url' branches call redirectToUrl(), and a
+			// third-party listener on srfm_form_submission_success may navigate too;
+			// either unload cancels an in-flight fetch, and issuing this afterwards
+			// meant the request aborted so the after-submission process never ran.
+			// afterSubmit() reads only after_submit_url, so it depends on neither the
+			// event nor the submission-mode resolution below, and gating it here on
+			// after_submit alone keeps every submission mode covered.
+			if ( formStatus?.data?.after_submit ) {
+				afterSubmit( formStatus, form );
+			}
+
 			/**
 			 * Emit a function to signal the successful submission of a form.
 			 */
@@ -1194,16 +1206,6 @@ async function handleFormSubmission(
 			afterSubmission =
 				formStatus?.data?.submission_settings?.after_submission ||
 				oldAfterSubmission;
-
-			// Dispatched before the branches below, because the 'different page'
-			// and 'custom url' branches call redirectToUrl() and the resulting
-			// unload cancels an in-flight fetch. Issuing it afterwards meant the
-			// request was aborted on every redirect-mode submission, so the
-			// after-submission process never ran. Kept out of the branches so it
-			// still covers all submission modes.
-			if ( formStatus?.data?.after_submit ) {
-				afterSubmit( formStatus, form );
-			}
 
 			if ( submitType === 'same page' ) {
 				showSuccessMessage(
