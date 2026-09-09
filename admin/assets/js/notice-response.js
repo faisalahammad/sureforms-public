@@ -97,6 +97,15 @@
 	 * Built here rather than printed by PHP so that with JavaScript off every
 	 * notice simply stays visible, exactly as before. Controls that cannot work
 	 * must not be the thing that hides a warning.
+	 *
+	 * The controls are created once, in the wrapper, and never moved. Moving them
+	 * into the newly shown card ran the DOM remove steps first, which unfocuses
+	 * whatever they contain -- so every activation dropped focus to <body> and a
+	 * keyboard user had to Tab in from the top of the page again, once per notice.
+	 * It also carried the aria-live counter out of and back into the document with
+	 * its text already set, which is generally not announced. Only one card is ever
+	 * visible, so the wrapper's box is the visible card's box and pinning the
+	 * controls to the wrapper looks identical.
 	 */
 	function buildNoticeCarousel() {
 		const cards = Array.prototype.slice.call(
@@ -108,7 +117,10 @@
 			return;
 		}
 
-		const labels = ( srfmNoticeResponse && srfmNoticeResponse.carousel ) || {};
+		const labels =
+			( typeof srfmNoticeResponse !== 'undefined' &&
+				srfmNoticeResponse.carousel ) ||
+			{};
 		let index = 0;
 
 		// Wrap in place, so the cards keep the position WordPress gave them
@@ -120,49 +132,39 @@
 			wrap.appendChild( notice );
 		} );
 
-		// Pinned to the top right of the notice being read. Absolute rather than a
-		// float so it cannot reflow the message text, and the notice gets padding on
-		// that side to reserve the space -- a long form title would otherwise run
-		// underneath the controls.
+		// Positioning and spacing live in the stylesheet the renderer prints, so
+		// an RTL sheet can override them and nothing here is a magic number.
 		const nav = document.createElement( 'p' );
 		nav.className = 'srfm-action-item-carousel-nav';
-		nav.style.display = 'flex';
-		nav.style.alignItems = 'center';
-		nav.style.gap = '8px';
-		nav.style.position = 'absolute';
-		nav.style.top = '8px';
-		nav.style.right = '12px';
-		nav.style.margin = '0';
 
-		cards.forEach( function ( notice ) {
-			notice.style.position = 'relative';
-			notice.style.paddingRight = '130px';
-		} );
+		const isRtl =
+			document.documentElement.getAttribute( 'dir' ) === 'rtl' ||
+			document.body.classList.contains( 'rtl' );
 
 		const prev = document.createElement( 'button' );
 		prev.type = 'button';
 		prev.className = 'button button-small';
-		prev.innerHTML = '&lsaquo;';
+		// Previous points at the start of the reading order, which is the right in
+		// an RTL locale. Hardcoding one direction contradicts the aria-label.
+		prev.textContent = isRtl ? '\u203A' : '\u2039';
 		prev.setAttribute( 'aria-label', labels.previous || 'Previous' );
 
 		const next = document.createElement( 'button' );
 		next.type = 'button';
 		next.className = 'button button-small';
-		next.innerHTML = '&rsaquo;';
+		next.textContent = isRtl ? '\u2039' : '\u203A';
 		next.setAttribute( 'aria-label', labels.next || 'Next' );
 
 		const counter = document.createElement( 'span' );
 		// Announced, because stepping swaps the text above with no other signal.
+		// The node stays put, so the region is in the document before its text
+		// changes -- which is what makes the change announce at all.
 		counter.setAttribute( 'aria-live', 'polite' );
 
 		function render() {
 			cards.forEach( function ( notice, i ) {
-				notice.style.display = i === index ? '' : 'none';
+				notice.hidden = i !== index;
 			} );
-
-			// Moved rather than duplicated: one set of controls, always inside the
-			// notice being read, so the count sits with the message it counts.
-			cards[ index ].appendChild( nav );
 
 			counter.textContent = ( labels.counter || '%1$d of %2$d' )
 				.replace( '%1$d', index + 1 )
@@ -184,8 +186,17 @@
 		nav.appendChild( prev );
 		nav.appendChild( counter );
 		nav.appendChild( next );
+		wrap.appendChild( nav );
 
 		render();
+
+		// Reserve exactly the room the controls take, measured rather than assumed:
+		// a translated counter is wider than "1 of 4" and a fixed padding lets a
+		// long form title run underneath the buttons.
+		wrap.style.setProperty(
+			'--srfm-carousel-reserve',
+			Math.ceil( nav.getBoundingClientRect().width ) + 24 + 'px'
+		);
 	}
 
 	if ( document.readyState === 'loading' ) {

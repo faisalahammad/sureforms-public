@@ -89,28 +89,6 @@ class Admin {
 	public const THANKYOU_PROMPT_NOTICE_ID = 'srfm-thankyou-prompt';
 
 	/**
-	 * Gmail's compose endpoint, used by the Contact Support action.
-	 *
-	 * No `/u/0/`: that pins the first signed-in account, which on a machine with
-	 * several is often the wrong one. Without it Gmail composes from whichever
-	 * account is active.
-	 *
-	 * @since 2.12.6
-	 */
-	private const GMAIL_COMPOSE_URL = 'https://mail.google.com/mail/';
-
-	/**
-	 * Ceiling for the generated support URL, in characters.
-	 *
-	 * Gmail truncates a long `body` without saying so, and browsers have their own
-	 * limits. 2000 is the length every current browser handles, and it leaves the
-	 * diagnostics block plus roughly the most recent few log entries.
-	 *
-	 * @since 2.12.6
-	 */
-	private const SUPPORT_URL_BUDGET = 2000;
-
-	/**
 	 * Dashboard widget entries data.
 	 *
 	 * @var array
@@ -3443,9 +3421,28 @@ JS;
 			return;
 		}
 
-		$this->enqueue_notice_response_script();
+		$items = $this->get_action_items();
 
-		foreach ( $this->get_action_items() as $item ) {
+		// Only the faults reach this surface, so count those before deciding
+		// whether the carousel stylesheet is worth printing.
+		$rendered = 0;
+
+		foreach ( $items as $item ) {
+			$status = Helper::get_string_value( $item['status'] ?? '' );
+
+			if ( 'success' !== $status && '' !== $status ) {
+				$rendered++;
+			}
+		}
+
+		if ( 0 === $rendered ) {
+			return;
+		}
+
+		$this->enqueue_notice_response_script();
+		$this->print_action_item_carousel_styles();
+
+		foreach ( $items as $item ) {
 			$status = Helper::get_string_value( $item['status'] ?? '' );
 
 			// Passing checks belong in the SureForms panel, not in wp-admin. A
@@ -3466,6 +3463,13 @@ JS;
 				// identity: whichever action leads is the primary button, and an item
 				// with no guide still leads with Contact Support.
 				$has_guide = ! empty( $item['guide_label'] ) && ! empty( $item['guide_url'] );
+
+				// Both keys, not either. An item contributed through
+				// srfm_action_items may carry only guide_* keys -- reading cta_url
+				// unguarded emits two PHP 8 undefined-key warnings and renders
+				// href="" -- and a label without a URL renders an anchor that is not
+				// keyboard focusable. React gates on the same pair.
+				$has_cta = ! empty( $item['cta_label'] ) && ! empty( $item['cta_url'] );
 				?>
 				<p>
 					<?php if ( $has_guide ) { ?>
@@ -3480,15 +3484,17 @@ JS;
 							<?php echo esc_html( $item['guide_label'] ); ?>
 						</a>
 					<?php } ?>
-					<a
-						href="<?php echo esc_url( Helper::get_string_value( $item['cta_url'] ) ); ?>"
-						class="<?php echo $has_guide ? 'button' : 'button button-primary'; ?>"
-						data-srfm-notice-id="<?php echo esc_attr( Helper::get_string_value( $item['id'] ) ); ?>"
-						data-srfm-button="<?php echo esc_attr( Helper::get_string_value( $item['cta_action'] ?? '' ) ); ?>"
-						<?php echo 0 === strpos( Helper::get_string_value( $item['cta_url'] ), 'mailto:' ) ? '' : 'target="_blank" rel="noopener noreferrer"'; ?>
-					>
-						<?php echo esc_html( $item['cta_label'] ); ?>
-					</a>
+					<?php if ( $has_cta ) { ?>
+						<a
+							href="<?php echo esc_url( Helper::get_string_value( $item['cta_url'] ) ); ?>"
+							class="<?php echo $has_guide ? 'button' : 'button button-primary'; ?>"
+							data-srfm-notice-id="<?php echo esc_attr( Helper::get_string_value( $item['id'] ) ); ?>"
+							data-srfm-button="<?php echo esc_attr( Helper::get_string_value( $item['cta_action'] ?? '' ) ); ?>"
+							<?php echo 0 === strpos( Helper::get_string_value( $item['cta_url'] ), 'mailto:' ) ? '' : 'target="_blank" rel="noopener noreferrer"'; ?>
+						>
+							<?php echo esc_html( $item['cta_label'] ); ?>
+						</a>
+					<?php } ?>
 					<?php if ( ! empty( $item['dismissible'] ) ) { ?>
 						<a href="<?php echo esc_url( $this->get_dismiss_action_item_url( Helper::get_string_value( $item['id'] ) ) ); ?>" class="button">
 							<?php esc_html_e( 'Dismiss', 'sureforms' ); ?>
@@ -3528,9 +3534,16 @@ JS;
 	/**
 	 * Whether anything is currently wrong enough to warrant a notice.
 	 *
-	 * Deliberately re-derives its conditions rather than calling
-	 * get_action_items(), which records an impression as a side effect and must not
-	 * run from a show_if callback.
+	 * Deliberately re-derives rather than calling get_action_items(), which
+	 * records an impression as a side effect and must not run from a show_if
+	 * callback. It re-derives the two first-party conditions only -- a persistent
+	 * failure and an active caching plugin -- so an item contributed through
+	 * `srfm_action_items` does not suppress the notices this gates.
+	 *
+	 * Returns false with logging disabled, which is what makes the rating,
+	 * getting-started and Thank-You notices eligible again on a site that has
+	 * turned this surface off. Intended: those notices are gated on nothing being
+	 * wrong, and with the surface off there is nothing being reported.
 	 *
 	 * @since 2.12.6
 	 * @return bool
@@ -3572,17 +3585,147 @@ JS;
 			return [];
 		}
 
-		// Logging off means the site owner has opted out of this whole surface: the
-		// fault counters stop being fed, so anything still standing in them is
-		// stale and cannot be trusted to reflect the site now.
-		if ( ! Client_Logger::is_enabled() ) {
-			return [];
+		// Logging off is the opt-out for this surface. Not because the counters go
+		// stale -- Client_Logger::record_failure() has no enabled check, and the
+		// notification and integration categories are written by direct calls in
+		// inc/form-submit.php that keep counting accurately with logging off. It is
+		// simply the switch a site owner has to turn these notices off, and it
+		// covers our own items only: the filter below still runs, because a third
+		// party's advisory has nothing to do with SureForms' logging toggle.
+		$warnings = [];
+
+		if ( Client_Logger::is_enabled() ) {
+			$warnings = $this->get_first_party_action_items();
 		}
 
-		$dismissed = Helper::get_array_value( Helper::get_srfm_option( 'dismissed_action_items', [] ) );
-		$warnings  = [];
+		$this->track_action_item_impressions( $warnings );
 
-		$open = Client_Logger::get_open_failures();
+		/**
+		 * Filter the dashboard action items.
+		 *
+		 * Each entry needs id, status ('warning' or 'success'), title, message,
+		 * cta_label, cta_url and dismissible. Only ids in
+		 * handle_dismiss_action_item()'s allowlist can actually be dismissed, so
+		 * adding a dismissible item here also needs a line there.
+		 *
+		 * @since 2.12.6
+		 *
+		 * @param array<int,array<string,mixed>> $items Action items.
+		 */
+		$items = Helper::apply_filters_as_array( 'srfm_action_items', $warnings );
+
+		// Both URLs normalised once, here, rather than trusting each renderer to do
+		// it. Two things are being fixed at once.
+		//
+		// The scheme: the classic notice runs esc_url() and drops anything outside
+		// the allowlist, while React assigns href directly and react-dom 18 leaves
+		// a javascript: URL intact -- its sanitizeURL() only warns, and the warning
+		// is compiled out of the production build. esc_url_raw() with the same
+		// allowlist closes both.
+		//
+		// The ampersands: Helper::get_sureforms_website_url() returns an esc_url()'d
+		// string, so a URL with UTM parameters arrives with &#038; in it. In an HTML
+		// href the browser decodes that; React sets the property directly, so the
+		// entity would be sent to the server verbatim. Decoded to one raw form here,
+		// and each renderer escapes it for its own context.
+		foreach ( $items as $index => $item ) {
+			foreach ( [ 'cta_url', 'guide_url' ] as $key ) {
+				if ( ! isset( $item[ $key ] ) ) {
+					continue;
+				}
+
+				$items[ $index ][ $key ] = esc_url_raw(
+					wp_specialchars_decode( Helper::get_string_value( $item[ $key ] ), ENT_QUOTES ),
+					[ 'http', 'https', 'mailto' ]
+				);
+			}
+		}
+
+		return $items;
+	}
+
+	/**
+	 * Dismiss one action item.
+	 *
+	 * Hooked - wp_ajax_srfm_dismiss_action_item.
+	 *
+	 * Only items get_action_items() marks dismissible can be dismissed, so a
+	 * crafted request cannot silence a genuine fault.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public function handle_dismiss_action_item() {
+		if ( ! Helper::current_user_can() ) {
+			wp_send_json_error( [ 'message' => __( 'Unauthorized user.', 'sureforms' ) ], 403 );
+			return;
+		}
+
+		if ( ! check_ajax_referer( 'srfm_dismiss_action_item', 'nonce', false ) ) {
+			wp_send_json_error( [ 'message' => __( 'Invalid nonce.', 'sureforms' ) ], 403 );
+			return;
+		}
+
+		$item_id = isset( $_POST['item_id'] ) ? sanitize_key( wp_unslash( $_POST['item_id'] ) ) : '';
+
+		if ( ! $this->dismiss_action_item( $item_id ) ) {
+			wp_send_json_error( [ 'message' => __( 'Invalid parameters.', 'sureforms' ) ], 400 );
+			return;
+		}
+
+		wp_send_json_success();
+	}
+
+	/**
+	 * Styles for the stacked-notice carousel.
+	 *
+	 * In a stylesheet rather than eight inline style assignments in
+	 * notice-response.js, so the rules use logical properties and an RTL sheet can
+	 * override them. The reserved room on the trailing edge is a custom property
+	 * the script measures and sets, because a translated counter is wider than
+	 * "1 of 4" and a fixed value lets a long form title run under the buttons.
+	 *
+	 * Printed only when at least one notice is about to render, and only from this
+	 * renderer -- print_srfm_notice_styles() is hooked to
+	 * astra_notice_before_markup_* and never fires for these.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	private function print_action_item_carousel_styles() {
+		?>
+		<style id="srfm-action-item-carousel-styles">
+			.srfm-action-item-carousel { position: relative; }
+			.srfm-action-item-carousel .srfm-action-item-notice { padding-inline-end: var(--srfm-carousel-reserve, 130px); }
+			/* WordPress sets display on .notice, which would beat the UA rule for [hidden]. */
+			.srfm-action-item-carousel .srfm-action-item-notice[hidden] { display: none; }
+			.srfm-action-item-carousel-nav {
+				position: absolute;
+				top: 8px;
+				inset-inline-end: 12px;
+				margin: 0;
+				display: flex;
+				align-items: center;
+				gap: 8px;
+			}
+		</style>
+		<?php
+	}
+
+	/**
+	 * SureForms' own action items, before the filter.
+	 *
+	 * Split out so the Enable Logs gate in get_action_items() can sit above this
+	 * rather than above `srfm_action_items`. An item contributed through that
+	 * filter has nothing to do with SureForms' logging toggle, and was being
+	 * silenced by it.
+	 *
+	 * @since x.x.x
+	 * @return array<int,array<string,mixed>>
+	 */
+	private function get_first_party_action_items() {
+		$warnings = [];
+		$open     = Client_Logger::get_open_failures();
 
 		// One item per category. They read differently to a site owner and must not
 		// be collapsed: submissions failing means visitors cannot reach you, a
@@ -3605,7 +3748,13 @@ JS;
 				// Email is the one failure here a site owner can usually fix without
 				// us: it is almost always SMTP not being configured. Offer the guide
 				// alongside support rather than making them wait for a reply.
-				'guide'   => 'https://sureforms.com/docs/troubleshooting-email-sending-in-sureforms/',
+				'guide'   => Helper::get_sureforms_website_url(
+					'docs/troubleshooting-email-sending-in-sureforms/',
+					[
+						'utm_medium'  => 'form_checks_notice',
+						'utm_content' => 'notification_error',
+					]
+				),
 			],
 			'integration'  => [
 				'id'      => 'integration_error',
@@ -3652,7 +3801,15 @@ JS;
 
 		$caching_plugin = Helper::get_active_caching_plugin();
 
-		if ( '' !== $caching_plugin && ! in_array( 'caching_plugin', $dismissed, true ) ) {
+		if ( '' === $caching_plugin ) {
+			return $warnings;
+		}
+
+		// Read here rather than at the top: with no caching plugin active nothing
+		// consults it, and this is the only dismissible item.
+		$dismissed = Helper::get_array_value( Helper::get_srfm_option( 'dismissed_action_items', [] ) );
+
+		if ( ! in_array( 'caching_plugin', $dismissed, true ) ) {
 			$warnings[] = [
 				'id'          => 'caching_plugin',
 				'status'      => 'warning',
@@ -3669,58 +3826,7 @@ JS;
 			];
 		}
 
-		// Only what needs attention. A panel confirming that nothing is wrong is
-		// something people learn to skip, and it takes sidebar space from the cards
-		// that do have something to say.
-		$items = $warnings;
-
-		$this->track_action_item_impressions( $warnings );
-
-		/**
-		 * Filter the dashboard action items.
-		 *
-		 * Each entry needs id, status ('warning' or 'success'), title, message,
-		 * cta_label, cta_url and dismissible. Only ids in
-		 * handle_dismiss_action_item()'s allowlist can actually be dismissed, so
-		 * adding a dismissible item here also needs a line there.
-		 *
-		 * @since 2.12.6
-		 *
-		 * @param array<int,array<string,mixed>> $items Action items.
-		 */
-		return Helper::apply_filters_as_array( 'srfm_action_items', $items );
-	}
-
-	/**
-	 * Dismiss one action item.
-	 *
-	 * Hooked - wp_ajax_srfm_dismiss_action_item.
-	 *
-	 * Only items get_action_items() marks dismissible can be dismissed, so a
-	 * crafted request cannot silence a genuine fault.
-	 *
-	 * @since 2.12.6
-	 * @return void
-	 */
-	public function handle_dismiss_action_item() {
-		if ( ! Helper::current_user_can() ) {
-			wp_send_json_error( [ 'message' => __( 'Unauthorized user.', 'sureforms' ) ], 403 );
-			return;
-		}
-
-		if ( ! check_ajax_referer( 'srfm_dismiss_action_item', 'nonce', false ) ) {
-			wp_send_json_error( [ 'message' => __( 'Invalid nonce.', 'sureforms' ) ], 403 );
-			return;
-		}
-
-		$item_id = isset( $_POST['item_id'] ) ? sanitize_key( wp_unslash( $_POST['item_id'] ) ) : '';
-
-		if ( ! $this->dismiss_action_item( $item_id ) ) {
-			wp_send_json_error( [ 'message' => __( 'Invalid parameters.', 'sureforms' ) ], 400 );
-			return;
-		}
-
-		wp_send_json_success();
+		return $warnings;
 	}
 
 	/**
@@ -4301,9 +4407,11 @@ JS;
 	 * sites are affected. A day per user answers the question that matters -- how
 	 * many people are seeing this -- for one option write.
 	 *
-	 * Passing checks are not counted. "Nothing is wrong" is not an impression.
+	 * Counts SureForms' own items only. It runs before `srfm_action_items`, so a
+	 * third party's contribution is not counted here -- SureForms has no name for
+	 * it and no analytics key that would mean anything.
 	 *
-	 * @param array<int,array<string,mixed>> $warnings Warning items only.
+	 * @param array<int,array<string,mixed>> $warnings SureForms' own items.
 	 * @since 2.12.6
 	 * @return void
 	 */
@@ -4366,21 +4474,21 @@ JS;
 	 * ticket titled "form submissions are failing" and a count that belonged to a
 	 * different counter -- wrong at a glance and routed to the wrong place.
 	 *
-	 * Opens Gmail's compose window rather than handing off to `mailto:`. A mailto
-	 * goes to whatever the machine has registered as its mail handler, which on a
-	 * machine with none configured opens nothing at all; this always lands
-	 * somewhere the person can see and send.
+	 * A `mailto:`, handed to whatever the machine has registered as its mail
+	 * handler. The body never leaves the machine on the way there, which a webmail
+	 * compose URL cannot say: that would put the site host, the version set, the
+	 * form title and the log excerpt into a third party's request logs, the
+	 * admin's synced browser history and any extension holding `webRequest`.
+	 * `esc_url()` also exempts `mailto:` from its `%0a`/`%0d` stripping
+	 * (`wp-includes/formatting.php`), so the body keeps its line breaks through
+	 * the classic renderer; every other scheme arrives as one paragraph.
 	 *
-	 * The trade is that someone who does not use Gmail on the web gets a compose
-	 * window for an account they may not want. They can still copy the message out
-	 * of it, and it is a visible window rather than a link that appears to do
-	 * nothing.
-	 *
-	 * The log is pasted into the body rather than attached because neither a mailto
-	 * nor a compose URL can carry an attachment, and it is a tail rather than the
-	 * whole file because a megabyte of JSON would exceed any URL length. Gmail
-	 * truncates a long `body` silently, so the log is trimmed to a budget below --
-	 * losing the oldest entries visibly beats losing the newest without saying so.
+	 * The log is pasted into the body rather than attached because a mailto has no
+	 * attachment parameter -- browsers drop any attempt to add one -- and it is a
+	 * tail rather than the whole file because a megabyte of JSON would exceed the
+	 * URL length every mail client enforces. Client_Logger::get_tail() applies
+	 * that bound itself, cutting whole lines from the oldest end, so the entries
+	 * describing the failure being reported are the ones that survive.
 	 *
 	 * @param string $category   One of Client_Logger::CATEGORIES. Unknown or absent
 	 *                           gets neutral wording rather than a specific claim.
@@ -4397,11 +4505,10 @@ JS;
 			Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) )
 		);
 
-		// Bare LF, not CRLF. CRLF is the mailto convention and correct when a mail
-		// client parses the URL, but Gmail's compose window does not honour the
-		// carriage returns and runs the whole body together as one paragraph -- the
-		// diagnostics and the log arrive as a wall of text. Nothing parses this as
-		// a mail header any more, so there is no reason left to send CRLF.
+		// Bare LF, not CRLF. RFC 6068 says a mailto body's line breaks are %0A, and
+		// the carriage return is what several webmail compose windows drop on the
+		// floor -- the diagnostics and the log then arrive as one paragraph. No
+		// consumer here parses this as a mail header, so CRLF buys nothing.
 		$log   = Client_Logger::get_tail();
 		$body  = $this->get_support_message( $category, $form_title );
 		$body .= "\n\n" . '---' . "\n";
@@ -4426,49 +4533,24 @@ JS;
 			}
 		}
 
-		/**
-		 * Filter the support address the Contact Support action writes to.
-		 *
-		 * @since 2.12.6
-		 *
-		 * @param string $address Support inbox.
-		 */
-		$address = Helper::get_string_value( apply_filters( 'srfm_support_email_address', 'support@sureforms.com' ) );
-
-		// Budget for the whole URL. Gmail drops the overflow of an over-long body
-		// without a word, and the overflow is the end of the log -- the newest
-		// entries, the ones describing the failure being reported. Trimming here
-		// instead means the oldest go first and the note below says so.
-		$base = self::GMAIL_COMPOSE_URL . '?' . http_build_query(
+		return 'mailto:support@sureforms.com?' . http_build_query(
 			[
-				'view' => 'cm',
-				'fs'   => '1',
-				'to'   => $address,
-				'su'   => $subject,
+				'subject' => $subject,
+				'body'    => $body,
 			],
 			'',
 			'&',
 			PHP_QUERY_RFC3986
-		) . '&body=';
-
-		$room = self::SUPPORT_URL_BUDGET - strlen( $base );
-
-		if ( strlen( rawurlencode( $body ) ) > $room ) {
-			// Cut on the raw string, then re-encode: slicing an encoded string can
-			// land inside a percent-escape and produce a malformed URL.
-			$budget = max( 0, (int) floor( $room / 3 ) );
-			$body   = mb_substr( $body, 0, $budget );
-			$body  .= "\n\n" . __( 'This log was shortened to fit. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
-		}
-
-		return $base . rawurlencode( $body );
+		);
 	}
 
 	/**
-	 * Subject and opening line for one kind of failure.
+	 * Subject and countless opening line for one kind of failure.
 	 *
 	 * Both come from here so they cannot drift apart: a subject naming one problem
-	 * over a body describing another is worse than either alone.
+	 * over a body describing another is worse than either alone. The counted form
+	 * of the opening line lives in get_support_count_sentence(), which needs
+	 * `_n()`'s literals and so cannot be an array lookup.
 	 *
 	 * An unknown or absent category gets deliberately neutral wording. The
 	 * alternative -- defaulting to the submission copy -- states something specific
@@ -4476,34 +4558,28 @@ JS;
 	 * category at all.
 	 *
 	 * @param string $category One of Client_Logger::CATEGORIES.
-	 * @since 2.12.6
-	 * @return array{subject:string,singular:string,plural:string}
+	 * @since x.x.x
+	 * @return array{subject:string,anon:string}
 	 */
 	private function get_support_copy( $category ) {
 		$copy = [
 			'submission'   => [
 				/* translators: %s: site host. */
-				'subject'  => __( 'SureForms: form submissions are failing on %s', 'sureforms' ),
-				/* translators: %d: number of failed submissions. */
-				'singular' => __( 'SureForms has recorded %d form submission that could not be completed.', 'sureforms' ),
-				/* translators: %d: number of failed submissions. */
-				'plural'   => __( 'SureForms has recorded %d form submissions that could not be completed.', 'sureforms' ),
+				'subject' => __( 'SureForms: form submissions are failing on %s', 'sureforms' ),
+				/* translators: %s: site host. */
+				'anon'    => __( 'SureForms has recorded form submissions on %s that could not be completed.', 'sureforms' ),
 			],
 			'notification' => [
 				/* translators: %s: site host. */
-				'subject'  => __( 'SureForms: notification emails are not being sent on %s', 'sureforms' ),
-				/* translators: %d: number of failed notifications. */
-				'singular' => __( 'SureForms saved %d entry but could not send the notification email for it.', 'sureforms' ),
-				/* translators: %d: number of failed notifications. */
-				'plural'   => __( 'SureForms saved %d entries but could not send the notification emails for them.', 'sureforms' ),
+				'subject' => __( 'SureForms: notification emails are not being sent on %s', 'sureforms' ),
+				/* translators: %s: site host. */
+				'anon'    => __( 'SureForms saved entries on %s but could not send the notification emails for them.', 'sureforms' ),
 			],
 			'integration'  => [
 				/* translators: %s: site host. */
-				'subject'  => __( 'SureForms: an integration is not receiving entries on %s', 'sureforms' ),
-				/* translators: %d: number of failed integration hand-offs. */
-				'singular' => __( 'SureForms saved %d entry but could not pass it to a connected service.', 'sureforms' ),
-				/* translators: %d: number of failed integration hand-offs. */
-				'plural'   => __( 'SureForms saved %d entries but could not pass them to a connected service.', 'sureforms' ),
+				'subject' => __( 'SureForms: an integration is not receiving entries on %s', 'sureforms' ),
+				/* translators: %s: site host. */
+				'anon'    => __( 'SureForms saved entries on %s but could not pass them to a connected service.', 'sureforms' ),
 			],
 		];
 
@@ -4513,12 +4589,78 @@ JS;
 
 		return [
 			/* translators: %s: site host. */
-			'subject'  => __( 'SureForms: a problem with the forms on %s', 'sureforms' ),
-			/* translators: %d: number of recorded problems. */
-			'singular' => __( 'SureForms has recorded %d problem with the forms on this site.', 'sureforms' ),
-			/* translators: %d: number of recorded problems. */
-			'plural'   => __( 'SureForms has recorded %d problems with the forms on this site.', 'sureforms' ),
+			'subject' => __( 'SureForms: a problem with the forms on %s', 'sureforms' ),
+			/* translators: %s: site host. */
+			'anon'    => __( 'SureForms has recorded a problem with the forms on %s.', 'sureforms' ),
 		];
+	}
+
+	/**
+	 * The sentence that opens the support email, with the failure count in it.
+	 *
+	 * A switch with literal `_n()` calls rather than a singular/plural pair looked
+	 * up from an array. `_n()` has to see its two literals at extraction time to
+	 * emit an `msgid_plural`, and only that lets a locale supply the number of
+	 * forms it actually uses -- Polish and Russian need three, Arabic six,
+	 * Japanese one. Choosing on `1 === $count` in PHP is correct for English and
+	 * wrong everywhere with a different plural rule.
+	 *
+	 * @param string $category One of Client_Logger::CATEGORIES. Unknown or absent
+	 *                         gets neutral wording rather than a specific claim.
+	 * @param int    $count    Failures recorded for that category.
+	 * @since x.x.x
+	 * @return string
+	 */
+	private function get_support_count_sentence( $category, $count ) {
+		switch ( $category ) {
+			case 'submission':
+				return sprintf(
+					/* translators: %d: number of failed submissions. */
+					_n(
+						'SureForms has recorded %d form submission that could not be completed.',
+						'SureForms has recorded %d form submissions that could not be completed.',
+						$count,
+						'sureforms'
+					),
+					$count
+				);
+
+			case 'notification':
+				return sprintf(
+					/* translators: %d: number of failed notifications. */
+					_n(
+						'SureForms saved %d entry but could not send the notification email for it.',
+						'SureForms saved %d entries but could not send the notification emails for them.',
+						$count,
+						'sureforms'
+					),
+					$count
+				);
+
+			case 'integration':
+				return sprintf(
+					/* translators: %d: number of failed integration hand-offs. */
+					_n(
+						'SureForms saved %d entry but could not pass it to a connected service.',
+						'SureForms saved %d entries but could not pass them to a connected service.',
+						$count,
+						'sureforms'
+					),
+					$count
+				);
+
+			default:
+				return sprintf(
+					/* translators: %d: number of recorded problems. */
+					_n(
+						'SureForms has recorded %d problem with the forms on this site.',
+						'SureForms has recorded %d problems with the forms on this site.',
+						$count,
+						'sureforms'
+					),
+					$count
+				);
+		}
 	}
 
 	/**
@@ -4543,14 +4685,17 @@ JS;
 		$count    = Helper::get_integer_value( $failures[ $category ]['count'] ?? 0 );
 		$copy     = $this->get_support_copy( $category );
 
-		// A category with nothing recorded still needs to read as a sentence, and
-		// "0 entries" reads as a bug in the email rather than a fault on the site.
-		$count = max( 1, $count );
+		// With nothing recorded, describe the failure without a number. The old
+		// max( 1, $count ) reported "recorded 1 problem" and "Recorded failures: 1"
+		// for a count nobody recorded -- a number support would then chase.
+		$host = Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) );
 
 		$lines = [
 			__( 'Hello SureForms support,', 'sureforms' ),
 			'',
-			sprintf( 1 === $count ? $copy['singular'] : $copy['plural'], $count ),
+			$count > 0
+				? $this->get_support_count_sentence( $category, $count )
+				: sprintf( $copy['anon'], $host ),
 		];
 
 		if ( '' !== $form_title ) {
@@ -4561,6 +4706,9 @@ JS;
 				$form_title
 			);
 		}
+
+		// Once: each call reads an option and a site option.
+		$caching = Helper::get_active_caching_plugin();
 
 		$lines = array_merge(
 			$lines,
@@ -4573,8 +4721,8 @@ JS;
 				'SureForms Pro: ' . ( Helper::has_pro() && defined( 'SRFM_PRO_VER' ) ? SRFM_PRO_VER : __( 'not active', 'sureforms' ) ),
 				'WordPress: ' . Helper::get_string_value( $wp_version ),
 				'PHP: ' . PHP_VERSION,
-				'Caching: ' . ( '' !== Helper::get_active_caching_plugin() ? Helper::get_active_caching_plugin() : __( 'none detected', 'sureforms' ) ),
-				'Recorded failures: ' . $count,
+				'Caching: ' . ( '' !== $caching ? $caching : __( 'none detected', 'sureforms' ) ),
+				'Recorded failures: ' . ( $count > 0 ? $count : __( 'none recorded', 'sureforms' ) ),
 			]
 		);
 

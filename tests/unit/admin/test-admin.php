@@ -1095,12 +1095,14 @@ class Test_Admin extends TestCase {
 	}
 
 	/**
-	 * Turning logging off takes the whole panel down with it.
+	 * Turning logging off takes SureForms' own items down with it.
 	 *
-	 * The toggle is what feeds the fault counters, so once it is off whatever is
-	 * still standing in them describes the site as it was, not as it is. Asserted
-	 * with a fault recorded and a caching plugin active -- both surfaces the panel
-	 * has -- so this cannot pass just because there was nothing to show.
+	 * The toggle is the opt-out for this surface. Not because the counters go
+	 * stale: Client_Logger::record_failure() has no enabled check, and the
+	 * notification and integration categories keep counting accurately with
+	 * logging off. Asserted with a fault recorded and a caching plugin active --
+	 * both surfaces the panel has -- so this cannot pass just because there was
+	 * nothing to show.
 	 */
 	public function test_get_action_items_shows_nothing_when_logging_is_off() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
@@ -1167,10 +1169,15 @@ class Test_Admin extends TestCase {
 		}
 
 		$this->assertArrayHasKey( 'notification_error', $items );
-		$this->assertSame(
+		$this->assertStringStartsWith(
 			'https://sureforms.com/docs/troubleshooting-email-sending-in-sureforms/',
 			$items['notification_error']['guide_url'] ?? '',
 			'The notification failure must link to the email troubleshooting guide.'
+		);
+		$this->assertStringNotContainsString(
+			'&#038;',
+			$items['notification_error']['guide_url'] ?? '',
+			'React assigns href as a property, so an HTML entity here reaches the server verbatim.'
 		);
 		$this->assertSame( 'help_me_fix', $items['notification_error']['guide_action'] ?? '' );
 		$this->assertNotEmpty( $items['notification_error']['guide_label'] ?? '' );
@@ -1272,11 +1279,11 @@ class Test_Admin extends TestCase {
 
 		// Three distinct subjects. Asserted against each other as well as their own
 		// text, because the failure mode here was one subject serving all three.
-		$this->assertStringContainsString( 'form submissions are failing', $submission['su'] );
-		$this->assertStringContainsString( 'notification emails are not being sent', $notification['su'] );
-		$this->assertStringContainsString( 'integration is not receiving entries', $integration['su'] );
-		$this->assertNotSame( $submission['su'], $notification['su'] );
-		$this->assertNotSame( $notification['su'], $integration['su'] );
+		$this->assertStringContainsString( 'form submissions are failing', $submission['subject'] );
+		$this->assertStringContainsString( 'notification emails are not being sent', $notification['subject'] );
+		$this->assertStringContainsString( 'integration is not receiving entries', $integration['subject'] );
+		$this->assertNotSame( $submission['subject'], $notification['subject'] );
+		$this->assertNotSame( $notification['subject'], $integration['subject'] );
 
 		// The body must not claim submissions are failing when they are not.
 		$this->assertStringNotContainsString(
@@ -1294,25 +1301,26 @@ class Test_Admin extends TestCase {
 		// The form is named, which is the first thing support asks for.
 		$this->assertStringContainsString( 'Job Application', $integration['body'] );
 
-		// Gmail, not a mailto. A mailto goes to whatever the machine registered as
-		// its mail handler, and on one with none configured it opens nothing.
+		// A mailto, and it has to stay one. Any other scheme sends the site host,
+		// the version set, the form title and the log excerpt through a third
+		// party's request logs, and loses every line break to esc_url()'s
+		// %0a/%0d stripping, which exempts mailto: alone.
 		$url = $method->invoke( Admin::get_instance(), 'submission', 'Contact Form' );
-		$this->assertStringStartsWith( 'https://mail.google.com/mail/', $url );
-		$this->assertStringNotContainsString( 'mailto:', $url );
-		$this->assertStringContainsString( 'view=cm', $url );
-		$this->assertStringContainsString( 'to=support%40sureforms.com', $url );
+		$this->assertStringStartsWith( 'mailto:support@sureforms.com?', $url );
+		$this->assertStringNotContainsString( 'mail.google.com', $url );
 	}
 
 	/**
-	 * The body uses bare LF, so Gmail keeps the line breaks.
+	 * The composed body keeps its line breaks, in the URL and in the markup.
 	 *
-	 * CRLF is the mailto convention and correct when a mail client parses the URL,
-	 * but Gmail's compose window ignores the carriage returns and runs the whole
-	 * body together as one paragraph -- the diagnostics and the log arrive as a wall
-	 * of text. Nothing parses this as a mail header any more, so CRLF has no
-	 * consumer left.
+	 * Two layers can flatten it. The body itself uses bare LF, because the carriage
+	 * return is what several webmail compose windows drop. And esc_url() strips
+	 * %0a/%0d from every scheme except mailto:, so a support link that stops being
+	 * a mailto arrives as one unreadable paragraph -- asserted through the renderer
+	 * below, since the method's own return value is a layer above the escaping and
+	 * cannot see it.
 	 */
-	public function test_get_support_email_url_keeps_line_breaks_gmail_will_honour() {
+	public function test_get_support_email_url_keeps_line_breaks() {
 		delete_option( Client_Logger::FAILURES_OPTION );
 		Client_Logger::clear();
 		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
@@ -1324,7 +1332,7 @@ class Test_Admin extends TestCase {
 		$this->assertStringNotContainsString(
 			'%0D%0A',
 			$url,
-			'A carriage return collapses the body to one paragraph in Gmail.'
+			'A carriage return is dropped by several webmail compose windows.'
 		);
 		$this->assertStringContainsString( '%0A', $url, 'The body must still be broken into lines.' );
 
@@ -1336,16 +1344,37 @@ class Test_Admin extends TestCase {
 			substr_count( $query['body'], "\n" ),
 			'The diagnostics block is several lines; one long line means the breaks were lost.'
 		);
+
+		// Through the renderer, which is where esc_url() gets its hands on it.
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+
+		global $pagenow;
+		$previous_pagenow = $pagenow;
+		$pagenow          = 'plugins.php';
+
+		ob_start();
+		Admin::get_instance()->render_action_item_notices();
+		$html = (string) ob_get_clean();
+
+		$pagenow = $previous_pagenow;
+
+		$this->assertStringContainsString(
+			'%0A',
+			$html,
+			'esc_url() strips %0a from every scheme but mailto:, so the rendered href must still carry them.'
+		);
 	}
 
 	/**
-	 * The URL stays inside a length Gmail will not silently truncate.
+	 * A long log is cut from the oldest end, so the newest entries survive.
 	 *
-	 * Gmail drops the overflow of a long body without a word, and the overflow is
-	 * the end of the log -- the newest entries, the ones describing the failure
-	 * being reported. Trimmed here instead, oldest first, with a line saying so.
+	 * The entries worth sending are the ones describing the failure being
+	 * reported, which are the newest. Client_Logger::get_tail() applies the bound
+	 * by dropping whole lines from the oldest end; anything that trims the
+	 * assembled body instead cuts from the other end and sends support the history
+	 * rather than the fault.
 	 */
-	public function test_get_support_email_url_stays_within_the_length_gmail_accepts() {
+	public function test_get_support_email_url_keeps_the_newest_log_entries() {
 		delete_option( Client_Logger::FAILURES_OPTION );
 		Client_Logger::clear();
 		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
@@ -1368,15 +1397,23 @@ class Test_Admin extends TestCase {
 		$method->setAccessible( true );
 		$url = $method->invoke( Admin::get_instance(), 'submission', 'Contact Form' );
 
-		$this->assertLessThanOrEqual(
-			2000,
-			strlen( $url ),
-			'A longer URL is truncated by Gmail, and what it drops is the newest log entries.'
+		parse_str( (string) wp_parse_url( $url, PHP_URL_QUERY ), $query );
+
+		// The last entry appended is entry 39. It is the one being reported, so it
+		// is the one that must be there.
+		$this->assertStringContainsString(
+			'fill the log 39',
+			$query['body'],
+			'The newest entry must survive the trim.'
+		);
+		$this->assertStringNotContainsString(
+			'fill the log 0',
+			$query['body'],
+			'The oldest entries are what the bound drops.'
 		);
 
 		// Still a usable email, not a stub: the subject and the diagnostics survive.
-		parse_str( (string) wp_parse_url( $url, PHP_URL_QUERY ), $query );
-		$this->assertStringContainsString( 'form submissions are failing', $query['su'] );
+		$this->assertStringContainsString( 'form submissions are failing', $query['subject'] );
 		$this->assertStringContainsString( 'Hello SureForms support', $query['body'] );
 
 		Client_Logger::clear();
@@ -1446,6 +1483,139 @@ class Test_Admin extends TestCase {
 	}
 
 	/**
+	 * A URL contributed through the filter is normalised server-side.
+	 *
+	 * The two renderers disagreed about whether srfm_action_items is trusted. The
+	 * classic notice runs esc_url() and drops a disallowed scheme; React assigns
+	 * href directly, and react-dom 18's sanitizeURL() only warns about
+	 * javascript:, with the warning compiled out of the production build. Doing it
+	 * once here closes both and leaves nothing to remember at the call sites.
+	 */
+	public function test_get_action_items_scrubs_urls_contributed_through_the_filter() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
+
+		$filter = static function () {
+			return [
+				[
+					'id'          => 'third_party_advisory',
+					'status'      => 'warning',
+					'title'       => 'Something needs attention.',
+					'message'     => 'Details here.',
+					'cta_label'   => 'Fix it',
+					'cta_url'     => 'javascript:alert(document.cookie)',
+					'guide_label' => 'Read more',
+					'guide_url'   => 'https://example.com/guide/',
+				],
+			];
+		};
+
+		add_filter( 'srfm_action_items', $filter );
+		$items = Admin::get_instance()->get_action_items();
+		remove_filter( 'srfm_action_items', $filter );
+
+		$this->assertCount( 1, $items );
+		$this->assertSame(
+			'',
+			$items[0]['cta_url'],
+			'A scheme outside the allowlist must not survive to either renderer.'
+		);
+		$this->assertSame(
+			'https://example.com/guide/',
+			$items[0]['guide_url'],
+			'An allowed scheme is left alone.'
+		);
+	}
+
+	/**
+	 * The filter still runs with logging disabled.
+	 *
+	 * The Enable Logs toggle removes SureForms' own items. It sat above
+	 * srfm_action_items, so a third party using the documented extension point had
+	 * its unrelated advisory silenced by a SureForms logging checkbox.
+	 */
+	public function test_get_action_items_still_runs_the_filter_with_logging_off() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
+
+		update_option( 'srfm_general_settings_options', [ 'srfm_enable_logs' => false ] );
+
+		$filter = static function ( $items ) {
+			$items[] = [
+				'id'      => 'third_party_advisory',
+				'status'  => 'warning',
+				'title'   => 'Something needs attention.',
+				'message' => 'Details here.',
+			];
+
+			return $items;
+		};
+
+		add_filter( 'srfm_action_items', $filter );
+		$items = Admin::get_instance()->get_action_items();
+		remove_filter( 'srfm_action_items', $filter );
+
+		delete_option( 'srfm_general_settings_options' );
+
+		$ids = array_column( $items, 'id' );
+
+		$this->assertContains( 'third_party_advisory', $ids, 'The filter must still run.' );
+		$this->assertNotContains(
+			'form_submission_error',
+			$ids,
+			'SureForms\' own items are what the toggle removes.'
+		);
+
+		delete_option( Client_Logger::FAILURES_OPTION );
+	}
+
+	/**
+	 * An item with only guide_* keys renders without touching cta_url.
+	 *
+	 * The React panel had already started gating on cta_label, so a filter item
+	 * carrying only a guide rendered correctly there. The classic renderer read
+	 * $item['cta_url'] and $item['cta_label'] unguarded, which is two PHP 8
+	 * undefined-key warnings and a <a class="button" href="">.
+	 */
+	public function test_render_action_item_notices_handles_an_item_with_no_cta() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
+
+		$filter = static function () {
+			return [
+				[
+					'id'           => 'third_party_advisory',
+					'status'       => 'warning',
+					'title'        => 'Something needs attention.',
+					'message'      => 'Details here.',
+					'guide_label'  => 'Read more',
+					'guide_url'    => 'https://example.com/guide/',
+					'guide_action' => 'help_me_fix',
+				],
+			];
+		};
+
+		global $pagenow;
+		$previous_pagenow = $pagenow;
+		$pagenow          = 'plugins.php';
+
+		add_filter( 'srfm_action_items', $filter );
+		ob_start();
+		Admin::get_instance()->render_action_item_notices();
+		$html = (string) ob_get_clean();
+		remove_filter( 'srfm_action_items', $filter );
+
+		$pagenow = $previous_pagenow;
+
+		$this->assertStringContainsString( 'https://example.com/guide/', $html, 'The guide still renders.' );
+		$this->assertStringNotContainsString( 'href=""', $html, 'No empty-href anchor is emitted.' );
+
+		// One anchor for the guide, and no second one for a CTA that does not exist.
+		$this->assertSame( 1, substr_count( $html, 'data-srfm-button=' ) );
+	}
+
+	/**
 	 * An unknown category gets neutral wording rather than a specific claim.
 	 *
 	 * srfm_action_items is public, so an item can arrive with no category at all.
@@ -1462,8 +1632,8 @@ class Test_Admin extends TestCase {
 			$query
 		);
 
-		$this->assertStringContainsString( 'a problem with the forms on', $query['su'] );
-		$this->assertStringNotContainsString( 'form submissions are failing', $query['su'] );
+		$this->assertStringContainsString( 'a problem with the forms on', $query['subject'] );
+		$this->assertStringNotContainsString( 'form submissions are failing', $query['subject'] );
 		$this->assertStringNotContainsString( 'form submission that could not', $query['body'] );
 	}
 
@@ -1498,10 +1668,16 @@ class Test_Admin extends TestCase {
 		// The guide for the plugin actually running, not the general page. WP Rocket
 		// has one of its own, so linking to the general page here would be the
 		// regression this assertion exists to catch.
-		$this->assertSame(
+		$this->assertStringStartsWith(
 			'https://sureforms.com/docs/how-to-set-up-sureforms-with-wp-rocket/',
 			$caching['cta_url']
 		);
+
+		// One raw form for both renderers. get_sureforms_website_url() esc_url()s
+		// its return, and React assigns href as a property rather than parsing it
+		// as HTML, so an &#038; here would be sent to the server verbatim.
+		$this->assertStringNotContainsString( '&#038;', $caching['cta_url'] );
+		$this->assertStringContainsString( 'utm_medium=form_checks_notice', $caching['cta_url'] );
 	}
 
 	/**

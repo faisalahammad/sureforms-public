@@ -3258,7 +3258,10 @@ class Test_Helper extends TestCase {
 			$detected = Helper::get_caching_plugin_doc_url();
 			remove_filter( 'pre_option_active_plugins', $filter );
 
-			$this->assertSame( $url, $detected, $path . ' must link to its own guide.' );
+			// Asserted on the prefix, not the whole string: the URL carries UTM
+			// parameters whose values depend on install attribution, and the claim
+			// here is about which guide it points at.
+			$this->assertStringStartsWith( $url, $detected, $path . ' must link to its own guide.' );
 		}
 	}
 
@@ -3282,7 +3285,7 @@ class Test_Helper extends TestCase {
 		$name     = Helper::get_active_caching_plugin();
 		remove_filter( 'pre_option_active_plugins', $filter );
 
-		$this->assertSame( $general, $detected, 'A plugin with no guide gets the general one.' );
+		$this->assertStringStartsWith( $general, $detected, 'A plugin with no guide gets the general one.' );
 		$this->assertSame( 'Breeze', $name, 'It is still detected by name.' );
 
 		// No caching plugin at all.
@@ -3294,7 +3297,7 @@ class Test_Helper extends TestCase {
 		$detected = Helper::get_caching_plugin_doc_url();
 		remove_filter( 'pre_option_active_plugins', $none );
 
-		$this->assertSame( $general, $detected, 'No caching plugin still yields a usable link.' );
+		$this->assertStringStartsWith( $general, $detected, 'No caching plugin still yields a usable link.' );
 	}
 
 	/**
