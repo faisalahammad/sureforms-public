@@ -1483,6 +1483,46 @@ class Test_Admin extends TestCase {
 	}
 
 	/**
+	 * The request memo is real, and resettable.
+	 *
+	 * Two halves. get_action_items() runs twice on every admin page -- once for the
+	 * localisation payload and once in the classic renderer -- and each open
+	 * category reads a log excerpt, so the second build has to come from the memo.
+	 * And Admin is a singleton, so the memo outlives a request inside one process:
+	 * without a reset, any test that records a failure and then asks again is
+	 * reading the answer from before the change.
+	 */
+	public function test_reset_action_items_cache() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Admin::reset_action_items_cache();
+
+		$this->assertSame( [], Admin::get_instance()->get_action_items(), 'Healthy site, nothing to report.' );
+
+		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
+
+		// Still the memoised answer: the option changed, the memo did not.
+		$this->assertSame(
+			[],
+			Admin::get_instance()->get_action_items(),
+			'The second call in a request must not rebuild.'
+		);
+
+		Admin::reset_action_items_cache();
+
+		$ids = array_column( Admin::get_instance()->get_action_items(), 'id' );
+
+		$this->assertContains(
+			'form_submission_error',
+			$ids,
+			'After a reset the fault recorded in between must be visible.'
+		);
+
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Admin::reset_action_items_cache();
+	}
+
+	/**
 	 * Every (notice, button) pair either surface can emit is on the allowlist.
 	 *
 	 * handle_notice_response() rejects an unknown pair with a 400, so a CTA added

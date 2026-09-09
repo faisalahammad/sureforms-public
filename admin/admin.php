@@ -152,9 +152,9 @@ class Admin {
 	/**
 	 * Action items for this request, or null before the first build.
 	 *
-	 * get_action_items() runs twice on every admin page -- once building the
-	 * localisation payload, once in the classic renderer -- and each open failure
-	 * category reads a log excerpt. It also records an impression, which running
+	 * Built twice on every admin page without this -- once for the localisation
+	 * payload, once in the classic renderer -- and each open failure category reads
+	 * a log excerpt. get_action_items() also records an impression, which running
 	 * twice counted twice.
 	 *
 	 * Reset with reset_action_items_cache(). Admin is a singleton, so without that
@@ -3818,11 +3818,10 @@ JS;
 		<style id="srfm-action-item-carousel-styles">
 			.srfm-action-item-carousel { position: relative; }
 			.srfm-action-item-carousel .srfm-action-item-notice { padding-inline-end: var(--srfm-carousel-reserve, 130px); }
-			/* WordPress sets display on .notice, which would beat the UA rule for [hidden]. */
+			/* [hidden] is only a UA rule. WordPress sets display on .notice, and a
+			third-party admin sheet doing something like `.notice div { display: block }`
+			would put the raw diagnostics on screen inside the notice. */
 			.srfm-action-item-carousel .srfm-action-item-notice[hidden] { display: none; }
-			/* [hidden] is only a UA rule, and a third-party admin stylesheet doing
-			   something like `.notice div { display: block }` would put the raw
-			   diagnostics on screen inside the notice. */
 			.srfm-notice-details { display: none; }
 			.srfm-action-item-carousel-nav {
 				position: absolute;
