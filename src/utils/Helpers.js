@@ -2,6 +2,7 @@ import apiFetch from '@wordpress/api-fetch';
 import { __, sprintf } from '@wordpress/i18n';
 import { Toaster, ToastBar } from 'react-hot-toast';
 import { store as editorStore } from '@wordpress/editor';
+import { store as blockEditorStore } from '@wordpress/block-editor';
 import { select, useSelect } from '@wordpress/data';
 import { addQueryArgs, cleanForSlug } from '@wordpress/url';
 import clsx from 'clsx';
@@ -440,7 +441,11 @@ export const flattenBlocks = ( blocks, { excludeChildrenOf = [] } = {} ) =>
 	}, [] );
 
 export const setFormSpecificSmartTags = ( updateBlockAttributes ) => {
-	const { getBlocks } = select( editorStore );
+	// Read the block list from core/block-editor rather than core/editor: WP 7.1
+	// deprecates the getBlocks() forwarder on core/editor (TC-004), and this call
+	// destructures it without optional chaining, so a removed forwarder would be a
+	// hard TypeError. core/block-editor returns the same list here.
+	const { getBlocks } = select( blockEditorStore );
 	let savedBlocks = getBlocks();
 	const blockSlugs = prepareBlockSlugs( updateBlockAttributes, savedBlocks );
 
@@ -836,7 +841,7 @@ export const prepareBlockSlugs = ( updateBlockAttributes, srfmBlocks ) => {
  * Called when the user manually edits a slug via the SlugControl component.
  *
  * @param {string} blockId - The block_id attribute of the block to lock.
- * @since x.x.x
+ * @since 2.7.1
  */
 export const lockBlockSlugByBlockId = ( blockId ) => {
 	_slugAutoLabels.delete( blockId );
@@ -850,7 +855,7 @@ export const lockBlockSlugByBlockId = ( blockId ) => {
  * regenerating the slug if the block's label changes later in the same session.
  *
  * @param {string} slug - The slug portion extracted from the {form:slug} shortcode.
- * @since x.x.x
+ * @since 2.7.0
  */
 export const lockBlockSlugBySlug = ( slug ) => {
 	const { getBlocks } = select( 'core/block-editor' );

@@ -10,6 +10,27 @@
 
 import { Alert, Button } from '@bsf/force-ui';
 import { TriangleAlert, Info, CheckCircle, CircleAlert } from 'lucide-react';
+import { useRef, useState } from '@wordpress/element';
+import { __ } from '@wordpress/i18n';
+import apiFetch from '@wordpress/api-fetch';
+
+/**
+ * Handlers for notice actions that have to call the server.
+ *
+ * PHP supplies an opaque identifier in `action`, never a URL or an endpoint — the
+ * server does not get to name an address for the browser to POST to. The endpoint,
+ * method and error handling live here, in reviewable source.
+ *
+ * A `url` on the same action stays as the no-JS fallback: if no handler matches the
+ * identifier, the existing URL behaviour runs instead.
+ */
+const NOTICE_ACTION_HANDLERS = {
+	'repair-entries-table': () =>
+		apiFetch( {
+			path: '/sureforms/v1/database/repair-entries-table',
+			method: 'POST',
+		} ),
+};
 
 /**
  * Get the appropriate icon for each notice variant.
@@ -63,6 +84,60 @@ const getNoticeClassName = ( variant ) => {
  * @return {JSX.Element} - The rendered notice
  */
 const SingleNotice = ( { variant = 'info', message, title, actions = [] } ) => {
+	// Only ever set by a server-backed action; a plain link action never touches it.
+	const [ status, setStatus ] = useState( { busy: false, error: '' } );
+	// Synchronous guard: `disabled={status.busy}` only takes effect after the next
+	// render commits, so two clicks dispatched before that commit would both run.
+	// The ref flips immediately, so the second click is dropped.
+	const inFlight = useRef( false );
+
+	const runAction = async ( action ) => {
+		const handler = NOTICE_ACTION_HANDLERS[ action.action ];
+
+		// No handler for this identifier — fall back to the URL, which is why PHP
+		// ships both.
+		if ( ! handler ) {
+			if ( action.url ) {
+				if ( action.target === '_blank' ) {
+					window.open( action.url, '_blank', 'noopener,noreferrer' );
+				} else {
+					window.location.href = action.url;
+				}
+			}
+			return;
+		}
+
+		if ( inFlight.current ) {
+			return;
+		}
+		inFlight.current = true;
+
+		setStatus( { busy: true, error: '' } );
+
+		try {
+			await handler();
+			// Reload rather than mutating local state: the notice is rendered from a
+			// PHP-localized array, so the server is the only thing that can say it is
+			// resolved.
+			//
+			// The flag has to be added by hand. PHP registers the confirmation off
+			// `srfm_db_repair`, and a bare reload would drop the warning with nothing
+			// in its place — the same silent outcome as a failure. The admin-post
+			// fallback redirects with this exact arg, so both paths land identically.
+			const next = new URL( window.location.href );
+			next.searchParams.set( 'srfm_db_repair', 'done' );
+			window.location.assign( next.toString() );
+		} catch ( error ) {
+			inFlight.current = false;
+			setStatus( {
+				busy: false,
+				error:
+					error?.message ||
+					__( 'Something went wrong. Please try again.', 'sureforms' ),
+			} );
+		}
+	};
+
 	// Build content with message and inline action buttons (matching WebhookConfigure pattern)
 	const content = (
 		<span className="flex flex-col gap-3.5">
@@ -73,31 +148,28 @@ const SingleNotice = ( { variant = 'info', message, title, actions = [] } ) => {
 						<span key={ index }>
 							{ ' ' }
 							<Button
-								onClick={ () => {
-									if ( action.url ) {
-										if ( action.target === '_blank' ) {
-											window.open(
-												action.url,
-												'_blank',
-												'noopener,noreferrer'
-											);
-										} else {
-											window.location.href = action.url;
-										}
-									}
-									if ( action.onClick ) {
-										action.onClick();
-									}
-								} }
+								onClick={ () => runAction( action ) }
+								disabled={ status.busy }
+								aria-busy={ status.busy }
 								variant="link"
 								size="xs"
 								className="inline-flex text-link-primary p-0 [&>span]:p-0"
 							>
-								{ action.label }
+								{ status.busy && action.action
+									? __( 'Working…', 'sureforms' )
+									: action.label }
 							</Button>
 						</span>
 					) ) }
 			</span>
+			<span role="status" aria-live="polite" className="sr-only">
+				{ status.busy ? __( 'Working\u2026', 'sureforms' ) : '' }
+			</span>
+			{ status.error && (
+				<span role="alert" className="text-text-error">
+					{ status.error }
+				</span>
+			) }
 		</span>
 	);
 

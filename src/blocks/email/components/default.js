@@ -48,6 +48,7 @@ export const EmailComponent = ( { attributes, blockID, setAttributes } ) => {
 						className={ `srfm-input-common srfm-input-${ slug }` }
 						placeholder={ placeholder }
 						required={ required }
+						readOnly={ true }
 					/>
 				</div>
 				<div className="srfm-error-wrap"></div>
@@ -80,6 +81,7 @@ export const EmailComponent = ( { attributes, blockID, setAttributes } ) => {
 							className={ `srfm-input-common srfm-${ slug }-email-confirm` }
 							placeholder={ placeholder }
 							required={ required }
+							readOnly={ true }
 						/>
 					</div>
 					<div className="srfm-error-wrap"></div>

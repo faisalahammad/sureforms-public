@@ -2,9 +2,9 @@
 Contributors: brainstormforce
 Tags: forms, ai forms, contact form, form builder, payment form
 Requires at least: 6.4
-Tested up to: 7.0.2
+Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 2.12.3
+Stable tag: 2.12.6
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -426,26 +426,17 @@ Visit the [SureForms features page](https://sureforms.com/features/?utm_source=w
 You can report security issues through our [Bug Bounty Program](https://brainstormforce.com/bug-bounty-program/). We collaborate with Patchstack to validate, triage, and handle security reports.
 
 == Changelog ==
-= 2.12.3 - 5th August 2026 =
-* New: Added an "Entries" shortcut in the Instant Form admin bar to open a form's entries in one click.
-* Improvement: Enhanced WPML compatibility. [https://wpml.org/plugin/sureforms/](https://wpml.org/plugin/sureforms/)
-* Improvement: Hardened security across entries, form submissions, and payments.
-* Fix: Cloudflare Turnstile no longer shows a warning on WordPress 7.0.
-* Fix: Enhanced entries search - includes submitted data too.
-* Fix: Fixed a failed database update that could stop forms from accepting submissions.
-* Fix: Forms with default styles disabled no longer break the page — previously this aborted setup of every later form on the same page.
-* Fix: Payment History styles load only on required pages.
-* Fix: Removed the entries "Language" column. Sorting or filtering entries by language is no longer available, including via the entries API.
-* Fix: The number field no longer looks misaligned when "Use label as placeholder" is on.
-= 2.12.2 - 20th July 2026 =
-* New: Added a Payment History widget for Elementor and Bricks.
-* Fix: Custom CSS now applies correctly on the single form view.
-= 2.12.1 - 8th July 2026 =
-* New: Added an AI-powered quick draft flow on the dashboard to generate forms faster, with built-in usage tracking.
-* Improvement: Email fields now enforce standard RFC 5321 length limits (a 64-character local part and 255-character domain) to prevent oversized submissions, with a filter to customize the limits.
-* Fix: Reset form option not working for some fields.
-* Fix: Resolved a Stripe one-time payment error that could cause card payments to fail with an HTTP 400 response.
-* Fix: Restored bullet point visibility in the rich text admin editor so formatted lists display correctly.
+= 2.12.6 - 2nd September 2026 =
+* New: Added an Enable Logs option that records form submission failures to a downloadable file, making it easier to diagnose issues on a live site.
+* New: Added Views and Conversion Rate columns to the Forms list, so you can see how each form is performing at a glance.
+* New: SureForms now detects a missing entries database table and offers a one-click repair, so submissions start saving again without manual database work.
+* Fix: The Edit Form button no longer overlaps form fields on the front end.
+* Fix: This update addressed a security bug. Props to Patchstack for reporting it responsibly to our team.
+= 2.12.5 - 25th August 2026 =
+* Fix: Form submissions now go through reliably, even on sites where a performance plugin combines or defers JavaScript.
+= 2.12.4 - 19th August 2026 =
+* Improvement: Email notification images are now saved to the Media Library instead of being embedded as base64, improving email deliverability and reducing message size.
+* Fix: Compatibility with WordPress 7.1.
 The full changelog is available [here](https://sureforms.com/whats-new/?utm_source=wordpress.org&utm_medium=whats_new).
 
 == Upgrade Notice ==

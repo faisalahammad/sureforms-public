@@ -150,7 +150,7 @@ const Sidebar = () => {
 														width="24"
 														height="24"
 														aria-hidden="true"
-														fill="#fff"
+														fill="currentColor"
 														focusable="false"
 													>
 														<path d="M18 11.2h-5.2V6h-1.6v5.2H6v1.6h5.2V18h1.6v-5.2H18z"></path>
@@ -217,7 +217,7 @@ const Sidebar = () => {
 														width="24"
 														height="24"
 														aria-hidden="true"
-														fill="#fff"
+														fill="currentColor"
 														focusable="false"
 													>
 														<path d="m19 7-3-3-8.5 8.5-1 4 4-1L19 7Zm-7 11.5H5V20h7v-1.5Z"></path>

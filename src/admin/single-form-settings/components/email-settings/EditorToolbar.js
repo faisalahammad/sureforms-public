@@ -1,6 +1,8 @@
 import { __, _x } from '@wordpress/i18n';
 import parse from 'html-react-parser';
 import svgIcons from '@Svg/svgs.json';
+import apiFetch from '@wordpress/api-fetch';
+import { notify } from '@Utils/notify';
 
 // Undo and redo functions for Custom Toolbar
 function undoChange() {
@@ -10,33 +12,70 @@ function redoChange() {
 	this.quill.history.redo();
 }
 
-// Custom image handler to add attributes to the image tag.
+// Custom image handler — uploads the file to the WordPress Media Library
+// and inserts the returned URL. This avoids base64 data URLs which are
+// stripped by wp_kses_post() on the PHP save path.
 function imageHandler() {
+	const quill = this.quill;
 	const input = document.createElement( 'input' );
 	input.setAttribute( 'type', 'file' );
 	input.setAttribute( 'accept', 'image/*' );
 	input.click();
 
 	input.onchange = ( e ) => {
-		const file = e.target.files[ 0 ];
-		if ( /^image\//.test( file.type ) ) {
-			const reader = new FileReader();
-			reader.onload = () => {
-				const base64Image = reader.result;
-				const range = this.quill.getSelection();
-				this.quill.insertEmbed( range.index, 'image', {
-					src: base64Image,
-					alt: '',
+		const file = e.target.files?.[ 0 ];
+		if ( ! file ) {
+			return;
+		}
+
+		if ( ! /^image\//.test( file.type ) ) {
+			notify.error( __( 'Please choose an image file.', 'sureforms' ) );
+			return;
+		}
+
+		const formData = new window.FormData();
+		formData.append( 'file', file );
+
+		apiFetch( {
+			path: '/wp/v2/media',
+			method: 'POST',
+			body: formData,
+		} )
+			.then( ( response ) => {
+				const url =
+					response?.source_url ||
+					response?.media_details?.sizes?.full?.source_url;
+				if ( ! url ) {
+					notify.error(
+						__(
+							'The image uploaded but could not be inserted. Please try again.',
+							'sureforms'
+						)
+					);
+					return;
+				}
+				const range = quill.getSelection( true );
+				quill.insertEmbed( range.index, 'image', {
+					src: url,
+					alt: response?.alt_text || '',
 					'aria-hidden': 'true',
 				} );
-			};
-			reader.onerror = () => {
-				console.error( 'Error while reading the file.' );
-			};
-			reader.readAsDataURL( file );
-		} else {
-			console.warn( 'You could only upload images.' );
-		}
+			} )
+			.catch( ( err ) => {
+				// Surface the failure — 413 (post_max_size), 403 (no upload_files)
+				// and network errors all landed here silently, so picking an
+				// oversized photo looked like nothing happened at all. WP sends a
+				// human-readable `message` for REST-level errors; a request that
+				// never reached the API (size cap, connection drop) has none, so
+				// fall back to generic copy rather than printing an object.
+				notify.error(
+					err?.message ||
+						__(
+							'The image could not be uploaded. It may be too large, or you may not have permission to upload files.',
+							'sureforms'
+						)
+				);
+			} );
 	};
 }
 

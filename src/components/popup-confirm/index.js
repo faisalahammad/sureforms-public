@@ -110,6 +110,4 @@ const SRFMConfirmPopup = ( props ) => {
 	);
 };
 
-SRFMConfirmPopup.defaultProps = {};
-
 export default SRFMConfirmPopup;

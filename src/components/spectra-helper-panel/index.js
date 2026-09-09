@@ -10,13 +10,9 @@ const propTypes = {
 	message: PropTypes.string,
 };
 
-const defaultProps = {
-	useLogo: true,
-};
-
 // The SRFM Helper Panel Component.
 const SRFMHelperPanel = ( props ) => {
-	const { useLogo, message } = props;
+	const { useLogo = true, message } = props;
 
 	// Add and remove the CSS on the drop and remove of the component.
 	useLayoutEffect( () => {
@@ -70,4 +66,3 @@ const SRFMHelperPanel = ( props ) => {
 export default SRFMHelperPanel;
 
 SRFMHelperPanel.propTypes = propTypes;
-SRFMHelperPanel.defaultProps = defaultProps;

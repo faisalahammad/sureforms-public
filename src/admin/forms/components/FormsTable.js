@@ -46,6 +46,11 @@ const FormsTable = ( {
 	onDuplicate,
 	onDraft,
 	paginationProps,
+	// Comes from the list payload, not from the page-load localized flag: the
+	// setting can be changed in another tab, and gating on a stale snapshot would
+	// keep rendering columns while every row came back empty — which reads as data
+	// loss rather than as a disabled feature. Defaults to hidden when absent.
+	showViewColumns = false,
 } ) => {
 	// State to track which shortcode was recently copied
 	const [ copiedFormId, setCopiedFormId ] = useState( null );
@@ -178,6 +183,57 @@ const FormsTable = ( {
 				</Button>
 			),
 		},
+		// Views and Conversion Rate only appear once the feature has been switched
+		// on. The flag travels with the rows so the columns and the data they show
+		// are always decided by the same evaluation.
+		...( ! showViewColumns
+			? []
+			: [
+				{
+					label: __( 'Views', 'sureforms' ),
+					key: 'views',
+					sortable: true,
+					headerClassName: 'w-[8%]',
+					render: ( form ) => (
+						<span className="text-sm font-normal text-text-secondary">
+							{ Number( form.views ?? 0 ).toLocaleString() }
+						</span>
+					),
+				},
+				{
+					label: __( 'Conversion Rate', 'sureforms' ),
+					key: 'conversion_rate',
+					sortable: true,
+					headerClassName: 'w-[10%]',
+					render: ( form ) => {
+						// Catches undefined as well as null, so a payload missing the
+						// key renders the dash rather than a fabricated 0% via
+						// Number( undefined ?? 0 ). A real 0 is a measurement and
+						// still renders as 0%.
+						if ( null === ( form.conversion_rate ?? null ) ) {
+							return (
+								<span className="text-sm font-normal text-text-tertiary">
+									<span aria-hidden="true">—</span>
+									<span className="sr-only">
+										{ __(
+											'No conversion data yet',
+											'sureforms'
+										) }
+									</span>
+								</span>
+							);
+						}
+						return (
+							<span className="text-sm font-normal text-text-secondary">
+								{ new Intl.NumberFormat( undefined, {
+									style: 'percent',
+									maximumFractionDigits: 1,
+								} ).format( form.conversion_rate / 100 ) }
+							</span>
+						);
+					},
+				},
+			  ] ),
 		{
 			label: __( 'Date & Time', 'sureforms' ),
 			key: 'date',

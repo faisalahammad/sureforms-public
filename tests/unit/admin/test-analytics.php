@@ -706,6 +706,88 @@ class Test_Analytics extends TestCase {
 		$this->assertSame( $mcp_count_before, $mcp_count_after, 'MCP events should not be duplicated on second instantiation.' );
 	}
 
+	// ─── plugin_activated referer race (shutdown deferral) ────────
+
+	/**
+	 * Test track_plugin_activated_event is deferred to 'shutdown' rather
+	 * than firing immediately when Analytics boots.
+	 *
+	 * @return void
+	 */
+	public function test_track_plugin_activated_event_defers_to_shutdown() {
+		delete_option( 'bsf_product_referers' );
+
+		new Analytics();
+
+		$this->assertFalse( Analytics::events()->is_tracked( 'plugin_activated' ), 'plugin_activated should not be tracked until shutdown fires.' );
+
+		do_action( 'shutdown' );
+
+		$this->assertTrue( Analytics::events()->is_tracked( 'plugin_activated' ), 'plugin_activated should be tracked once shutdown fires.' );
+	}
+
+	/**
+	 * Regression test: a referrer plugin/theme that writes bsf_product_referers
+	 * AFTER SureForms has already booted (but before the request ends) must
+	 * still be picked up as the source, because the read is deferred to
+	 * 'shutdown' rather than happening synchronously at boot.
+	 *
+	 * @return void
+	 */
+	public function test_track_plugin_activated_event_reads_referer_set_after_boot() {
+		delete_option( 'bsf_product_referers' );
+
+		// SureForms boots — e.g. mid-request, while another plugin is
+		// silently activating it via activate_plugin().
+		new Analytics();
+
+		// The referring plugin writes its stamp only now, after SureForms
+		// has already booted, but still within the same request.
+		update_option( 'bsf_product_referers', [ 'sureforms' => 'astra' ] );
+
+		// End of request.
+		do_action( 'shutdown' );
+
+		$pending = Helper::get_srfm_option( 'usage_events_pending', [] );
+		$event   = current(
+			array_filter(
+				$pending,
+				static function ( $e ) {
+					return 'plugin_activated' === $e['event_name'];
+				}
+			)
+		);
+
+		$this->assertNotFalse( $event, 'plugin_activated event should have been queued.' );
+		$this->assertSame( 'astra', $event['properties']['source'] );
+	}
+
+	/**
+	 * Test track_plugin_activated_event falls back to 'self' when no
+	 * referrer was ever recorded.
+	 *
+	 * @return void
+	 */
+	public function test_track_plugin_activated_event_defaults_to_self_when_no_referer() {
+		delete_option( 'bsf_product_referers' );
+
+		new Analytics();
+		do_action( 'shutdown' );
+
+		$pending = Helper::get_srfm_option( 'usage_events_pending', [] );
+		$event   = current(
+			array_filter(
+				$pending,
+				static function ( $e ) {
+					return 'plugin_activated' === $e['event_name'];
+				}
+			)
+		);
+
+		$this->assertNotFalse( $event, 'plugin_activated event should have been queued.' );
+		$this->assertSame( 'self', $event['properties']['source'] );
+	}
+
 	/**
 	 * Test track_first_form_published tracks event when a form transitions to publish.
 	 *
@@ -887,7 +969,124 @@ class Test_Analytics extends TestCase {
 		$this->assertSame( 0, $analytics->forms_using_custom_css() );
 	}
 
+	// ─── Form views & conversion analytics ───────────────────────
+
+	/**
+	 * `total_form_views` sums the view meta across published forms only.
+	 *
+	 * Trashed and draft forms are excluded deliberately: their views would inflate
+	 * the numerator while `total_entries` and `forms_with_views` no longer count
+	 * them, which is how a warehouse ends up with conversion rates above 100%.
+	 */
+	public function test_total_form_views() {
+		$analytics = Analytics::get_instance();
+
+		$this->assertSame( 0, $analytics->total_form_views(), 'No view meta should sum to zero, not null.' );
+
+		$form_a = $this->create_form_with_views( 7 );
+		$form_b = $this->create_form_with_views( 5 );
+		$draft  = $this->create_form_with_views( 100, 'draft' );
+
+		$this->assertSame( 12, $analytics->total_form_views(), 'Published forms should be summed; the draft must not count.' );
+
+		// Read straight through — no cache to go stale between analytics passes.
+		update_post_meta( $form_a, \SRFM\Inc\Form_Views::META_KEY, 1000 );
+		$this->assertSame( 1005, $analytics->total_form_views(), 'A later change should be visible immediately.' );
+
+		wp_delete_post( $form_a, true );
+		wp_delete_post( $form_b, true );
+		wp_delete_post( $draft, true );
+	}
+
+	/**
+	 * `forms_with_views` counts forms viewed at least once, not forms that exist.
+	 *
+	 * A form sitting at zero views must not count, otherwise the metric cannot
+	 * distinguish "the beacon is firing" from "forms exist but are never embedded",
+	 * which is the whole reason it sits alongside the raw total.
+	 */
+	public function test_forms_with_views() {
+		$analytics = Analytics::get_instance();
+
+		$this->assertSame( 0, $analytics->forms_with_views() );
+
+		$viewed = $this->create_form_with_views( 3 );
+		$zero   = $this->create_form_with_views( 0 );
+		$draft  = $this->create_form_with_views( 9, 'draft' );
+
+		$this->assertSame( 1, $analytics->forms_with_views(), 'Only the published form with a non-zero count should be included.' );
+
+		wp_delete_post( $viewed, true );
+		wp_delete_post( $zero, true );
+		wp_delete_post( $draft, true );
+	}
+
+	/**
+	 * The columns toggle reported to analytics must match what the Forms list does.
+	 *
+	 * The value is delegated to Form_Views rather than read from the option array,
+	 * so the two can never drift — which matters precisely because the default has
+	 * changed once already. This asserts the delegation, not a hardcoded default:
+	 * the absent-key case is compared against `is_tracking_enabled()` itself.
+	 */
+	public function test_global_settings_data() {
+		$analytics = Analytics::get_instance();
+		$original  = get_option( 'srfm_general_settings_options' );
+
+		// Never saved → opt-in, so reported as disabled, matching is_tracking_enabled().
+		delete_option( 'srfm_general_settings_options' );
+		$data = $analytics->global_settings_data();
+		$this->assertFalse( $data['boolean_values']['form_views_columns_enabled'], 'An absent setting must report as disabled.' );
+		$this->assertSame(
+			\SRFM\Inc\Form_Views::get_instance()->is_tracking_enabled(),
+			$data['boolean_values']['form_views_columns_enabled'],
+			'Analytics must not diverge from the Forms list.'
+		);
+
+		// Explicitly off.
+		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => false ] );
+		$data = $analytics->global_settings_data();
+		$this->assertFalse( $data['boolean_values']['form_views_columns_enabled'] );
+
+		// Explicitly on.
+		update_option( 'srfm_general_settings_options', [ 'srfm_form_views_tracking' => true ] );
+		$data = $analytics->global_settings_data();
+		$this->assertTrue( $data['boolean_values']['form_views_columns_enabled'] );
+
+		// Enabling above fires maybe_start_tracking(), which opens the tracking
+		// window. Left behind, that leaks into any sibling test that depends on the
+		// never-enabled state and makes the failure order-dependent.
+		delete_option( \SRFM\Inc\Form_Views::TRACKING_STARTED_OPTION );
+
+		if ( false === $original ) {
+			delete_option( 'srfm_general_settings_options' );
+		} else {
+			update_option( 'srfm_general_settings_options', $original );
+		}
+	}
+
 	// ─── Helpers ─────────────────────────────────────────────────
+
+	/**
+	 * Create a published form carrying the given view count.
+	 *
+	 * @param int    $views       View count to store.
+	 * @param string $post_status Post status. Default 'publish'.
+	 * @return int Post ID.
+	 */
+	private function create_form_with_views( $views, $post_status = 'publish' ) {
+		$form_id = wp_insert_post(
+			[
+				'post_title'  => 'Views Analytics Form',
+				'post_type'   => SRFM_FORMS_POST_TYPE,
+				'post_status' => $post_status,
+			]
+		);
+
+		update_post_meta( $form_id, \SRFM\Inc\Form_Views::META_KEY, $views );
+
+		return (int) $form_id;
+	}
 
 	/**
 	 * Create a test post with the given content.
@@ -1021,5 +1220,77 @@ class Test_Analytics extends TestCase {
 		$post = new \WP_Post( (object) $args );
 
 		return $post;
+	}
+
+	// ---------------------------------------------------------------
+	// Missing entries table
+	// ---------------------------------------------------------------
+
+	/**
+	 * The daily payload must carry the missing-table state. The impression event
+	 * fires once per site, so without this KPI a site that stays broken for months
+	 * looks identical to one that fixed itself the same day.
+	 */
+	public function test_analytics_payload_reports_the_entries_table_state() {
+		$data = Analytics::get_instance()->add_srfm_analytics_data( [] );
+
+		$this->assertArrayHasKey(
+			'db_entries_table_missing',
+			$data['plugin_data']['sureforms']['boolean_values']
+		);
+		$this->assertFalse( $data['plugin_data']['sureforms']['boolean_values']['db_entries_table_missing'] );
+	}
+
+	/**
+	 * Every query against the entries table errors while it is missing. Before this
+	 * guard the daily send tripped over get_total_entries_by_status() on exactly the
+	 * sites whose breakage we most need reported.
+	 */
+	public function test_analytics_does_not_query_a_missing_entries_table() {
+		global $wpdb;
+
+		$table = \SRFM\Inc\Database\Tables\Entries::get_instance()->get_tablename();
+
+		$versions            = (array) get_option( 'srfm_database_table_versions', [] );
+		$versions['entries'] = 2;
+		update_option( 'srfm_database_table_versions', $versions );
+
+		$wpdb->query( "CREATE TABLE `{$table}_srfmbak` LIKE `{$table}`" ); // phpcs:ignore -- Preserving the schema across the drop under test.
+		$wpdb->query( "DROP TABLE `{$table}`" ); // phpcs:ignore -- Reproducing the dropped-table state under test.
+		$this->reset_table_cache();
+
+		// Record every query the payload runs. Asserting on $wpdb->last_error would
+		// pass by accident, because a later successful query clears it.
+		$seen = [];
+		$spy  = static function ( $query ) use ( &$seen, $table ) {
+			if ( false !== strpos( (string) $query, $table ) ) {
+				$seen[] = $query;
+			}
+			return $query;
+		};
+
+		add_filter( 'query', $spy );
+		$data = Analytics::get_instance()->add_srfm_analytics_data( [] );
+		remove_filter( 'query', $spy );
+
+		$wpdb->query( "RENAME TABLE `{$table}_srfmbak` TO `{$table}`" ); // phpcs:ignore -- Restoring the table this test dropped.
+		$this->reset_table_cache();
+
+		$this->assertSame( [], $seen, 'The analytics payload must not query a missing entries table.' );
+		$this->assertSame( 0, $data['plugin_data']['sureforms']['numeric_values']['total_entries'] );
+		$this->assertTrue( $data['plugin_data']['sureforms']['boolean_values']['db_entries_table_missing'] );
+	}
+
+	/**
+	 * Clear the per-request memo and the transient behind is_entries_table_missing().
+	 *
+	 * @return void
+	 */
+	private function reset_table_cache() {
+		delete_transient( \SRFM\Inc\Database\Register::ENTRIES_TABLE_CHECK_TRANSIENT );
+
+		$memo = new ReflectionProperty( \SRFM\Inc\Database\Register::class, 'entries_table_present' );
+		$memo->setAccessible( true );
+		$memo->setValue( null, null );
 	}
 }

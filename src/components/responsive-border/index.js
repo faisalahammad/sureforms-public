@@ -31,7 +31,8 @@ const defaultProps = {
 	borderHoverColorLabel: __( 'Hover Color', 'sureforms' ),
 };
 
-const ResponsiveBorder = ( props ) => {
+const ResponsiveBorder = ( rawProps ) => {
+	const props = { ...defaultProps, ...rawProps };
 	const [ panelNameForHook, setPanelNameForHook ] = useState( null );
 	const panelRef = useRef( null );
 
@@ -380,4 +381,3 @@ const ResponsiveBorder = ( props ) => {
 export default ResponsiveBorder;
 
 ResponsiveBorder.propTypes = propTypes;
-ResponsiveBorder.defaultProps = defaultProps;

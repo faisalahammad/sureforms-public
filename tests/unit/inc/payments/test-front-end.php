@@ -216,6 +216,31 @@ class Test_Front_End_Payments extends TestCase {
 	}
 
 	/**
+	 * A payment field whose payment was not verified this request must not survive
+	 * as a payment-record id.
+	 *
+	 * A bare integer skips gateway verification (json_decode() is not an array), so
+	 * without deny-by-default it passed straight through and {form-payment} resolved
+	 * it against an arbitrary payment row (IDOR). See #3090.
+	 */
+	public function test_validate_payment_fields_drops_unverified_payment_id() {
+		$field     = 'srfm-payment-blk1-lbl-0-donation';
+		$form_data = [
+			// form-id 0: no payment-enabled form, so the required-payment path does not short-circuit.
+			'form-id' => 0,
+			$field    => '1', // attacker-chosen payment row id, sent as a bare integer.
+		];
+
+		$result = $this->front_end->validate_payment_fields( $form_data );
+
+		$this->assertSame(
+			'',
+			$result[ $field ],
+			'An unverified payment field must be cleared, not passed through as a database id.'
+		);
+	}
+
+	/**
 	 * Build a published form carrying one payment block.
 	 *
 	 * @param array<string,mixed> $attrs Payment block attributes to merge over the defaults.

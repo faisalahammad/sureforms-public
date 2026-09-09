@@ -4,7 +4,7 @@
  * Mirrors the pro QuizEntriesListPlaceHolder layout with the shared
  * dashboard Header so the page feels like a first-class admin screen.
  *
- * @since x.x.x
+ * @since 2.7.0
  */
 
 import { createRoot } from '@wordpress/element';

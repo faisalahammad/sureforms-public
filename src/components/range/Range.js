@@ -23,7 +23,31 @@ import SRFMHelpText from '@Components/help-text';
 
 const isNumberControlSupported = !! NumberControl;
 
-const Range = ( props ) => {
+const RANGE_DEFAULTS = {
+	label: __( 'Margin', 'sureforms' ),
+	className: '',
+	allowReset: true,
+	withInputField: true,
+	isShiftStepEnabled: true,
+	max: Infinity,
+	min: -Infinity,
+	resetFallbackValue: '',
+	placeholder: null,
+	unit: [ 'px', 'em' ],
+	displayUnit: true,
+	responsive: false,
+	help: false,
+	marks: false,
+	isFormSpecific: false,
+};
+
+// This component reads `props.*` throughout and forwards the whole object, so
+// the defaults-merge idiom is kept deliberately rather than destructuring ~30
+// references. No call site passes an explicit `undefined` for a defaulted key
+// (verified across responsive-slider and range-typography), so the
+// spread-vs-destructure difference for `undefined` is not reachable here.
+const Range = ( rawProps ) => {
+	const props = { ...RANGE_DEFAULTS, ...rawProps };
 	const [ panelNameForHook, setPanelNameForHook ] = useState( null );
 	const panelRef = useRef( null );
 
@@ -241,24 +265,6 @@ const Range = ( props ) => {
 			{ controlAfterDomElement }
 		</div>
 	);
-};
-
-Range.defaultProps = {
-	label: __( 'Margin', 'sureforms' ),
-	className: '',
-	allowReset: true,
-	withInputField: true,
-	isShiftStepEnabled: true,
-	max: Infinity,
-	min: -Infinity,
-	resetFallbackValue: '',
-	placeholder: null,
-	unit: [ 'px', 'em' ],
-	displayUnit: true,
-	responsive: false,
-	help: false,
-	marks: false,
-	isFormSpecific: false,
 };
 
 export default Range;

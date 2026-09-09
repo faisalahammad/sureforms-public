@@ -34,7 +34,7 @@ import createDOMPurify from 'dompurify';
  * `style="color:…"`, `text-align` and `direction`, so `style` must be filtered
  * per-property here rather than forbidden outright.
  *
- * @since x.x.x
+ * @since 2.12.3
  */
 export const RICH_TEXT_SANITIZE_CONFIG = {
 	USE_PROFILES: { html: true },
@@ -118,7 +118,7 @@ export const RICH_TEXT_SANITIZE_CONFIG = {
  * below pin PROPERTY filtering only. Widening this list is therefore a change
  * the test suite cannot catch; review it by hand.
  *
- * @since x.x.x
+ * @since 2.12.3
  */
 const ALLOWED_CSS_PROPERTIES = [
 	'color',
@@ -142,7 +142,7 @@ const ALLOWED_CSS_PROPERTIES = [
  * never by re-parsing the serialized output, which is the mistake that caused
  * CVE-2026-18406 in the first place.
  *
- * @since x.x.x
+ * @since 2.12.3
  *
  * @param {Element} node Node being sanitized.
  * @return {void}
@@ -228,7 +228,7 @@ const HTML_TAG_PATTERN = /<[a-z!/][^<>]*>/i;
  * the HTML path is sanitized regardless. Do not relax the sanitizer policy on
  * the grounds that "only real textareas reach it".
  *
- * @since x.x.x
+ * @since 2.12.3
  *
  * @param {Object} field Field object with `block_name` and `value`.
  * @return {boolean} True when the value must be sanitized and inserted as HTML.
@@ -260,7 +260,7 @@ export const isRichTextField = ( field ) =>
  * a different policy should change RICH_TEXT_SANITIZE_CONFIG and the tests that
  * pin it.
  *
- * @since x.x.x
+ * @since 2.12.3
  *
  * @param {string} value Raw value.
  * @return {string} Sanitized HTML, safe for direct DOM insertion only.
@@ -287,7 +287,7 @@ export const sanitizeEntryValue = ( value ) =>
  * it renders as a default-styled link that opens in the same tab. Restoring
  * those needs the PHP filter to return structured data instead of markup.
  *
- * @since x.x.x
+ * @since 2.12.3
  *
  * @param {Object} field Field object with `value`.
  * @return {string} Sanitized HTML, safe for direct DOM insertion only.
@@ -312,7 +312,7 @@ export const sanitizeFieldValue = ( field ) =>
  *
  * Long term Pro should spread `...field` in its formatter and this can go away.
  *
- * @since x.x.x
+ * @since 2.12.3
  *
  * @param {Object} field     The original field, which still has `block_name`.
  * @param {*}      formatted Whatever the Pro filter returned.
@@ -352,7 +352,7 @@ export const withBlockName = ( field, formatted ) =>
  * Non-strings return '' rather than rendering `"null"` or a JSON blob whose `<`
  * characters would be parsed as markup.
  *
- * @since x.x.x
+ * @since 2.12.3
  *
  * @param {*} message Raw log message from the API.
  * @return {string} Sanitized HTML, safe for direct DOM insertion only.

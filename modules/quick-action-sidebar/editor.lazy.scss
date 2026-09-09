@@ -473,3 +473,15 @@ div#widgets-editor {
 .srfm-ee-quick-access__sidebar--prevent-editor-interactions {
 	pointer-events: none;
 }
+
+/**
+ * WP 7.1 Distraction Free mode.
+ *
+ * The quick-action sidebar is a fixed element inserted into
+ * `.interface-interface-skeleton__body`, so core's distraction-free chrome
+ * hiding never reaches it and it lingers as a floating artifact. Hide it while
+ * distraction-free is active; toggling the mode off restores it.
+ */
+.is-distraction-free .srfm-ee-quick-access-container {
+	display: none;
+}

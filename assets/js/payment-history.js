@@ -5,7 +5,7 @@
  * and multi-step subscription cancellation flow.
  *
  * @package
- * @since x.x.x
+ * @since 2.8.0
  */
 
 ( function () {

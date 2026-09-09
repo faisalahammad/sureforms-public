@@ -3063,4 +3063,189 @@ class Test_Helper extends TestCase {
 		$this->assertStringContainsString( 'class="srfm-icon"', $unknown );
 		$this->assertStringNotContainsString( '<svg', $unknown );
 	}
+
+	/**
+	 * The submitting user must survive REST's nonce-less de-authentication.
+	 *
+	 * Public form endpoints authenticate with the HMAC Submit_Token rather than a
+	 * nonce, so `rest_cookie_check_errors()` calls `wp_set_current_user( 0 )` before
+	 * dispatch. `get_current_user_id()` therefore returns 0 mid-submission even for a
+	 * signed-in visitor, which silently dropped entry attribution and blanked every
+	 * `{user_*}` smart tag. This asserts the cookie fallback recovers the identity,
+	 * and — just as importantly — that it cannot be spoofed.
+	 */
+	public function test_get_submitting_user_id() {
+		$user_id = wp_insert_user(
+			[
+				'user_login' => 'srfm_attr_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_attr_' . wp_rand() . '@example.com',
+				'role'       => 'subscriber',
+			]
+		);
+		$user_id = is_wp_error( $user_id ) ? 0 : (int) $user_id;
+		$this->assertGreaterThan( 0, $user_id, 'Test user could not be created.' );
+
+		$original_cookie = $_COOKIE[ LOGGED_IN_COOKIE ] ?? null;
+
+		// Normal (non-REST) context: the current user is authoritative.
+		wp_set_current_user( $user_id );
+		unset( $_COOKIE[ LOGGED_IN_COOKIE ] );
+		$this->assertSame( $user_id, Helper::get_submitting_user_id(), 'A set current user should be returned as-is.' );
+
+		// Genuinely anonymous: no current user, no cookie.
+		wp_set_current_user( 0 );
+		$this->assertSame( 0, Helper::get_submitting_user_id(), 'An anonymous submitter must resolve to 0.' );
+
+		// The real case: core reset the current user to 0, but the browser still sent
+		// a valid logged_in cookie.
+		$expiration = time() + DAY_IN_SECONDS;
+		$manager    = \WP_Session_Tokens::get_instance( $user_id );
+		$cookie     = wp_generate_auth_cookie( $user_id, $expiration, 'logged_in', $manager->create( $expiration ) );
+
+		$_COOKIE[ LOGGED_IN_COOKIE ] = $cookie;
+		wp_set_current_user( 0 );
+		$this->assertSame( $user_id, Helper::get_submitting_user_id(), 'A valid logged_in cookie must recover the user.' );
+
+		// Not spoofable: the cookie's HMAC is verified, so a tampered value is nobody.
+		$_COOKIE[ LOGGED_IN_COOKIE ] = $cookie . 'tampered';
+		$this->assertSame( 0, Helper::get_submitting_user_id(), 'A tampered cookie must not authenticate anyone.' );
+
+		$_COOKIE[ LOGGED_IN_COOKIE ] = 'not-a-cookie-at-all';
+		$this->assertSame( 0, Helper::get_submitting_user_id(), 'A malformed cookie must resolve to 0, not error.' );
+
+		if ( null === $original_cookie ) {
+			unset( $_COOKIE[ LOGGED_IN_COOKIE ] );
+		} else {
+			$_COOKIE[ LOGGED_IN_COOKIE ] = $original_cookie;
+		}
+		wp_set_current_user( 0 );
+		wp_delete_user( $user_id );
+	}
+
+	/**
+	 * The shared REST permission gate must deny by default.
+	 *
+	 * This guards a number of admin REST routes, and it had no test — it surfaced
+	 * only because check-test-coverage attributes changed lines to the preceding
+	 * function, so adding a method after it flagged the gap. Worth covering on its
+	 * own merits: it delegates to current_user_can(), whose default capability is
+	 * manage_options, so the failure mode to protect against is it returning true
+	 * for someone who should not pass.
+	 */
+	public function test_get_items_permissions_check() {
+		$original = get_current_user_id();
+
+		// Anonymous must be refused, as a WP_Error carrying a 401/403 status.
+		wp_set_current_user( 0 );
+		$result = Helper::get_items_permissions_check();
+		$this->assertInstanceOf( 'WP_Error', $result, 'An anonymous request must be refused.' );
+		$this->assertSame( 'rest_cannot_view', $result->get_error_code() );
+		$this->assertContains(
+			$result->get_error_data()['status'] ?? 0,
+			[ 401, 403 ],
+			'The error must carry an authorization status code.'
+		);
+
+		// A subscriber lacks manage_options, so must also be refused.
+		$subscriber = wp_insert_user(
+			[
+				'user_login' => 'srfm_perm_sub_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_perm_sub_' . wp_rand() . '@example.com',
+				'role'       => 'subscriber',
+			]
+		);
+		if ( ! is_wp_error( $subscriber ) ) {
+			wp_set_current_user( (int) $subscriber );
+			$this->assertInstanceOf( 'WP_Error', Helper::get_items_permissions_check(), 'A subscriber must be refused.' );
+		}
+
+		// An administrator passes.
+		$admin = wp_insert_user(
+			[
+				'user_login' => 'srfm_perm_admin_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_perm_admin_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		if ( ! is_wp_error( $admin ) ) {
+			wp_set_current_user( (int) $admin );
+			$this->assertTrue( Helper::get_items_permissions_check(), 'An administrator must be allowed.' );
+			wp_delete_user( (int) $admin );
+		}
+
+		if ( ! is_wp_error( $subscriber ) ) {
+			wp_delete_user( (int) $subscriber );
+		}
+		wp_set_current_user( $original );
+	}
+
+	// ---------------------------------------------------------------
+	// Caching plugin detection
+	// ---------------------------------------------------------------
+
+	/**
+	 * Every plugin in the list must be detected, and its display name returned.
+	 *
+	 * A typo in any path means that plugin's users silently never see the setup
+	 * advice, which is invisible without checking each one.
+	 */
+	public function test_get_active_caching_plugin() {
+		$expected = [
+			'litespeed-cache/litespeed-cache.php'                   => 'LiteSpeed Cache',
+			'wp-rocket/wp-rocket.php'                               => 'WP Rocket',
+			'w3-total-cache/w3-total-cache.php'                     => 'W3 Total Cache',
+			'wp-super-cache/wp-cache.php'                           => 'WP Super Cache',
+			'wp-fastest-cache/wpFastestCache.php'                   => 'WP Fastest Cache',
+			'autoptimize/autoptimize.php'                           => 'Autoptimize',
+			'sg-cachepress/sg-cachepress.php'                       => 'SiteGround Optimizer',
+			'wp-optimize/wp-optimize.php'                           => 'WP-Optimize',
+			'cache-enabler/cache-enabler.php'                       => 'Cache Enabler',
+			'comet-cache/comet-cache.php'                           => 'Comet Cache',
+			'hummingbird-performance/wp-hummingbird.php'            => 'Hummingbird',
+			'breeze/breeze.php'                                     => 'Breeze',
+			'nitropack/main.php'                                    => 'NitroPack',
+			'swift-performance-lite/performance.php'                => 'Swift Performance Lite',
+			'wp-cloudflare-page-cache/wp-cloudflare-page-cache.php' => 'Super Page Cache',
+			'flying-press/flying-press.php'                         => 'FlyingPress',
+			'redis-cache/redis-cache.php'                           => 'Redis Object Cache',
+			'powered-cache/powered-cache.php'                       => 'Powered Cache',
+			'docket-cache/docket-cache.php'                          => 'Docket Cache',
+			'seraphinite-accelerator/plugin_root.php'               => 'Seraphinite Accelerator',
+		];
+
+		$this->assertCount( 20, $expected, 'The list is documented as the top 20.' );
+
+		foreach ( $expected as $path => $name ) {
+			$filter = static function () use ( $path ) {
+				return [ $path ];
+			};
+
+			add_filter( 'pre_option_active_plugins', $filter );
+			$detected = Helper::get_active_caching_plugin();
+			remove_filter( 'pre_option_active_plugins', $filter );
+
+			$this->assertSame( $name, $detected, $path . ' must be detected.' );
+		}
+	}
+
+	/**
+	 * A site with no caching plugin must produce nothing. Caching plugins are
+	 * common but far from universal, and a false positive puts a permanent
+	 * "your forms may be broken" card on a site that is fine.
+	 */
+	public function test_get_active_caching_plugin_returns_empty_without_one() {
+		$filter = static function () {
+			return [ 'akismet/akismet.php', 'hello.php' ];
+		};
+
+		add_filter( 'pre_option_active_plugins', $filter );
+		$detected = Helper::get_active_caching_plugin();
+		remove_filter( 'pre_option_active_plugins', $filter );
+
+		$this->assertSame( '', $detected );
+	}
+
 }

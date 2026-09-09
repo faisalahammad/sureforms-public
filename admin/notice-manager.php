@@ -58,7 +58,10 @@ class Notice_Manager {
 	 *
 	 *     @type string   $id          Required. Unique notice identifier.
 	 *     @type string   $variant     Notice type: 'error', 'warning', 'info', 'success'. Default 'info'.
-	 *     @type string   $message     Required. Notice message (can contain HTML).
+	 *     @type string   $message     Required. Notice message. Plain text only —
+	 *                                 AdminNotice.js renders it as a React child, so any
+	 *                                 markup shows up as literal characters. Links belong
+	 *                                 in `actions`.
 	 *     @type string   $title       Optional. Notice title.
 	 *     @type array    $actions     Optional. Array of action button configurations.
 	 *     @type bool     $dismissible Optional. Whether notice can be dismissed. Default true.
@@ -73,6 +76,12 @@ class Notice_Manager {
 	 *     @type string $variant  Optional. Button variant: 'primary', 'secondary', 'link'. Default 'primary'.
 	 *     @type string $size     Optional. Button size: 'sm', 'md', 'lg'. Default 'sm'.
 	 *     @type string $className Optional. Additional CSS classes.
+	 *     @type string $action   Optional. Opaque identifier that AdminNotice.js resolves
+	 *                            to a local handler, for an action that must call the
+	 *                            server. Deliberately NOT a URL, endpoint or HTTP method:
+	 *                            the server never tells the browser which address to call.
+	 *                            Pair it with `url` so the action still does something if
+	 *                            no handler is registered for the identifier.
 	 * }
 	 *
 	 * @return void
@@ -187,7 +196,7 @@ class Notice_Manager {
 	 *
 	 * @param string $id      Unique notice identifier.
 	 * @param string $variant Notice type: 'error', 'warning', 'info', 'success'.
-	 * @param string $message Notice message (HTML allowed).
+	 * @param string $message Notice message. Plain text only; see register_notice().
 	 * @param array  $actions Optional. Array of action button configurations.
 	 * @param array  $pages   Optional. Page slugs where notice should appear. Default ['all'].
 	 * @return void

@@ -3,7 +3,7 @@ if ( googlefonts === undefined ) {
 }
 import PropTypes from 'prop-types';
 import WebFont from 'webfontloader';
-import { useState, useEffect } from '@wordpress/element';
+import { useState, useEffect, useMemo } from '@wordpress/element';
 const statuses = {
 	inactive: 'inactive',
 	active: 'active',
@@ -11,7 +11,20 @@ const statuses = {
 };
 const noop = () => {};
 
-const WebfontLoader = ( props ) => {
+const WEBFONT_LOADER_DEFAULTS = {
+	onStatus: noop,
+};
+
+const WebfontLoader = ( rawProps ) => {
+	// Memoize on rawProps identity so `props` is stable across this component's
+	// own re-renders. The [ props ] effect below calls loadFonts(), whose WebFont
+	// callbacks setValue({ status }) and re-render; a fresh props object each
+	// render would make that effect re-fire every time, an unbounded
+	// render→loadFonts→setValue loop in the same-origin iframe path.
+	const props = useMemo(
+		() => ( { ...WEBFONT_LOADER_DEFAULTS, ...rawProps } ),
+		[ rawProps ]
+	);
 	const [ value, setValue ] = useState( [] );
 
 	const status = undefined;
@@ -96,11 +109,9 @@ const WebfontLoader = ( props ) => {
 WebfontLoader.propTypes = {
 	config: PropTypes.object?.isRequired,
 	children: PropTypes.element,
-	onStatus: PropTypes.func?.isRequired,
-};
-
-WebfontLoader.defaultProps = {
-	onStatus: noop,
+	// Optional: the component falls back to a noop via WEBFONT_LOADER_DEFAULTS,
+	// so callers may omit it without a "required but undefined" dev warning.
+	onStatus: PropTypes.func,
 };
 
 export default WebfontLoader;

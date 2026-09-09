@@ -356,4 +356,48 @@ class Test_Global_Settings extends TestCase {
 		$this->assertTrue( $saved['srfm_honeypot'] );
 	}
 
+
+	/**
+	 * Every path that reports the logging default must agree with the runtime.
+	 *
+	 * Client_Logger::is_enabled() treats an absent key as on. When the settings
+	 * paths defaulted it to off instead, a fresh install showed the toggle OFF in
+	 * both the Settings UI and the Abilities API while logging was actually
+	 * running -- and the next save of any unrelated General setting persisted
+	 * `false`, silently ending it. The fresh-install default array is what makes
+	 * this subtle: it sets the key, so the later `! isset()` backfill never fires.
+	 */
+	public function test_srfm_enable_logs_default_is_consistent_across_paths() {
+		$backup = get_option( 'srfm_general_settings_options', [] );
+		delete_option( 'srfm_general_settings_options' );
+
+		$request = new \WP_REST_Request( 'GET', '/sureforms/v1/srfm-global-settings' );
+		$request->set_param( 'options_to_fetch', 'srfm_general_settings_options' );
+		$request->set_header( 'X-WP-Nonce', wp_create_nonce( 'wp_rest' ) );
+		$ui = \SRFM\Inc\Global_Settings\Global_Settings::srfm_get_general_settings( $request );
+
+		// The callback answers with a REST response, not a bare array.
+		$ui_data  = $ui instanceof \WP_REST_Response ? $ui->get_data() : $ui;
+		$ui_value = is_array( $ui_data ) ? ( $ui_data['srfm_general_settings_options']['srfm_enable_logs'] ?? null ) : null;
+
+		$this->assertNotNull( $ui_value, 'The Settings UI must report the key at all.' );
+
+		$this->assertTrue(
+			\SRFM\Inc\Client_Logger::is_enabled(),
+			'Runtime treats an absent key as on.'
+		);
+		$this->assertTrue( (bool) $ui_value, 'The Settings UI must agree with the runtime.' );
+
+		// The step that used to persist false: save an unrelated General setting.
+		\SRFM\Inc\Global_Settings\Global_Settings::srfm_save_general_settings( [ 'srfm_ip_log' => true ] );
+		$saved = (array) get_option( 'srfm_general_settings_options', [] );
+
+		$this->assertTrue(
+			(bool) $saved['srfm_enable_logs'],
+			'Saving an unrelated setting must not switch logging off.'
+		);
+
+		update_option( 'srfm_general_settings_options', $backup );
+	}
+
 }

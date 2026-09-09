@@ -80,7 +80,15 @@ class Export {
 			$post_id   = intval( $post_id );
 			$post      = get_post( $post_id );
 			$post_meta = get_post_meta( $post_id );
-			$posts[]   = [
+
+			// The view counter belongs to this site's traffic, not to the form. These
+			// payloads feed shared starter templates, so shipping it would hand every
+			// importer a stranger's numbers. The import side already refuses the key,
+			// so this is about not exporting it in the first place.
+			if ( is_array( $post_meta ) ) {
+				unset( $post_meta[ \SRFM\Inc\Form_Views::META_KEY ] );
+			}
+			$posts[] = [
 				'post'      => $post,
 				'post_meta' => $post_meta,
 			];

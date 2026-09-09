@@ -11,7 +11,7 @@
  * properties are defined in a <style> tag nested inside the container.
  *
  * @package
- * @since x.x.x
+ * @since 2.7.0
  */
 ( function () {
 	'use strict';
@@ -41,7 +41,7 @@
 	 * Build CSS text for all variable overrides and apply via the dynamic <style> tag.
 	 *
 	 * @param {Object} cssVars Key-value pairs of CSS variable names to values.
-	 * @since x.x.x
+	 * @since 2.7.0
 	 */
 	function applyCssVarOverrides( cssVars ) {
 		let cssText = '.' + containerId + ' {\n';
@@ -52,6 +52,59 @@
 		}
 		cssText += '}\n';
 		overrideStyle.textContent = cssText;
+	}
+
+	/**
+	 * Report our rendered height to the embedding editor.
+	 *
+	 * The block editor used to measure this document directly, but from WP 7.1 its
+	 * canvas is cross-origin isolated, so the embed is opaque to it and the iframe
+	 * stayed at its default height. Pushing the height out is the only channel that
+	 * works in both cases.
+	 *
+	 * targetOrigin is '*' deliberately: the embedder can be an opaque/blob origin
+	 * under WP 7.1, so no specific origin can be computed, and the payload is a
+	 * single layout number with nothing sensitive in it. The editor side verifies
+	 * the sender by comparing against its own iframe's contentWindow.
+	 *
+	 * @since 2.12.5
+	 */
+	let lastReportedHeight = 0;
+
+	function reportHeight() {
+		const height = container.offsetHeight;
+
+		// Skip unchanged heights. The embedder applies what we send to the frame,
+		// which reflows this document — so re-reporting the same measurement is how
+		// a height feedback loop starts. The tolerance also absorbs sub-pixel
+		// rounding that would otherwise oscillate between two neighbouring values.
+		if ( ! height || Math.abs( height - lastReportedHeight ) < 4 ) {
+			return;
+		}
+
+		lastReportedHeight = height;
+
+		const message = { type: 'srfm-preview-height', height };
+
+		// The editor's React tree runs in the top window while the canvas is a
+		// separate document, so parent and top can differ — post to both.
+		[ window.parent, window.top ].forEach( function ( target ) {
+			if ( target && target !== window ) {
+				target.postMessage( message, '*' );
+			}
+		} );
+	}
+
+	// Only meaningful when framed; a directly-loaded preview has no embedder.
+	//
+	// Deliberately not a ResizeObserver on the container: the embedder resizes the
+	// frame in response, which resizes this container, which fires the observer
+	// again — an unbounded loop that froze the editor tab. Reporting on load and on
+	// viewport resize matches what the previous same-origin measurement did.
+	if ( window.parent !== window ) {
+		reportHeight();
+		window.addEventListener( 'load', reportHeight );
+		window.addEventListener( 'resize', reportHeight );
 	}
 
 	window.addEventListener( 'message', function ( event ) {

@@ -235,4 +235,125 @@ class Test_Post_Types extends TestCase {
 
 		$this->assertSame( [], $result );
 	}
+
+	/**
+	 * The admin bar "+ New" menu gets a Form node for users who can create forms (#3026).
+	 */
+	public function test_add_new_form_to_admin_bar_menu_adds_node() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+		if ( ! class_exists( 'WP_Admin_Bar' ) ) {
+			require_once ABSPATH . WPINC . '/class-wp-admin-bar.php';
+		}
+
+		$post_types = Post_Types::get_instance();
+		$post_types->register_post_types();
+		add_filter( 'show_admin_bar', '__return_true' );
+
+		// An admin can create forms (the CPT maps create_posts to manage_options).
+		$admin = wp_insert_user(
+			[
+				'user_login' => 'srfm_bar_admin_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_bar_admin_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $admin ) ? 0 : (int) $admin );
+
+		$bar = new WP_Admin_Bar();
+		$post_types->add_new_form_to_admin_bar_menu( $bar );
+
+		$node = $bar->get_node( 'new-' . SRFM_FORMS_POST_TYPE );
+		$this->assertNotNull( $node, 'Admin should get a Form node under "+ New".' );
+		$this->assertSame( 'new-content', $node->parent );
+		$this->assertSame( 'Form', (string) $node->title, 'Node uses the admin-bar label.' );
+		$this->assertStringContainsString( 'post-new.php?post_type=' . SRFM_FORMS_POST_TYPE, (string) $node->href );
+
+		// A user without the create capability gets no node.
+		$subscriber = wp_insert_user(
+			[
+				'user_login' => 'srfm_bar_sub_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_bar_sub_' . wp_rand() . '@example.com',
+				'role'       => 'subscriber',
+			]
+		);
+		wp_set_current_user( is_wp_error( $subscriber ) ? 0 : (int) $subscriber );
+
+		$bar_sub = new WP_Admin_Bar();
+		$post_types->add_new_form_to_admin_bar_menu( $bar_sub );
+		$this->assertNull( $bar_sub->get_node( 'new-' . SRFM_FORMS_POST_TYPE ), 'A non-privileged user must not get the Form node.' );
+
+		remove_filter( 'show_admin_bar', '__return_true' );
+		unset( $GLOBALS['show_admin_bar'] );
+		wp_set_current_user( 0 );
+		if ( function_exists( 'wp_delete_user' ) ) {
+			if ( ! is_wp_error( $admin ) ) {
+				wp_delete_user( (int) $admin );
+			}
+			if ( ! is_wp_error( $subscriber ) ) {
+				wp_delete_user( (int) $subscriber );
+			}
+		}
+	}
+
+	/**
+	 * The admin bar gets an "Edit Form" node only while viewing a form (#3026 sibling).
+	 */
+	public function test_add_edit_form_to_admin_bar_menu() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+		if ( ! class_exists( 'WP_Admin_Bar' ) ) {
+			require_once ABSPATH . WPINC . '/class-wp-admin-bar.php';
+		}
+
+		$post_types = Post_Types::get_instance();
+		$post_types->register_post_types();
+		add_filter( 'show_admin_bar', '__return_true' );
+
+		$admin = wp_insert_user(
+			[
+				'user_login' => 'srfm_edit_bar_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_edit_bar_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $admin ) ? 0 : (int) $admin );
+
+		global $post;
+		$original_post = $post;
+
+		// Viewing a form → an "Edit Form" node is added.
+		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Bar edit form' ] );
+		$post    = get_post( $form_id );
+
+		$bar = new WP_Admin_Bar();
+		$post_types->add_edit_form_to_admin_bar_menu( $bar );
+
+		$node = $bar->get_node( 'edit-form' );
+		$this->assertNotNull( $node, 'Viewing a form should add an Edit Form node.' );
+		$this->assertStringContainsString( 'Edit Form', (string) $node->title );
+
+		// Viewing a non-form post → no node.
+		$page_id = wp_insert_post( [ 'post_type' => 'post', 'post_status' => 'publish', 'post_title' => 'Not a form' ] );
+		$post    = get_post( $page_id );
+
+		$bar_other = new WP_Admin_Bar();
+		$post_types->add_edit_form_to_admin_bar_menu( $bar_other );
+		$this->assertNull( $bar_other->get_node( 'edit-form' ), 'A non-form post must not add the Edit Form node.' );
+
+		$post = $original_post;
+		remove_filter( 'show_admin_bar', '__return_true' );
+		unset( $GLOBALS['show_admin_bar'] );
+		wp_delete_post( $form_id, true );
+		wp_delete_post( $page_id, true );
+		wp_set_current_user( 0 );
+		if ( function_exists( 'wp_delete_user' ) && ! is_wp_error( $admin ) ) {
+			wp_delete_user( (int) $admin );
+		}
+	}
 }

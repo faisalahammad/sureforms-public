@@ -6,7 +6,7 @@
  * available on this site are shown; clicking "Import" on a ready source drills
  * into its forms.
  *
- * @since x.x.x
+ * @since 2.11.0
  */
 
 import { __, sprintf, _n } from '@wordpress/i18n';

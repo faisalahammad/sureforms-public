@@ -433,4 +433,178 @@ class Test_Database_Base extends TestCase {
 		$this->assertFalse( $this->base->maybe_add_new_columns( [] ) );
 		$this->assertFalse( $this->base->maybe_add_new_columns() );
 	}
+
+	// ---------------------------------------------------------------
+	// table_exists
+	// ---------------------------------------------------------------
+
+	/**
+	 * The happy path. Both concrete tables exist on a working install, so a false
+	 * here would put a "your database needs updating" warning on every healthy site.
+	 */
+	public function test_table_exists_reports_a_present_table() {
+		$this->assertTrue( $this->entries_table->table_exists() );
+		$this->assertTrue( $this->base->table_exists() );
+	}
+
+	/**
+	 * `$wpdb->prefix` contains an underscore, which is a LIKE wildcard. Without
+	 * esc_like(), `wp_srfm_entries` would also match `wpXsrfm_entries` and the check
+	 * could report a table that is not ours. Compare the returned name, not just
+	 * emptiness, to pin that down.
+	 */
+	public function test_table_exists_matches_the_exact_table_name() {
+		global $wpdb;
+
+		$table = $this->entries_table->get_tablename();
+		$found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) ); // phpcs:ignore -- Test assertion helper.
+
+		$this->assertSame( $table, $found );
+	}
+
+	/**
+	 * The table name is always derived from the live `$wpdb->prefix`, never cached
+	 * from install time — that derivation is what makes a prefix change detectable
+	 * rather than silently fatal.
+	 */
+	public function test_get_tablename() {
+		global $wpdb;
+
+		$this->assertSame( $wpdb->prefix . 'srfm_entries', $this->entries_table->get_tablename() );
+		$this->assertSame( $wpdb->prefix . 'srfm_payments', $this->base->get_tablename() );
+	}
+
+	/**
+	 * create() must refuse an empty column definition rather than emit a CREATE TABLE
+	 * with no body. Guard-clause coverage for the function that gained the
+	 * srfm_db_upgrade_query_failed failure hook.
+	 */
+	public function test_create() {
+		$this->assertFalse( $this->entries_table->create( [] ) );
+	}
+
+	/**
+	 * A name match is not a data match: has_expected_columns() is the guard that stops
+	 * an unrelated table being renamed into place just because it ends in the right
+	 * words. True for the real table, false for one carrying only an id.
+	 */
+	public function test_has_expected_columns() {
+		global $wpdb;
+
+		$method = new \ReflectionMethod( $this->entries_table, 'has_expected_columns' );
+		$method->setAccessible( true );
+
+		$this->assertTrue( $method->invoke( $this->entries_table, $this->entries_table->get_tablename() ) );
+
+		$bare = $wpdb->prefix . 'srfm_bare_probe';
+		$wpdb->query( "CREATE TABLE `{$bare}` ( id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY )" ); // phpcs:ignore -- Scratch table for this test.
+		$wrong = $method->invoke( $this->entries_table, $bare );
+		$wpdb->query( "DROP TABLE `{$bare}`" ); // phpcs:ignore -- Dropping the scratch table this test created.
+
+		$this->assertFalse( $wrong );
+	}
+
+	/**
+	 * Nothing is adoptable while the table is in place — the live table always wins,
+	 * so a stray differently-prefixed copy must not be reported as a candidate.
+	 *
+	 * The missing-table cases, and every refusal guard, are covered in
+	 * Test_Database_Register alongside the repair that consumes them.
+	 */
+	public function test_find_adoptable_table() {
+		$this->assertSame( '', $this->entries_table->find_adoptable_table() );
+	}
+
+	/**
+	 * adopt_table() renames a table, so its refusals matter more than its happy path:
+	 * nothing to adopt is not a repair, and renaming a table onto itself is a MySQL
+	 * error rather than a no-op. The successful adoption is covered in
+	 * Test_Database_Register, where the rows can be seeded and read back.
+	 */
+	public function test_adopt_table() {
+		$this->assertFalse( $this->entries_table->adopt_table( '' ) );
+		$this->assertFalse( $this->entries_table->adopt_table( $this->entries_table->get_tablename() ) );
+	}
+
+	/**
+	 * The owner signature is a stable, prefixed, per-site string.
+	 */
+	public function test_get_owner_signature() {
+		$method = new ReflectionMethod( $this->entries_table, 'get_owner_signature' );
+		$method->setAccessible( true );
+
+		$signature = $method->invoke( $this->entries_table );
+
+		$this->assertIsString( $signature );
+		$this->assertStringStartsWith( 'srfm-owner:', $signature );
+		$this->assertSame( $signature, $method->invoke( $this->entries_table ), 'The signature must be stable within a site.' );
+	}
+
+	/**
+	 * Stamping writes this site's signature into the table's MySQL comment, where a
+	 * later adoption can read it back. The comment survives RENAME, unlike an option.
+	 */
+	public function test_stamp_owner_signature() {
+		global $wpdb;
+
+		$method = new ReflectionMethod( $this->entries_table, 'get_owner_signature' );
+		$method->setAccessible( true );
+		$signature = $method->invoke( $this->entries_table );
+
+		$table = $wpdb->prefix . 'srfm_stamp_probe';
+		$wpdb->query( "CREATE TABLE `{$table}` ( id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY )" ); // phpcs:ignore -- Scratch table for this test.
+
+		$this->entries_table->stamp_owner_signature( $table );
+
+		$comment = $wpdb->get_var( $wpdb->prepare( 'SELECT TABLE_COMMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s', $table ) ); // phpcs:ignore -- Reading back the comment this test wrote.
+		$wpdb->query( "DROP TABLE IF EXISTS `{$table}`" ); // phpcs:ignore -- Test teardown on a scratch table this test created.
+
+		$this->assertSame( $signature, $comment );
+	}
+
+	/**
+	 * Ownership is proven only by an exact signature match. A stamped table is ours;
+	 * an unstamped one (as another install's table would be) and an empty name are
+	 * denied.
+	 */
+	public function test_table_belongs_to_site() {
+		global $wpdb;
+
+		$owned   = $wpdb->prefix . 'srfm_owned_probe';
+		$foreign = $wpdb->prefix . 'srfm_foreign_probe';
+		$wpdb->query( "CREATE TABLE `{$owned}` ( id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY )" ); // phpcs:ignore -- Scratch table for this test.
+		$wpdb->query( "CREATE TABLE `{$foreign}` ( id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY )" ); // phpcs:ignore -- Scratch table for this test.
+		$this->entries_table->stamp_owner_signature( $owned );
+
+		$owned_result   = $this->entries_table->table_belongs_to_site( $owned );
+		$foreign_result = $this->entries_table->table_belongs_to_site( $foreign );
+		$empty_result   = $this->entries_table->table_belongs_to_site( '' );
+
+		$wpdb->query( "DROP TABLE IF EXISTS `{$owned}`" ); // phpcs:ignore -- Test teardown on a scratch table this test created.
+		$wpdb->query( "DROP TABLE IF EXISTS `{$foreign}`" ); // phpcs:ignore -- Test teardown on a scratch table this test created.
+
+		$this->assertTrue( $owned_result, 'A table carrying this site signature is ours.' );
+		$this->assertFalse( $foreign_result, 'An unstamped table must be denied.' );
+		$this->assertFalse( $empty_result, 'An empty name must be denied.' );
+	}
+
+	/**
+	 * A dropped table must read as missing — this is the state the whole
+	 * detect-and-repair feature exists to catch.
+	 */
+	public function test_table_exists_reports_a_dropped_table_as_missing() {
+		global $wpdb;
+
+		$table = $this->entries_table->get_tablename();
+
+		$wpdb->query( "CREATE TABLE `{$table}_srfmbak` LIKE `{$table}`" ); // phpcs:ignore -- Preserving the schema across the drop under test.
+		$wpdb->query( "DROP TABLE `{$table}`" ); // phpcs:ignore -- Reproducing the dropped-table state under test.
+
+		$missing = $this->entries_table->table_exists();
+
+		$wpdb->query( "RENAME TABLE `{$table}_srfmbak` TO `{$table}`" ); // phpcs:ignore -- Restoring the table this test dropped.
+
+		$this->assertFalse( $missing );
+		$this->assertTrue( $this->entries_table->table_exists() );
+	}
 }

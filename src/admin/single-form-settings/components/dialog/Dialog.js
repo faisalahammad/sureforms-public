@@ -183,6 +183,22 @@ const Dialog = ( {
 		return width + 40;
 	};
 
+	/**
+	 * Measured height of the WP admin bar, or 0 when there isn't one.
+	 *
+	 * Measured rather than derived from fullscreen mode: up to WP 7.0 fullscreen
+	 * hid the admin bar, but from 7.1 the bar stays visible in fullscreen, so
+	 * assuming "fullscreen means nothing above us" slid the dialog's top edge
+	 * (and its close button) underneath the bar. offsetHeight is 0 whenever the
+	 * bar is hidden, which keeps the pre-7.1 behaviour intact.
+	 *
+	 * @return {number} Admin bar height in pixels.
+	 */
+	const getAdminBarHeight = () => {
+		const adminBar = document.getElementById( 'wpadminbar' );
+		return adminBar ? adminBar.offsetHeight : 0;
+	};
+
 	const isFullscreen = useSelect(
 		// Param renamed to `wpSelect` to avoid shadowing the imported
 		// `select` from `@wordpress/data` used by the toast listener below.
@@ -221,10 +237,22 @@ const Dialog = ( {
 		if ( ! dialogWrapper ) {
 			return;
 		}
-		if ( ! isFullscreen ) {
-			dialogWrapper.style.marginTop = '40px';
+
+		// Outside fullscreen the offset stays 40px (admin bar plus the editor
+		// header). In fullscreen, clear whatever admin bar is actually on screen:
+		// WP 7.1 keeps the bar in fullscreen mode, so removing the offset outright
+		// put the dialog header — and its close button — behind it. Pre-7.1 the bar
+		// is hidden there and this measures 0, giving the previous no-offset layout.
+		const topOffset = isFullscreen ? getAdminBarHeight() : 40;
+
+		if ( topOffset > 0 ) {
+			dialogWrapper.style.marginTop = `${ topOffset }px`;
+			// The panel is h-full, so the offset has to come off its height too or
+			// the same number of pixels drops off the bottom of the viewport.
+			dialogWrapper.style.height = `calc(100% - ${ topOffset }px)`;
 		} else {
 			dialogWrapper.style.removeProperty( 'margin-top' );
+			dialogWrapper.style.removeProperty( 'height' );
 		}
 	}, [ open, isFullscreen ] );
 

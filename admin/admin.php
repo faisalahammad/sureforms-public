@@ -9,7 +9,10 @@ namespace SRFM\Admin;
 
 use Astra_Notices;
 use SRFM\Inc\AI_Form_Builder\AI_Helper;
+use SRFM\Inc\Client_Logger;
+use SRFM\Inc\Database\Register;
 use SRFM\Inc\Database\Tables\Entries;
+use SRFM\Inc\Generate_Form_Markup;
 use SRFM\Inc\Global_Settings\Global_Settings;
 use SRFM\Inc\Helper;
 use SRFM\Inc\Onboarding;
@@ -41,6 +44,29 @@ class Admin {
 	public const RATING_NOTICE_THRESHOLD = 3;
 
 	/**
+	 * Post meta the Starter Templates (Astra Sites) plugin stamps on every post it
+	 * imports. The "Finish setting up" Thank You prompt (#3030) scopes to these
+	 * forms only. Owned by a plugin that is NOT a SureForms dependency: on installs
+	 * without Starter Templates nothing carries this meta and the prompt never shows.
+	 *
+	 * @since 2.12.4
+	 */
+	public const ASTRA_SITES_IMPORT_META = '_astra_sites_imported_post';
+
+	/**
+	 * Negative-cache transient: no form on this site carries the import marker.
+	 *
+	 * Set only when the marker query itself returns zero posts, which is a
+	 * site-wide fact rather than a per-user one, and cleared as soon as any post is
+	 * stamped with the marker (see invalidate_starter_template_cache()). This keeps
+	 * the query off the majority of installs without tying the features to whether
+	 * Starter Templates happens to still be active — the marker outlives it.
+	 *
+	 * @since 2.12.4
+	 */
+	public const NO_IMPORTED_FORMS_TRANSIENT = 'srfm_no_starter_template_forms';
+
+	/**
 	 * Inline CSS for Quill 1.x (react-quill) list markers.
 	 *
 	 * Quill 1.x renders bullet/numbered list markers via CSS ::before pseudo-elements,
@@ -50,6 +76,17 @@ class Admin {
 	 * @since 2.5.2
 	 */
 	public const QUILL_1X_INLINE_CSS = '.ql-editor ul,.ql-editor ol{padding-left:1.5em}.ql-editor ul>li,.ql-editor ol>li{list-style-type:none}.ql-editor ol li:not(.ql-direction-rtl),.ql-editor ul li:not(.ql-direction-rtl){padding-left:1.5em}.ql-editor ol li.ql-direction-rtl,.ql-editor ul li.ql-direction-rtl{padding-right:1.5em}.ql-editor ul>li::before{content:"\2022"}.ql-editor li::before{display:inline-block;white-space:nowrap;width:1.2em}.ql-editor li:not(.ql-direction-rtl)::before{margin-left:-1.5em;margin-right:.3em;text-align:right}.ql-editor li.ql-direction-rtl::before{margin-left:.3em;margin-right:-1.5em}.ql-editor ol li{counter-reset:list-1 list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9;counter-increment:list-0}.ql-editor ol li::before{content:counter(list-0,decimal) ". "}.ql-editor ol li.ql-indent-1{counter-increment:list-1;counter-reset:list-2 list-3 list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-1::before{content:counter(list-1,lower-alpha) ". "}.ql-editor ol li.ql-indent-2{counter-increment:list-2;counter-reset:list-3 list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-2::before{content:counter(list-2,lower-roman) ". "}.ql-editor ol li.ql-indent-3{counter-increment:list-3;counter-reset:list-4 list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-3::before{content:counter(list-3,decimal) ". "}.ql-editor ol li.ql-indent-4{counter-increment:list-4;counter-reset:list-5 list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-4::before{content:counter(list-4,lower-alpha) ". "}.ql-editor ol li.ql-indent-5{counter-increment:list-5;counter-reset:list-6 list-7 list-8 list-9}.ql-editor ol li.ql-indent-5::before{content:counter(list-5,lower-roman) ". "}.ql-editor ol li.ql-indent-6{counter-increment:list-6;counter-reset:list-7 list-8 list-9}.ql-editor ol li.ql-indent-6::before{content:counter(list-6,decimal) ". "}.ql-editor ol li.ql-indent-7{counter-increment:list-7;counter-reset:list-8 list-9}.ql-editor ol li.ql-indent-7::before{content:counter(list-7,lower-alpha) ". "}.ql-editor ol li.ql-indent-8{counter-increment:list-8;counter-reset:list-9}.ql-editor ol li.ql-indent-8::before{content:counter(list-8,lower-roman) ". "}.ql-editor ol li.ql-indent-9{counter-increment:list-9}.ql-editor ol li.ql-indent-9::before{content:counter(list-9,decimal) ". "}';
+
+	/**
+	 * Notice id for the "Finish setting up" Thank You prompt (#3030).
+	 *
+	 * A single stable id (not per-form): keeps both the autoloaded
+	 * `allowed_astra_notices` option and the per-user dismissal meta bounded to one
+	 * row, and lets a dismissed user short-circuit before the query runs.
+	 *
+	 * @since 2.12.6
+	 */
+	public const THANKYOU_PROMPT_NOTICE_ID = 'srfm-thankyou-prompt';
 
 	/**
 	 * Dashboard widget entries data.
@@ -74,6 +111,32 @@ class Admin {
 	 * @since 1.12.2
 	 */
 	private static $sureforms_page_default_capability = 'manage_options';
+
+	/**
+	 * Request memo for the "Finish setting up" Thank You prompt (#3030).
+	 *
+	 * A static property (not a function-local static) so tests can reset it via
+	 * reflection / reset_thankyou_prompt_cache() — otherwise the first call pins
+	 * the value for the whole process and the feature is untestable.
+	 *
+	 * @var array<int,array<string,mixed>>|null
+	 * @since 2.12.4
+	 */
+	private static $thankyou_prompt_cache = null;
+
+	/**
+	 * Request memo for the dashboard setup-checklist card (#3031).
+	 *
+	 * A static property (not a function-local static) so tests can reset it via
+	 * reset_form_setup_card_cache() and exercise the populated path — a
+	 * function-local static pins the first result for the whole process. Keyed by
+	 * user id since the payload derives from that user's capabilities.
+	 * `false` means "not computed yet"; `null`/array is a computed result.
+	 *
+	 * @var array<int,array<string,mixed>|null>
+	 * @since 2.12.4
+	 */
+	private static $setup_card_cache = [];
 
 	/**
 	 * Class constructor.
@@ -107,6 +170,14 @@ class Admin {
 		add_action( 'current_screen', [ $this, 'enable_gutenberg_for_sureforms' ], 100 );
 		// Register notices early for React pages (before admin_enqueue_scripts).
 		add_action( 'admin_init', [ $this, 'register_pro_compatibility_notices' ], 5 );
+
+		// Database maintenance notice: the entries table is missing, so submissions
+		// cannot be saved. Registered at admin_init priority 5 so the React notice is
+		// in place before admin_enqueue_scripts localizes it.
+		add_action( 'admin_init', [ $this, 'register_database_repair_notice' ], 5 );
+		add_action( 'admin_notices', [ $this, 'render_action_item_notices' ] );
+		add_action( 'admin_notices', [ $this, 'render_database_repair_notice' ] );
+		add_action( 'admin_post_srfm_repair_entries_table', [ $this, 'handle_database_repair' ] );
 		// Display notices on traditional WordPress admin pages.
 		add_action( 'admin_notices', [ $this, 'srfm_pro_version_compatibility' ] );
 
@@ -131,7 +202,11 @@ class Admin {
 		add_action( 'wp_ajax_sureforms_dismiss_pointer', [ $this, 'pointer_dismissed' ] );
 		add_action( 'wp_ajax_sureforms_accept_cta', [ $this, 'pointer_accepted_cta' ] );
 		add_action( 'wp_ajax_srfm_notice_response', [ $this, 'handle_notice_response' ] );
+		add_action( 'wp_ajax_srfm_dismiss_action_item', [ $this, 'handle_dismiss_action_item' ] );
+		add_action( 'admin_post_srfm_dismiss_action_item_link', [ $this, 'handle_dismiss_action_item_link' ] );
 		add_action( 'wp_ajax_srfm_ai_widget_usage', [ $this, 'track_ai_widget_usage' ] );
+		add_action( 'load-post.php', [ $this, 'maybe_track_edit_form_button_click' ] );
+		add_filter( 'removable_query_args', [ $this, 'add_removable_query_args' ] );
 
 		// Register dashboard widget only if there are recent entries.
 		add_action( 'admin_init', [ $this, 'maybe_register_dashboard_widget' ] );
@@ -139,10 +214,24 @@ class Admin {
 		// Enqueue the AI quick draft widget script on the dashboard screen.
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_ai_dashboard_widget_assets' ] );
 
+		// "Finish setting up" checklist widget on the main WP dashboard (#3031).
+		add_action( 'wp_dashboard_setup', [ $this, 'register_form_setup_widget' ] );
+		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_form_setup_widget_assets' ] );
+
+		// Drop the "no imported forms" negative cache as soon as a post is stamped
+		// with the import marker, so a template imported after the cache was written
+		// surfaces immediately instead of waiting for the transient to expire.
+		add_action( 'added_post_meta', [ $this, 'invalidate_starter_template_cache' ], 10, 3 );
+		add_action( 'updated_post_meta', [ $this, 'invalidate_starter_template_cache' ], 10, 3 );
+
 		// Save first form creation time stamp.
 		add_action( 'admin_init', [ $this, 'save_first_form_creation_time_stamp' ] );
 		add_action( 'admin_notices', [ $this, 'display_srfm_rating_notice' ] );
 		add_action( 'admin_notices', [ $this, 'display_srfm_getting_started_notice' ] );
+
+		// "Finish setting up" prompt, shown as an Astra Notices admin notice on
+		// every admin screen except the dashboard (#3030).
+		add_action( 'admin_notices', [ $this, 'render_thankyou_prompt_notice' ] );
 
 		/**
 		 * Suppress foreign (third-party) admin notices on SureForms admin screens.
@@ -245,6 +334,663 @@ class Admin {
 
 		// Check if the first form creation time stamp is a valid integer and greater than zero.
 		return is_int( $first_form_creation_time_stamp ) && $first_form_creation_time_stamp > 0;
+	}
+
+	/**
+	 * Whether a form's confirmation message is still the shipped default.
+	 *
+	 * Compared on tag-stripped, entity-decoded, whitespace-collapsed text rather
+	 * than raw HTML: the default is stored with a base64 icon on creation but
+	 * regenerated with a URL icon, so the markup differs while the wording does
+	 * not, and a starter-template import can store a literal apostrophe where the
+	 * generated default carries the encoded `&#039;` — decoding entities makes both
+	 * compare equal. Any real edit to the heading or body text changes the text and
+	 * flips this to false, which is exactly when the prompt should stop showing.
+	 *
+	 * Locale caveat: the comparison target is translated at call time, so a form
+	 * whose default was stored under a different active locale won't match. That
+	 * fails safe — the prompt simply doesn't show — never a false nag.
+	 *
+	 * @param int $form_id Form post ID.
+	 *
+	 * @since 2.12.4
+	 * @return bool
+	 */
+	public static function is_default_confirmation_message( $form_id ) {
+		$confirmation = get_post_meta( (int) $form_id, '_srfm_form_confirmation', true );
+
+		if ( ! is_array( $confirmation ) || ! isset( $confirmation[0]['message'] ) || ! is_string( $confirmation[0]['message'] ) ) {
+			return false;
+		}
+
+		// The default message is only ever shown for a "same page" confirmation.
+		// A redirect ("different page" / "custom url") never renders it, yet the
+		// stored settings still seed the default message string — so without this
+		// guard a redirect form would be nagged forever about a message no visitor
+		// sees, with no way to clear the prompt by doing what it asks.
+		if ( ! isset( $confirmation[0]['confirmation_type'] ) || 'same page' !== $confirmation[0]['confirmation_type'] ) {
+			return false;
+		}
+
+		$message = $confirmation[0]['message'];
+
+		if ( '' === trim( $message ) ) {
+			return false;
+		}
+
+		$normalize = static function ( $html ) {
+			// Decode entities too, so an encoded apostrophe (&#039;) in the generated
+			// default matches a literal one stored by a template import.
+			$text = html_entity_decode( wp_strip_all_tags( (string) $html ), ENT_QUOTES, 'UTF-8' );
+			return trim( (string) preg_replace( '/\s+/', ' ', $text ) );
+		};
+
+		return $normalize( $message ) === $normalize( Global_Settings::get_default_confirmation_message() );
+	}
+
+	/**
+	 * Whether a form has somewhere to send replies (an enabled email notification
+	 * with a non-empty recipient).
+	 *
+	 * @param int $form_id Form post ID.
+	 *
+	 * @since 2.12.4
+	 * @return bool
+	 */
+	public static function form_has_reply_destination( $form_id ) {
+		$notifications = get_post_meta( (int) $form_id, '_srfm_email_notification', true );
+
+		if ( ! is_array( $notifications ) ) {
+			return false;
+		}
+
+		foreach ( $notifications as $notification ) {
+			if ( is_array( $notification ) && ! empty( $notification['status'] ) && ! empty( $notification['email_to'] ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * The most recently created form still needing setup (default Thank You
+	 * message, or no reply destination).
+	 *
+	 * Powers the "Finish setting up" prompt (#3030). Limited to the single latest
+	 * such form to avoid clutter, and to forms the current user may actually edit.
+	 * A form is a candidate when it still has an unfinished step (default Thank You
+	 * message, or no reply destination). Dismissal is enforced by the caller,
+	 * before this query runs.
+	 *
+	 * @since 2.12.4
+	 * @return array<int,array<string,mixed>> One entry, or none.
+	 */
+	public static function get_thankyou_prompt_forms() {
+		// Memoized for the request so repeated reads (e.g. the notice render plus
+		// any add-on consumer) share a single query. Sentinel is null, not false,
+		// so a filter returning false (__return_false to disable) still memoizes.
+		if ( null !== self::$thankyou_prompt_cache ) {
+			return self::$thankyou_prompt_cache;
+		}
+
+		/**
+		 * Filter the forms the "Finish setting up" Thank You notice may surface.
+		 *
+		 * @param array<int,array<string,mixed>> $prompts Candidate prompt payloads.
+		 *
+		 * @since 2.12.4
+		 */
+		$filtered                    = apply_filters( 'srfm_thankyou_prompt_forms', self::compute_thankyou_prompt_forms() );
+		self::$thankyou_prompt_cache = is_array( $filtered ) ? $filtered : [];
+
+		return self::$thankyou_prompt_cache;
+	}
+
+	/**
+	 * Clear the request memo for the Thank You prompt (#3030).
+	 *
+	 * Lets tests exercise the memoized public path, and is a safe hook for anything
+	 * that changes which form qualifies (e.g. a form save).
+	 *
+	 * @since 2.12.4
+	 * @return void
+	 */
+	public static function reset_thankyou_prompt_cache() {
+		self::$thankyou_prompt_cache = null;
+	}
+
+	/**
+	 * Setup-checklist data for the newest starter-template form (#3031).
+	 *
+	 * Picks the most recent form the current user can edit that was created from an
+	 * Astra Sites starter template. The widget
+	 * lists a fixed set of optional next-steps for it — their completion is not
+	 * computed — so the payload carries only the form and the CTA targets. Memoized
+	 * for the request so the widget register/enqueue/render passes share one query.
+	 *
+	 * @since 2.12.4
+	 * @return array<string,mixed>|null Card payload, or null when there is no candidate form.
+	 */
+	public static function get_form_setup_card() {
+		$user_id = get_current_user_id();
+
+		// Request memo, keyed per user — the payload derives from that user's
+		// capabilities. Reset via reset_form_setup_card_cache().
+		if ( array_key_exists( $user_id, self::$setup_card_cache ) ) {
+			return self::$setup_card_cache[ $user_id ];
+		}
+
+		self::$setup_card_cache[ $user_id ] = self::compute_form_setup_card();
+
+		return self::$setup_card_cache[ $user_id ];
+	}
+
+	/**
+	 * Drop the "no imported forms" negative cache when the marker is written.
+	 *
+	 * Hooked to added_post_meta/updated_post_meta. Without this, a starter template
+	 * imported after the negative cache was written would show neither the Thank You
+	 * prompt nor the setup widget until the transient expired.
+	 *
+	 * Arguments are read from func_get_args() rather than declared: the hook passes
+	 * ( $meta_id, $post_id, $meta_key ) and the meta id is never needed, so declaring
+	 * it would leave an unused parameter that the coding-standards gate rejects.
+	 *
+	 * @since 2.12.4
+	 * @return void
+	 */
+	public function invalidate_starter_template_cache() {
+		$args     = func_get_args();
+		$post_id  = isset( $args[1] ) ? (int) $args[1] : 0;
+		$meta_key = isset( $args[2] ) ? (string) $args[2] : '';
+
+		if ( self::ASTRA_SITES_IMPORT_META !== $meta_key ) {
+			return;
+		}
+
+		// A full-site import stamps this marker on every post it creates, so narrow to
+		// our own post type: both features only ever query sureforms_form, and this
+		// avoids clearing the cache repeatedly for pages and products during an import.
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || SRFM_FORMS_POST_TYPE !== get_post_type( $post_id ) ) {
+			return;
+		}
+
+		delete_transient( self::NO_IMPORTED_FORMS_TRANSIENT );
+	}
+
+	/**
+	 * Clear the setup-card request memo (#3031).
+	 *
+	 * Lets tests exercise the populated path, and is a safe hook for anything that
+	 * changes which form qualifies (e.g. a form save).
+	 *
+	 * @since 2.12.4
+	 * @return void
+	 */
+	public static function reset_form_setup_card_cache() {
+		self::$setup_card_cache = [];
+	}
+
+	/**
+	 * REST handler: record a "Finish setting up" widget interaction (#3031).
+	 *
+	 * Records the clicked CTA/view action as an analytics event. The request
+	 * carries the displayed form id: capability is re-checked against it here —
+	 * beyond the route's generic permission callback — so only a genuine editor of
+	 * that form can act.
+	 *
+	 * @param \WP_REST_Request<array<string,mixed>> $request Request.
+	 *
+	 * @since 2.12.4
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function dismiss_form_setup_card( $request ) {
+		$form_id = absint( $request->get_param( 'form_id' ) );
+
+		if ( $form_id <= 0 || ! defined( 'SRFM_FORMS_POST_TYPE' ) || SRFM_FORMS_POST_TYPE !== get_post_type( $form_id ) || ! current_user_can( 'edit_post', $form_id ) ) {
+			return new \WP_Error( 'srfm_setup_card_forbidden', __( 'You are not allowed to update this prompt.', 'sureforms' ), [ 'status' => 403 ] );
+		}
+
+		$action = sanitize_key( (string) $request->get_param( 'action' ) );
+
+		// Interaction analytics for the setup widget (#3031). Each event carries a
+		// date automatically (see BSF_Analytics_Events::track()) and dedupes per
+		// event name, matching the sibling notice's telemetry.
+		$events = [
+			'edit_form'     => 'form_setup_widget_edit_form',
+			'edit_thankyou' => 'form_setup_widget_edit_thankyou',
+			'set_up_email'  => 'form_setup_widget_set_up_email',
+			'view_form'     => 'form_setup_widget_view_form',
+		];
+
+		if ( isset( $events[ $action ] ) ) {
+			Analytics::events()->track( $events[ $action ], (string) $form_id );
+		}
+
+		return new \WP_REST_Response( [ 'success' => true ], 200 );
+	}
+
+	/**
+	 * Register the "Finish setting up" checklist widget on the main WP dashboard (#3031).
+	 *
+	 * Only for capable users, and only when there is a form still needing setup —
+	 * so the widget never appears empty. The data is memoized in get_form_setup_card()
+	 * and reused by the enqueue and render passes.
+	 *
+	 * @since 2.12.4
+	 * @return void
+	 */
+	public function register_form_setup_widget() {
+		if ( ! Helper::current_user_can() ) {
+			return;
+		}
+
+		if ( null === self::get_form_setup_card() ) {
+			return;
+		}
+
+		wp_add_dashboard_widget(
+			'srfm_form_setup_checklist',
+			__( 'Finish setting up your form', 'sureforms' ),
+			[ $this, 'render_form_setup_widget' ],
+			null,
+			null,
+			'normal',
+			'high'
+		);
+	}
+
+	/**
+	 * Render the setup-checklist widget content (#3031).
+	 *
+	 * A heading (with a link to view the form), a subtitle, and a fixed list of
+	 * optional next-steps — each always shown with its CTA; completion is not
+	 * computed. Each CTA deep-links into the editor (edit form / Thank You message /
+	 * email notification) and records an analytics event via the REST endpoint
+	 * wired in the enqueued inline script.
+	 *
+	 * @since 2.12.4
+	 * @return void
+	 */
+	public function render_form_setup_widget() {
+		$card = self::get_form_setup_card();
+
+		if ( null === $card ) {
+			return;
+		}
+
+		// Optional next-steps — always offered, their completion is not computed.
+		// 'event' is the analytics action key beaconed on click (see the widget JS).
+		$rows = [
+			[
+				'label' => __( 'Review or edit your form', 'sureforms' ),
+				'cta'   => __( 'Edit form', 'sureforms' ),
+				'url'   => $card['edit_url'],
+				'event' => 'edit_form',
+			],
+			[
+				'label' => __( 'Personalize the Thank You message', 'sureforms' ),
+				'cta'   => __( 'Edit message', 'sureforms' ),
+				'url'   => $card['thankyou_url'],
+				'event' => 'edit_thankyou',
+			],
+			[
+				'label' => __( 'Choose who gets notified of new replies', 'sureforms' ),
+				'cta'   => __( 'Set up email', 'sureforms' ),
+				'url'   => $card['email_url'],
+				'event' => 'set_up_email',
+			],
+		];
+
+		// Fall back to a generic label for an untitled form so the heading never
+		// renders "Finish setting up " with a dangling space.
+		$card_title = '' !== trim( (string) $card['title'] ) ? $card['title'] : __( 'your form', 'sureforms' );
+		$heading    = sprintf(
+			/* translators: %s: form title. */
+			__( 'Finish setting up %s', 'sureforms' ),
+			$card_title
+		);
+		?>
+		<div class="srfm-setup-checklist" id="srfm-setup-checklist">
+			<p class="srfm-setup-checklist__title">
+				<?php echo esc_html( $heading ); ?>
+				<?php if ( ! empty( $card['view_url'] ) ) { ?>
+					<a class="srfm-setup-checklist__view" data-srfm-event="view_form" href="<?php echo esc_url( $card['view_url'] ); ?>" target="_blank" rel="noopener noreferrer" aria-label="<?php echo esc_attr( sprintf( /* translators: %s: form title. */ __( 'View %s (opens in a new tab)', 'sureforms' ), $card_title ) ); ?>">
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+					</a>
+				<?php } ?>
+			</p>
+			<p class="srfm-setup-checklist__subtitle"><?php esc_html_e( 'Customize your form to get it ready for real submissions:', 'sureforms' ); ?></p>
+
+			<ul class="srfm-setup-checklist__steps">
+				<?php foreach ( $rows as $row ) { ?>
+					<li class="srfm-setup-checklist__step">
+						<span class="srfm-setup-checklist__label"><?php echo esc_html( $row['label'] ); ?></span>
+						<a class="srfm-setup-checklist__cta" data-srfm-event="<?php echo esc_attr( $row['event'] ); ?>" href="<?php echo esc_url( $row['url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $row['cta'] ); ?></a>
+					</li>
+				<?php } ?>
+			</ul>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Enqueue the setup-checklist widget's styles and behavior on the dashboard (#3031).
+	 *
+	 * Mirrors the AI widget convention: an inline-only handle carries the CSS and the
+	 * behavior (CTA click analytics), with server values —
+	 * the REST URL, nonce and form id — passed through wp_localize_script rather than
+	 * printed into the markup, so it stays Plugin-Check clean.
+	 *
+	 * @param string $hook_suffix Current admin page hook suffix.
+	 *
+	 * @since 2.12.4
+	 * @return void
+	 */
+	public function enqueue_form_setup_widget_assets( $hook_suffix ) {
+		if ( 'index.php' !== $hook_suffix || ! Helper::current_user_can() ) {
+			return;
+		}
+
+		$card = self::get_form_setup_card();
+
+		if ( null === $card ) {
+			return;
+		}
+
+		$css = <<<'CSS'
+#srfm_form_setup_checklist .inside { margin: 0; padding: 0; }
+.srfm-setup-checklist { padding: 12px 16px 16px; }
+.srfm-setup-checklist__title { margin: 0 0 4px; font-size: 15px; font-weight: 600; color: #1e1e1e; }
+.srfm-setup-checklist__view { display: inline-flex; align-items: center; margin-left: 6px; color: #d54e21; vertical-align: middle; }
+.srfm-setup-checklist__view:hover, .srfm-setup-checklist__view:focus { color: #b83c14; }
+.srfm-setup-checklist__subtitle { margin: 0 0 12px; color: #646970; font-size: 13px; }
+.srfm-setup-checklist__steps { margin: 0; padding: 0; list-style: none; }
+.srfm-setup-checklist__step { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 8px; }
+.srfm-setup-checklist__step + .srfm-setup-checklist__step { margin-top: 6px; }
+.srfm-setup-checklist__step { background: #f6f7f7; }
+.srfm-setup-checklist__label { flex: 1 1 auto; font-size: 14px; color: #1e1e1e; }
+.srfm-setup-checklist__cta { margin-left: auto; border: 0; background: transparent; padding: 0; font-size: 14px; font-weight: 600; color: #d54e21; text-decoration: underline; cursor: pointer; }
+.srfm-setup-checklist__cta:hover { color: #b83c14; }
+/* Keep visited links on-brand — WP admin's a:visited would otherwise turn them blue. */
+.srfm-setup-checklist a:visited { color: #d54e21; }
+.srfm-setup-checklist a:visited:hover, .srfm-setup-checklist a:visited:focus { color: #b83c14; }
+/* Drop WP's blue focus ring on the widget's links; keep an accessible, on-brand keyboard outline. */
+.srfm-setup-checklist a:focus { outline: none; box-shadow: none; }
+.srfm-setup-checklist a:focus-visible { outline: 2px solid #d54e21; outline-offset: 2px; box-shadow: none; }
+CSS;
+
+		wp_register_style( 'srfm-setup-checklist-widget', false, [], SRFM_VER );
+		wp_enqueue_style( 'srfm-setup-checklist-widget' );
+		wp_add_inline_style( 'srfm-setup-checklist-widget', $css );
+
+		wp_register_script( 'srfm-setup-checklist-widget', '', [], SRFM_VER, true );
+		wp_enqueue_script( 'srfm-setup-checklist-widget' );
+
+		wp_localize_script(
+			'srfm-setup-checklist-widget',
+			'srfmSetupChecklist',
+			[
+				'restUrl' => esc_url_raw( rest_url( 'sureforms/v1/dismiss-form-setup-card' ) ),
+				'nonce'   => wp_create_nonce( 'wp_rest' ),
+				'formId'  => $card['id'],
+			]
+		);
+
+		$inline_script = <<<'JS'
+( function () {
+	const cfg = window.srfmSetupChecklist || {};
+	const widget = document.getElementById( 'srfm-setup-checklist' );
+	if ( ! widget ) {
+		return;
+	}
+
+	const persist = function ( action ) {
+		return fetch( cfg.restUrl, {
+			method: 'POST',
+			credentials: 'same-origin',
+			keepalive: true,
+			headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': cfg.nonce },
+			body: JSON.stringify( { form_id: cfg.formId, action: action } ),
+		} ).catch( function () {} );
+	};
+
+	// Beacon the CTA / view-form clicks for analytics. keepalive on the fetch lets
+	// the request finish even though the CTA immediately navigates away.
+	widget.addEventListener( 'click', function ( e ) {
+		const target = e.target?.closest?.( '[data-srfm-event]' );
+		if ( target ) {
+			persist( target.getAttribute( 'data-srfm-event' ) );
+		}
+	} );
+}() );
+JS;
+
+		wp_add_inline_script( 'srfm-setup-checklist-widget', $inline_script );
+	}
+
+	/**
+	 * Register the "Finish setting up" prompt as an Astra Notices admin notice (#3030).
+	 *
+	 * Hooked to admin_notices so it registers before the Astra Notices library
+	 * renders (priority 30). Shown on every admin screen EXCEPT the main dashboard,
+	 * for the newest form the current user can edit that still has an unfinished
+	 * step (default Thank You message, or no reply destination). Uses a single
+	 * stable notice id so the library's built-in ✕ dismissal is one persistent
+	 * choice ("stop nudging me"), not a per-form row.
+	 *
+	 * Split out from the renderer so the decision has exactly one home. The Getting
+	 * Started notice suppresses itself when this returns a form, and duplicating the
+	 * conditions there would have meant two copies drifting apart. Reading it costs
+	 * nothing extra — get_thankyou_prompt_forms() memoizes its query per request.
+	 *
+	 * @since 2.12.6
+	 * @return array<string,mixed>|null The form to prompt for, or null when no prompt should render.
+	 */
+	public function get_displayable_thankyou_prompt() {
+		if ( ! Helper::current_user_can() || ! class_exists( 'Astra_Notices' ) ) {
+			return null;
+		}
+
+		/**
+		 * Short-circuit the "Finish setting up" Thank You notice.
+		 *
+		 * @param bool $show Whether to show the notice. Default true.
+		 *
+		 * @since 2.12.4
+		 */
+		if ( ! apply_filters( 'srfm_show_thankyou_prompt', true ) ) {
+			return null;
+		}
+
+		// Everywhere in wp-admin except the main dashboard. A null screen fails
+		// closed (return) rather than registering the notice on an unknown screen.
+		$screen = get_current_screen();
+
+		if ( ! $screen || 'dashboard' === $screen->id ) {
+			return null;
+		}
+
+		// The library only checks dismissal at render (priority 30, after this
+		// query would already have run). Check it up front so a user who dismissed
+		// the prompt never pays for the WP_Query on subsequent admin page views.
+		if ( 'notice-dismissed' === get_user_meta( get_current_user_id(), self::THANKYOU_PROMPT_NOTICE_ID, true ) ) {
+			return null;
+		}
+
+		// array_values so a filter returning a key-preserving array (e.g. the
+		// result of array_filter()) still exposes the newest prompt at index 0.
+		$prompts = array_values( (array) self::get_thankyou_prompt_forms() );
+
+		// Validate every key build_thankyou_notice_markup() reads, not just id/edit_url
+		// — a filter returning a partial payload would otherwise trip "Undefined array
+		// key" warnings and esc_url( null ) deprecations on every admin page.
+		if (
+			empty( $prompts[0] ) || ! is_array( $prompts[0] )
+			|| empty( $prompts[0]['id'] ) || empty( $prompts[0]['edit_url'] )
+			|| empty( $prompts[0]['thankyou_url'] ) || empty( $prompts[0]['replies_url'] )
+			|| ! isset( $prompts[0]['title'] )
+		) {
+			return null;
+		}
+
+		return $prompts[0];
+	}
+
+	/**
+	 * Render the "Finish setting up" Thank You notice (#3030).
+	 *
+	 * @since 2.12.4
+	 * @return void
+	 */
+	public function render_thankyou_prompt_notice() {
+		$notice_id = self::THANKYOU_PROMPT_NOTICE_ID;
+		$form      = $this->get_displayable_thankyou_prompt();
+
+		if ( null === $form ) {
+			return;
+		}
+
+		// A broken form outranks a setup prompt. This is the top of the existing
+		// precedence chain, so the action-item check goes here rather than the
+		// action items standing down for an engagement notice.
+		if ( $this->has_action_item_warnings() ) {
+			return;
+		}
+
+		\Astra_Notices::add_notice(
+			[
+				'id'                         => $notice_id,
+				'type'                       => 'info',
+				'message'                    => self::build_thankyou_notice_markup( $form ),
+				'class'                      => 'srfm-notice srfm-thankyou-notice',
+				'is_dismissible'             => true,
+				'display-with-other-notices' => true,
+				// Render late so this nudge never pre-empts higher-priority notices
+				// (e.g. Astra's minimum-version warnings, which are display-with-
+				// other-notices => false and would be skipped once ours renders).
+				'priority'                   => 100,
+			]
+		);
+
+		// The message is wp_kses_post'd by the library, so the brand-orange styling
+		// is printed through the notice's pre-markup hook instead of inline.
+		add_action( 'astra_notice_before_markup_' . $notice_id, [ $this, 'print_srfm_notice_styles' ] );
+
+		// Track clicks on the CTAs and the dismiss ✕ via the shared notice-response
+		// endpoint, enqueued only when the notice actually renders.
+		add_action( 'astra_notice_after_markup_' . $notice_id, [ $this, 'enqueue_thankyou_notice_tracking' ] );
+	}
+
+	/**
+	 * Enqueue the click-tracking for the Thank You notice (#3030).
+	 *
+	 * Sends an analytics beacon to the shared `srfm_notice_response` AJAX handler
+	 * when a CTA or the dismiss ✕ is clicked. Uses `keepalive` so the beacon
+	 * survives the navigation the CTA links trigger.
+	 *
+	 * @since 2.12.4
+	 * @return void
+	 */
+	public function enqueue_thankyou_notice_tracking() {
+		if ( wp_script_is( 'srfm-thankyou-notice-track', 'enqueued' ) ) {
+			return;
+		}
+
+		wp_register_script( 'srfm-thankyou-notice-track', '', [], SRFM_VER, true );
+		wp_enqueue_script( 'srfm-thankyou-notice-track' );
+
+		$config = wp_json_encode(
+			[
+				'ajaxurl' => admin_url( 'admin-ajax.php' ),
+				'nonce'   => wp_create_nonce( 'srfm_notice_response' ),
+			]
+		);
+
+		wp_add_inline_script( 'srfm-thankyou-notice-track', 'window.srfmThankYouNoticeTrack = ' . $config . ';', 'before' );
+
+		$inline_script = <<<'JS'
+( function () {
+	const cfg = window.srfmThankYouNoticeTrack || {};
+	const wrap = document.querySelector( '.srfm-thankyou-notice' );
+	if ( ! wrap ) {
+		return;
+	}
+	const noticeId = wrap.id || '';
+	const send = function ( button ) {
+		const body = new URLSearchParams();
+		body.append( 'action', 'srfm_notice_response' );
+		body.append( 'nonce', cfg.nonce );
+		body.append( 'notice_id', noticeId );
+		body.append( 'button', button );
+		fetch( cfg.ajaxurl, {
+			method: 'POST',
+			credentials: 'same-origin',
+			keepalive: true,
+			headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+			body: body.toString(),
+		} ).catch( function () {} );
+	};
+	// Delegate from the wrapper: this inline script runs at parse time, before
+	// core's common.js injects the .notice-dismiss ✕ (on DOMContentLoaded), so a
+	// direct querySelector for it would find nothing and the dismiss beacon would
+	// never fire. Delegation catches the ✕ and the CTAs whenever they exist.
+	const ctas = [
+		[ '.srfm-ty-edit-form', 'edit_form' ],
+		[ '.srfm-ty-set-replies', 'set_replies' ],
+		[ '.srfm-ty-edit-thankyou', 'edit_thankyou' ],
+	];
+	wrap.addEventListener( 'click', function ( e ) {
+		if ( e.target.closest( '.notice-dismiss' ) ) {
+			send( 'dismissed' );
+			return;
+		}
+		for ( let i = 0; i < ctas.length; i++ ) {
+			if ( e.target.closest( ctas[ i ][ 0 ] ) ) {
+				send( ctas[ i ][ 1 ] );
+				return;
+			}
+		}
+	} );
+}() );
+JS;
+
+		wp_add_inline_script( 'srfm-thankyou-notice-track', $inline_script );
+	}
+
+	/**
+	 * Print the Thank You notice's brand-orange styling (#3030).
+	 *
+	 * Fired via astra_notice_before_markup_{id} so it lands right before the notice
+	 * and only when the notice actually renders.
+	 *
+	 * @since 2.12.4
+	 * @return void
+	 */
+	public function print_srfm_notice_styles() {
+		// The library wp_kses_post()'s the message, which strips <svg> and data:
+		// image srcs, so the SureForms mark is painted as a CSS background here
+		// (this hook fires outside that kses call). URL-encoded, not base64, so the
+		// value is fully percent-encoded and safe to pass through esc_url.
+		$icon = 'data:image/svg+xml,' . rawurlencode(
+			'<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 32 32"><path fill="#D54407" fill-rule="evenodd" clip-rule="evenodd" d="M32 0H0V32H32V0ZM22.8573 6.85728H9.14304V11.4287V13.7144L11.4288 11.4287H22.8573V6.85728ZM20.5717 13.7146H9.14314V18.286V20.5714V20.5718V25.1428H16.0003V20.5714H9.14351L11.4289 18.286H20.5717V13.7146Z"/></svg>'
+		);
+		?>
+		<style id="srfm-notice-styles">
+			.srfm-notice.notice { border-left-color: #D54407; }
+			/* Stack our blocks (the library lays the container out as a flex row) and reserve room on the left for the SureForms mark. */
+			.srfm-notice .astra-notice-container { display: block; padding: 4px 0 4px 52px; background: url('<?php echo esc_url( $icon, [ 'data' ] ); ?>') no-repeat 4px 6px; background-size: 32px 32px; }
+			.srfm-notice .srfm-notice__title { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: #1d2327; }
+			.srfm-notice .srfm-notice__text { margin: 0 0 10px; color: #50575e; }
+			.srfm-notice .srfm-notice__actions { margin: 12px 0 2px; display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; }
+			.srfm-notice .button-primary { background: #D54407; border-color: #D54407; color: #fff; box-shadow: none; text-shadow: none; }
+			.srfm-notice .button-primary:hover, .srfm-notice .button-primary:focus { background: #C83B00; border-color: #C83B00; color: #fff; box-shadow: none; }
+			.srfm-notice .button:not(.button-primary) { background: transparent; border-color: transparent; color: #D54407; box-shadow: none; padding: 0; }
+			.srfm-notice .button:not(.button-primary):hover, .srfm-notice .button:not(.button-primary):focus { background: transparent; border-color: transparent; color: #C83B00; box-shadow: none; }
+			.srfm-notice .button-primary:focus { outline: 2px solid #D54407; outline-offset: 1px; }
+		</style>
+		<?php
 	}
 
 	/**
@@ -1025,6 +1771,10 @@ class Admin {
 			'integrations'                 => Helper::sureforms_get_integration(),
 			'rotating_plugin_banner'       => Helper::get_rotating_plugin_banner(),
 			'ajax_url'                     => admin_url( 'admin-ajax.php' ),
+			'client_logs_nonce'            => Helper::current_user_can() ? wp_create_nonce( 'srfm_client_logs' ) : '',
+			'action_items'                 => $this->get_action_items(),
+			'notice_response_nonce'        => Helper::current_user_can() ? wp_create_nonce( 'srfm_notice_response' ) : '',
+			'dismiss_action_item_nonce'    => Helper::current_user_can() ? wp_create_nonce( 'srfm_dismiss_action_item' ) : '',
 			'sf_plugin_manager_nonce'      => wp_create_nonce( 'sf_plugin_manager_nonce' ),
 			'plugin_installer_nonce'       => wp_create_nonce( 'updates' ),
 			'plugin_activating_text'       => __( 'Activating...', 'sureforms' ),
@@ -1553,6 +2303,232 @@ class Admin {
 	}
 
 	/**
+	 * Register the React notice when the entries table is missing.
+	 *
+	 * Hooked - admin_init, priority 5.
+	 *
+	 * Priority 5 is load-bearing: Notice_Manager hands notices to the front end
+	 * through the `srfm_admin_filter` applied during admin_enqueue_scripts, so
+	 * anything registering later never reaches the page.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public function register_database_repair_notice() {
+		// admin_init also fires on admin-ajax.php. Nothing there renders a notice, so
+		// skip the work rather than reading a transient on every AJAX request.
+		if ( wp_doing_ajax() ) {
+			return;
+		}
+
+		if ( ! Helper::current_user_can() ) {
+			return;
+		}
+
+		if ( ! class_exists( 'SRFM\Admin\Notice_Manager' ) ) {
+			return;
+		}
+
+		// A just-completed repair reports its outcome instead of the warning.
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only display flag; the repair itself is nonce-checked in handle_database_repair().
+		$result = isset( $_GET['srfm_db_repair'] ) ? sanitize_key( wp_unslash( $_GET['srfm_db_repair'] ) ) : '';
+
+		if ( 'done' === $result ) {
+			Notice_Manager::register_notice(
+				[
+					'id'      => 'srfm-database-repaired',
+					'variant' => 'success',
+					'message' => __( 'Your SureForms database is up to date. New form entries will be saved as usual.', 'sureforms' ),
+					'pages'   => [ 'all' ],
+				]
+			);
+			return;
+		}
+
+		if ( 'failed' === $result ) {
+			Notice_Manager::register_notice(
+				[
+					'id'      => 'srfm-database-repair-failed',
+					// Still a warning, not an error: a host that does not allow
+					// SureForms to create tables is not the user's mistake.
+					'variant' => 'warning',
+					'message' => __( 'SureForms could not finish updating the database. Your hosting may not allow SureForms to create database tables — please contact your hosting provider or SureForms support.', 'sureforms' ),
+					'actions' => [
+						[
+							'label' => __( 'Contact support', 'sureforms' ),
+							'url'   => 'https://sureforms.com/contact/',
+						],
+					],
+					'pages'   => [ 'all' ],
+				]
+			);
+			return;
+		}
+
+		if ( ! Register::is_entries_table_missing() ) {
+			return;
+		}
+
+		$this->track_database_notice_impression();
+
+		Notice_Manager::register_notice(
+			[
+				'id'      => 'srfm-database-maintenance',
+				'variant' => 'warning',
+				'title'   => __( 'Database update needed', 'sureforms' ),
+				// Plain text only. AdminNotice.js renders this as a React child, so
+				// any markup here would show up as literal characters.
+				'message' => $this->get_database_notice_message(),
+				'actions' => [
+					[
+						'label'  => __( 'Fix now', 'sureforms' ),
+						// Opaque identifier, resolved to a handler in AdminNotice.js.
+						// Deliberately not a URL or endpoint: the server never tells
+						// the browser which address to call.
+						'action' => 'repair-entries-table',
+						'url'    => $this->get_database_repair_url(),
+					],
+				],
+				'pages'   => [ 'all' ],
+			]
+		);
+	}
+
+	/**
+	 * Render the classic warning on the WordPress dashboard.
+	 *
+	 * Hooked - admin_notices.
+	 *
+	 * Scoped to index.php on purpose. The React notice already covers the SureForms
+	 * screens, so leaving this one admin-wide would stack two warnings on the same
+	 * page and nag on every screen in wp-admin.
+	 *
+	 * Registered as [ $this, 'method' ] rather than a closure because
+	 * suppress_foreign_admin_notices() strips any callback it cannot attribute to a
+	 * SureForms class — a closure here would be silently removed.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public function render_database_repair_notice() {
+		if ( ! Helper::current_user_can() ) {
+			return;
+		}
+
+		$screen = get_current_screen();
+
+		if ( ! $screen || 'dashboard' !== $screen->base ) {
+			return;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only display flag; the repair itself is nonce-checked in handle_database_repair().
+		$result = isset( $_GET['srfm_db_repair'] ) ? sanitize_key( wp_unslash( $_GET['srfm_db_repair'] ) ) : '';
+
+		if ( 'done' === $result ) {
+			?>
+			<div class="notice notice-success is-dismissible">
+				<p><?php esc_html_e( 'Your SureForms database is up to date. New form entries will be saved as usual.', 'sureforms' ); ?></p>
+			</div>
+			<?php
+			return;
+		}
+
+		if ( 'failed' === $result ) {
+			?>
+			<div class="notice notice-warning is-dismissible">
+				<p><?php esc_html_e( 'SureForms could not finish updating the database. Your hosting may not allow SureForms to create database tables — please contact your hosting provider or SureForms support.', 'sureforms' ); ?></p>
+			</div>
+			<?php
+			return;
+		}
+
+		if ( ! Register::is_entries_table_missing() ) {
+			return;
+		}
+
+		$this->track_database_notice_impression();
+		?>
+		<div class="notice notice-warning">
+			<p>
+				<strong><?php esc_html_e( 'SureForms — database update needed', 'sureforms' ); ?></strong>
+			</p>
+			<p><?php echo esc_html( $this->get_database_notice_message() ); ?></p>
+			<p>
+				<a href="<?php echo esc_url( $this->get_database_repair_url() ); ?>" class="button button-primary">
+					<?php esc_html_e( 'Update database', 'sureforms' ); ?>
+				</a>
+			</p>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Repair the entries table, then redirect back with the outcome.
+	 *
+	 * Hooked - admin_post_srfm_repair_entries_table.
+	 *
+	 * A nonce-protected GET that changes state matches how core's own plugin
+	 * activate / deactivate / delete links work.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public function handle_database_repair() {
+		if ( ! Helper::current_user_can() ) {
+			wp_die( esc_html__( 'You do not have permission to update the database.', 'sureforms' ), 403 );
+		}
+
+		check_admin_referer( 'srfm_repair_entries_table' );
+
+		$repaired = $this->do_database_repair();
+		$referer  = wp_get_referer();
+
+		wp_safe_redirect(
+			add_query_arg(
+				'srfm_db_repair',
+				$repaired ? 'done' : 'failed',
+				$referer ? $referer : admin_url()
+			)
+		);
+		exit;
+	}
+
+	/**
+	 * Repair the entries table and record what happened.
+	 *
+	 * The single place the repair is performed and counted, shared by the
+	 * admin-post handler and the REST endpoint. One user action reaches exactly one
+	 * of those, so the click counter cannot double-count across the two surfaces.
+	 *
+	 * @since 2.12.6
+	 * @return bool True when the table exists afterwards.
+	 */
+	public function do_database_repair() {
+		// Cumulative counter, so $force = true: each new count is a new value and is
+		// re-sent, while an identical repeat short-circuits inside track().
+		$attempts = Helper::get_integer_value( Helper::get_srfm_option( 'db_repair_attempts', 0 ) ) + 1;
+		Helper::update_srfm_option( 'db_repair_attempts', $attempts );
+
+		// Event name is the `database_error` => `fix_now` entry in the $valid
+		// allowlist in handle_notice_response(). Kept in sync by hand; that array is
+		// where the team looks notice event names up.
+		Analytics::events()->track( 'database_error_notice_cta', (string) $attempts, [], true );
+
+		$repaired = Register::repair_entries_table();
+
+		// The failure case is the more valuable signal: it means the host refuses to
+		// let SureForms create tables, which no amount of retrying will fix.
+		Analytics::events()->track(
+			'database_repair_result',
+			$repaired ? 'success' : 'failed',
+			[],
+			true
+		);
+
+		return $repaired;
+	}
+
+	/**
 	 * Admin Notice Callback if sureforms pro is out of date.
 	 *
 	 * Hooked - admin_notices
@@ -1649,27 +2625,50 @@ class Admin {
 			return;
 		}
 
+		$notice_id = 'srfm-plugin-review-notice';
+
 		Astra_Notices::add_notice(
 			[
-				'id'                         => 'srfm-plugin-review-notice',
+				'id'                         => $notice_id,
 				'type'                       => '',
-				'message'                    => $this->build_notice_markup(
-					esc_html__( 'Amazing! SureForms is powering your forms and submissions - let\'s keep growing together!', 'sureforms' ),
-					esc_html__( 'If SureForms has been helpful, would you mind taking a moment to leave a 5-star review on WordPress.org?', 'sureforms' ),
-					esc_url( 'https://wordpress.org/support/plugin/sureforms/reviews/' ),
-					esc_html__( 'Rate SureForms', 'sureforms' ),
-					esc_html__( 'Maybe later', 'sureforms' ),
-					esc_html__( 'I already did', 'sureforms' ),
-					WEEK_IN_SECONDS,
-					true
+				'message'                    => self::build_srfm_notice_markup(
+					__( 'Amazing! SureForms is powering your forms and submissions - let\'s keep growing together!', 'sureforms' ),
+					__( 'If SureForms has been helpful, would you mind taking a moment to leave a 5-star review on WordPress.org?', 'sureforms' ),
+					[
+						[
+							'text'     => __( 'Rate SureForms', 'sureforms' ),
+							'url'      => esc_url( 'https://wordpress.org/support/plugin/sureforms/reviews/' ),
+							'primary'  => true,
+							// Leaves wp-admin, so it also dismisses on the way out.
+							'dismiss'  => true,
+							'external' => true,
+						],
+						[
+							'text'    => __( 'Maybe later', 'sureforms' ),
+							'url'     => '#',
+							'dismiss' => true,
+							'snooze'  => WEEK_IN_SECONDS,
+						],
+						[
+							'text'    => __( 'I already did', 'sureforms' ),
+							'url'     => '#',
+							'dismiss' => true,
+						],
+					]
 				),
+				'class'                      => 'srfm-notice srfm-rating-notice',
 				'repeat-notice-after'        => WEEK_IN_SECONDS,
-				'show_if'                    => $this->maybe_display_rating_notice(),
+				// Yields to the Thank You prompt for the same reason the Getting Started
+				// notice does: a specific form to finish beats a recurring review ask,
+				// and a user with three forms who then imports a template would
+				// otherwise see both at once.
+				'show_if'                    => $this->maybe_display_rating_notice() && null === $this->get_displayable_thankyou_prompt() && ! $this->has_action_item_warnings(),
 				'display-with-other-notices' => true,
 			]
 		);
 
-		add_action( 'astra_notice_after_markup_srfm-plugin-review-notice', [ $this, 'enqueue_notice_response_script' ] );
+		add_action( 'astra_notice_before_markup_' . $notice_id, [ $this, 'print_srfm_notice_styles' ] );
+		add_action( 'astra_notice_after_markup_' . $notice_id, [ $this, 'enqueue_notice_response_script' ] );
 	}
 
 	/**
@@ -1693,27 +2692,50 @@ class Admin {
 			return;
 		}
 
+		$notice_id = 'srfm-getting-started-notice';
+
 		Astra_Notices::add_notice(
 			[
-				'id'                         => 'srfm-getting-started-notice',
+				'id'                         => $notice_id,
 				'type'                       => '',
-				'message'                    => $this->build_notice_markup(
-					esc_html__( 'SureForms is ready to power your forms — explore what\'s possible!', 'sureforms' ),
-					esc_html__( 'Manage your forms, track submissions, and discover features like AI Form Builder, payment integrations, and more from the SureForms dashboard.', 'sureforms' ),
-					esc_url( admin_url( 'admin.php?page=sureforms_menu' ) ),
-					esc_html__( 'Go to Dashboard', 'sureforms' ),
-					esc_html__( 'Maybe later', 'sureforms' ),
-					esc_html__( 'I already know', 'sureforms' ),
-					WEEK_IN_SECONDS
+				'message'                    => self::build_srfm_notice_markup(
+					__( 'SureForms is ready to power your forms — explore what\'s possible!', 'sureforms' ),
+					__( 'Manage your forms, track submissions, and discover features like AI Form Builder, payment integrations, and more from the SureForms dashboard.', 'sureforms' ),
+					[
+						[
+							'text'    => __( 'Go to Dashboard', 'sureforms' ),
+							'url'     => esc_url( admin_url( 'admin.php?page=sureforms_menu' ) ),
+							'primary' => true,
+						],
+						[
+							'text'    => __( 'Maybe later', 'sureforms' ),
+							'url'     => '#',
+							'dismiss' => true,
+							'snooze'  => WEEK_IN_SECONDS,
+						],
+						[
+							'text'    => __( 'I already know', 'sureforms' ),
+							'url'     => '#',
+							'dismiss' => true,
+						],
+					]
 				),
+				'class'                      => 'srfm-notice srfm-getting-started-notice',
 				'repeat-notice-after'        => WEEK_IN_SECONDS,
-				'show_if'                    => ! $this->maybe_display_rating_notice(),
+				// Yields to both of the other SureForms notices, so only one of ours is
+				// ever on screen. The rating notice supersedes it once the user has real
+				// usage; the Thank You prompt supersedes it because "finish this specific
+				// form" is a concrete next step and this is a generic tour invitation.
+				'show_if'                    => ! $this->maybe_display_rating_notice() && null === $this->get_displayable_thankyou_prompt() && ! $this->has_action_item_warnings(),
 				'display-notice-after'       => WEEK_IN_SECONDS,
 				'display-with-other-notices' => true,
 			]
 		);
 
-		add_action( 'astra_notice_after_markup_srfm-getting-started-notice', [ $this, 'enqueue_notice_response_script' ] );
+		// Same pre-markup hook the Thank You prompt uses, so both notices are painted
+		// by one stylesheet instead of two that drift apart.
+		add_action( 'astra_notice_before_markup_' . $notice_id, [ $this, 'print_srfm_notice_styles' ] );
+		add_action( 'astra_notice_after_markup_' . $notice_id, [ $this, 'enqueue_notice_response_script' ] );
 	}
 
 	/**
@@ -1760,10 +2782,12 @@ class Admin {
 	public function handle_notice_response() {
 		if ( ! check_ajax_referer( 'srfm_notice_response', 'nonce', false ) ) {
 			wp_send_json_error( [ 'message' => __( 'Invalid nonce.', 'sureforms' ) ], 403 );
+			return;
 		}
 
 		if ( ! Helper::current_user_can() ) {
 			wp_send_json_error( [ 'message' => __( 'Unauthorized user.', 'sureforms' ) ], 403 );
+			return;
 		}
 
 		$notice_id = isset( $_POST['notice_id'] ) ? sanitize_text_field( wp_unslash( $_POST['notice_id'] ) ) : '';
@@ -1780,14 +2804,66 @@ class Admin {
 				'maybe_later'    => 'rating_notice_snooze',
 				'dismissed'      => 'rating_notice_dismiss',
 			],
+			// Database maintenance notice. Keyed `database_error` for the warehouse;
+			// the user-facing copy deliberately reads as a routine update, not an
+			// error. `dismissed` is registered but unreachable today — a missing
+			// entries table is not something we let people dismiss.
+			'database_error'              => [
+				'fix_now'   => 'database_error_notice_cta',
+				'dismissed' => 'database_error_notice_dismiss',
+			],
+			// The "Finish setting up" prompt (#3030): three CTAs, plus the ✕.
+			'form_submission_error'       => [
+				'contact_support' => 'submission_failure_notice_cta',
+				'dismissed'       => 'submission_failure_notice_dismiss',
+			],
+			'notification_error'          => [
+				'contact_support' => 'notification_failure_notice_cta',
+				'dismissed'       => 'notification_failure_notice_dismiss',
+			],
+			'integration_error'           => [
+				'contact_support' => 'integration_failure_notice_cta',
+				'dismissed'       => 'integration_failure_notice_dismiss',
+			],
+			'caching_plugin'              => [
+				'help_me_fix' => 'caching_plugin_notice_cta',
+				'dismissed'   => 'caching_plugin_notice_dismiss',
+			],
+			'srfm-thankyou-prompt'        => [
+				'edit_form'     => 'thankyou_notice_edit_form',
+				'set_replies'   => 'thankyou_notice_set_replies',
+				'edit_thankyou' => 'thankyou_notice_edit_thankyou',
+				'dismissed'     => 'thankyou_notice_dismiss',
+			],
 		];
 
 		if ( ! isset( $valid[ $notice_id ][ $button ] ) ) {
 			wp_send_json_error( [ 'message' => __( 'Invalid parameters.', 'sureforms' ) ], 400 );
+			// wp_send_json_error() ends the request in production. The explicit return
+			// keeps the guard a guard rather than something that only works because of
+			// a side effect in a function elsewhere.
+			return;
 		}
 
 		$event_name = $valid[ $notice_id ][ $button ];
 		Analytics::events()->track( $event_name, $button );
+
+		// Reporting the failures retires the notice until something new fails.
+		// Handled here rather than in the browser so it holds for the classic
+		// wp-admin notice too, which is a plain link with no JavaScript.
+		$categories = [
+			'form_submission_error' => 'submission',
+			'notification_error'    => 'notification',
+			'integration_error'     => 'integration',
+		];
+
+		if ( 'contact_support' === $button && isset( $categories[ $notice_id ] ) ) {
+			Client_Logger::acknowledge_category( $categories[ $notice_id ] );
+
+			if ( 'form_submission_error' === $notice_id ) {
+				Client_Logger::acknowledge_failures();
+			}
+		}
 
 		wp_send_json_success();
 	}
@@ -2123,6 +3199,116 @@ JS;
 	}
 
 	/**
+	 * Count an editor visit that came from the front-end "Edit Form" pill.
+	 *
+	 * The pill is a plain link, so the click is attributed by the marker query arg
+	 * it carries rather than by a front-end click handler. That keeps the front end
+	 * script-free and adds no AJAX endpoint: the only thing on the page is still an
+	 * anchor. It also measures the outcome that matters — the editor actually
+	 * opening — instead of a click that may never land.
+	 *
+	 * Every decision here comes from server state. The query arg selects the code
+	 * path; what gets counted is derived from the resolved post and the current
+	 * user's capability on it. An absent, empty, misspelled or reused arg, a post
+	 * that is not a SureForms form, and a user without `edit_post` on that form all
+	 * fall through to no-op without an explicit branch.
+	 *
+	 * No nonce, deliberately: the pill is rendered into front-end HTML that may be
+	 * page-cached, so a nonce would either be baked into the cache or be stale on
+	 * arrival. The effect is a private usage counter for a user who can already edit
+	 * the form, and nothing attacker-controlled reaches the analytics payload — the
+	 * value sent is an integer read back from stored state.
+	 *
+	 * Because the marker is just a query arg, the invariant that bounds this is the
+	 * dedup transient below, not the arg: a given editor moves the counter at most
+	 * once per form per hour, no matter how many times the URL is requested. That is
+	 * also what keeps the metric honest — without it a refresh or a back-navigation
+	 * would count again, and each count is a read-modify-write of the whole
+	 * `srfm_options` row, which holds unrelated settings.
+	 *
+	 * @return void
+	 * @since 2.12.6
+	 */
+	public function maybe_track_edit_form_button_click() {
+		// is_string() before sanitize_key(): `?srfm_edit_src[]=x` satisfies isset(),
+		// and wp_unslash() hands the array straight through. sanitize_key() only grew
+		// its is_scalar() guard after this plugin's minimum WordPress, so on the older
+		// supported versions that reaches strtolower( array ) — a TypeError on PHP 8,
+		// i.e. the one input shape that ended in a fatal rather than in the no-op the
+		// rest of this method guarantees.
+		$arg = Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG;
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only attribution marker; see docblock for why a nonce is neither possible nor needed.
+		$source = isset( $_GET[ $arg ] ) && is_string( $_GET[ $arg ] ) ? sanitize_key( wp_unslash( $_GET[ $arg ] ) ) : '';
+
+		if ( 'embed' !== $source ) {
+			return;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Same read-only path as above.
+		$post_id = isset( $_GET['post'] ) ? absint( wp_unslash( $_GET['post'] ) ) : 0;
+
+		// Resolve the post type from the stored post, never from the request.
+		//
+		// The capability below reads as per-post but is not: sureforms_form is
+		// registered with an explicit capabilities map and no `map_meta_cap`
+		// (inc/post-types.php), so core short-circuits `edit_post` to the post type's
+		// `edit_post` capability — `manage_options` — without ever consulting $post_id.
+		// The real gate is therefore "site administrator", which is stricter than a
+		// per-form check, not weaker. Written down because a later `map_meta_cap` on
+		// the CPT would silently change what this line means with no diff here.
+		if ( 0 === $post_id || SRFM_FORMS_POST_TYPE !== get_post_type( $post_id ) ) {
+			return;
+		}
+
+		if ( ! current_user_can( 'edit_post', $post_id ) ) {
+			return;
+		}
+
+		// One count per editor per form per hour. Without this the metric measures
+		// "editor loads carrying the marker" rather than pill clicks — a refresh or a
+		// back-navigation re-counts — and a forged page could drive the counter, and
+		// the writes behind it, without bound.
+		$dedup_key = 'srfm_pill_click_' . get_current_user_id() . '_' . $post_id;
+
+		if ( false !== get_transient( $dedup_key ) ) {
+			return;
+		}
+
+		set_transient( $dedup_key, 1, HOUR_IN_SECONDS );
+
+		$count = Helper::get_integer_value( Helper::get_srfm_option( 'edit_form_button_clicks', 0 ) ) + 1;
+		Helper::update_srfm_option( 'edit_form_button_clicks', $count );
+
+		// $force = true because this is a cumulative counter, not a one-time event —
+		// it must re-send the latest count each cycle (bypasses one-time dedup).
+		Analytics::events()->track( 'edit_form_button_clicked', (string) $count, [], true );
+	}
+
+	/**
+	 * Let core strip the edit-attribution marker from the admin URL.
+	 *
+	 * Core's wp_admin_canonical_url() rewrites the address bar via replaceState() on
+	 * admin_head, which runs after load-post.php — so the marker has already been
+	 * counted by the time it is removed and no attribution is lost. Without this it
+	 * lingers in the address bar, in bookmarks, and in the Referer header sent to
+	 * every subresource the editor loads.
+	 *
+	 * @param array<string> $args Query args core already removes.
+	 * @since 2.12.6
+	 * @return array<string> Args with the marker appended.
+	 */
+	public function add_removable_query_args( $args ) {
+		if ( ! is_array( $args ) ) {
+			return [ Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG ];
+		}
+
+		$args[] = Generate_Form_Markup::EDIT_FORM_BUTTON_SOURCE_ARG;
+
+		return $args;
+	}
+
+	/**
 	 * Track AI dashboard widget usage.
 	 *
 	 * @return void
@@ -2199,6 +3385,662 @@ JS;
 	}
 
 	/**
+	 * Classic dashboard notice when submissions keep failing.
+	 *
+	 * Hooked - admin_notices.
+	 *
+	 * Gated to the WP dashboard. The React notice already covers SureForms' own
+	 * screens, so leaving this admin-wide would stack two warnings on one page.
+	 *
+	 * Registered as [ $this, 'method' ] rather than a closure because
+	 * suppress_foreign_admin_notices() strips any callback it cannot attribute to
+	 * a SureForms class -- a closure here would be silently removed.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public function render_action_item_notices() {
+		// Shown across wp-admin, because someone whose forms are silently failing
+		// may not open the WP dashboard or SureForms for days.
+		//
+		// The one exclusion is SureForms' own dashboard: the Form Checks panel in
+		// its sidebar already lists these, and a banner above it would say the same
+		// thing twice on one screen.
+		if ( Helper::validate_request_context( 'sureforms_menu', 'page' ) ) {
+			return;
+		}
+
+		$this->enqueue_notice_response_script();
+
+		foreach ( $this->get_action_items() as $item ) {
+			$status = Helper::get_string_value( $item['status'] ?? '' );
+
+			// Passing checks belong in the SureForms panel, not in wp-admin. A
+			// notice that says nothing is wrong is noise on every page load.
+			if ( 'success' === $status || '' === $status ) {
+				continue;
+			}
+
+			// A fault reads as an error; advice reads as a warning. Both are shown,
+			// but they are not the same kind of message and should not look alike.
+			$class = 'error' === $status ? 'notice-error' : 'notice-warning';
+			?>
+			<div class="notice <?php echo esc_attr( $class ); ?>">
+				<p><strong><?php echo esc_html( $item['title'] ); ?></strong></p>
+				<p><?php echo esc_html( $item['message'] ); ?></p>
+				<p>
+					<a
+						href="<?php echo esc_url( Helper::get_string_value( $item['cta_url'] ) ); ?>"
+						class="button button-primary"
+						data-srfm-notice-id="<?php echo esc_attr( Helper::get_string_value( $item['id'] ) ); ?>"
+						data-srfm-button="<?php echo esc_attr( Helper::get_string_value( $item['cta_action'] ?? '' ) ); ?>"
+						<?php echo 0 === strpos( Helper::get_string_value( $item['cta_url'] ), 'mailto:' ) ? '' : 'target="_blank" rel="noopener noreferrer"'; ?>
+					>
+						<?php echo esc_html( $item['cta_label'] ); ?>
+					</a>
+					<?php if ( ! empty( $item['dismissible'] ) ) { ?>
+						<a href="<?php echo esc_url( $this->get_dismiss_action_item_url( Helper::get_string_value( $item['id'] ) ) ); ?>" class="button">
+							<?php esc_html_e( 'Dismiss', 'sureforms' ); ?>
+						</a>
+					<?php } ?>
+				</p>
+			</div>
+			<?php
+		}
+	}
+
+	/**
+	 * Dismiss an action item from the classic notice's link.
+	 *
+	 * Hooked - admin_post_srfm_dismiss_action_item_link.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public function handle_dismiss_action_item_link() {
+		if ( ! Helper::current_user_can() ) {
+			wp_die( esc_html__( 'You do not have permission to do this.', 'sureforms' ), 403 );
+		}
+
+		check_admin_referer( 'srfm_dismiss_action_item' );
+
+		$item_id = isset( $_GET['item'] ) ? sanitize_key( wp_unslash( $_GET['item'] ) ) : '';
+
+		$this->dismiss_action_item( $item_id );
+
+		$referer = wp_get_referer();
+
+		wp_safe_redirect( $referer ? $referer : admin_url() );
+		exit;
+	}
+
+	/**
+	 * Whether anything is currently wrong enough to warrant a notice.
+	 *
+	 * Deliberately re-derives the two conditions rather than calling
+	 * get_action_items(), which records an impression as a side effect and must not
+	 * run from a show_if callback.
+	 *
+	 * @since 2.12.6
+	 * @return bool
+	 */
+	public function has_action_item_warnings() {
+		if ( Client_Logger::has_persistent_failures() ) {
+			return true;
+		}
+
+		if ( '' === Helper::get_active_caching_plugin() ) {
+			return false;
+		}
+
+		$dismissed = Helper::get_array_value( Helper::get_srfm_option( 'dismissed_action_items', [] ) );
+
+		return ! in_array( 'caching_plugin', $dismissed, true );
+	}
+
+	/**
+	 * Things on this site that need the owner's attention, newest concern first.
+	 *
+	 * Fed to the dashboard sidebar carousel. Each entry is self-describing so the
+	 * front end has no rules of its own to keep in sync -- adding a new item here
+	 * makes it appear with no JavaScript change.
+	 *
+	 * `dismissible` separates a fault from advice. A run of failed submissions is
+	 * not something to wave away, and clears itself when a submission succeeds. A
+	 * caching plugin being present is information, so it can be dismissed.
+	 *
+	 * @since 2.12.6
+	 * @return array<int,array<string,mixed>>
+	 */
+	public function get_action_items() {
+		if ( ! Helper::current_user_can() ) {
+			return [];
+		}
+
+		$dismissed = Helper::get_array_value( Helper::get_srfm_option( 'dismissed_action_items', [] ) );
+		$warnings  = [];
+		$passing   = [];
+
+		$open = Client_Logger::get_open_failures();
+
+		// One item per category. They read differently to a site owner and must not
+		// be collapsed: submissions failing means visitors cannot reach you, a
+		// notification failing means you are not hearing about entries that did
+		// save, an integration failing means a third party is not receiving them.
+		$categories = [
+			'submission'   => [
+				'id'      => 'form_submission_error',
+				/* translators: %s: form title. */
+				'title'   => __( 'We noticed a form submission failure on %s.', 'sureforms' ),
+				'generic' => __( 'We noticed a form submission failure.', 'sureforms' ),
+				'message' => __( 'Visitors may be unable to reach you, and those entries were not saved.', 'sureforms' ),
+				'passing' => __( 'Form submissions are completing normally.', 'sureforms' ),
+			],
+			'notification' => [
+				'id'      => 'notification_error',
+				/* translators: %s: form title. */
+				'title'   => __( 'We noticed a notification failure on %s.', 'sureforms' ),
+				'generic' => __( 'We noticed a notification failure.', 'sureforms' ),
+				'message' => __( 'The entry was saved, but the email telling you about it could not be sent — so new entries may be arriving without you hearing about them.', 'sureforms' ),
+				'passing' => __( 'Notification emails are sending normally.', 'sureforms' ),
+			],
+			'integration'  => [
+				'id'      => 'integration_error',
+				/* translators: %s: form title. */
+				'title'   => __( 'We noticed an integration failure on %s.', 'sureforms' ),
+				'generic' => __( 'We noticed an integration failure.', 'sureforms' ),
+				'message' => __( 'The entry was saved, but it could not be passed on to a connected service.', 'sureforms' ),
+				'passing' => __( 'Integrations are running normally.', 'sureforms' ),
+			],
+		];
+
+		foreach ( $categories as $category => $copy ) {
+			if ( ! isset( $open[ $category ] ) ) {
+				$passing[] = [
+					'id'          => $copy['id'],
+					'status'      => 'success',
+					'title'       => $copy['passing'],
+					'message'     => '',
+					'cta_label'   => '',
+					'cta_url'     => '',
+					'dismissible' => false,
+				];
+				continue;
+			}
+
+			// Name the form. "A form is failing" is not actionable on a site with
+			// twenty of them, and the title is the first thing anyone asks for.
+			$form_title = Helper::get_string_value( $open[ $category ]['form_title'] ?? '' );
+
+			$warnings[] = [
+				'id'          => $copy['id'],
+				'status'      => 'error',
+				'title'       => '' !== $form_title
+					? sprintf( $copy['title'], $form_title )
+					: $copy['generic'],
+				'message'     => $copy['message'],
+				'cta_label'   => __( 'Contact Support', 'sureforms' ),
+				'cta_url'     => $this->get_support_mailto_url(),
+				'cta_action'  => 'contact_support',
+				'dismissible' => false,
+			];
+		}
+
+		$caching_plugin = Helper::get_active_caching_plugin();
+
+		if ( '' === $caching_plugin ) {
+			$passing[] = [
+				'id'          => 'caching_plugin',
+				'status'      => 'success',
+				'title'       => __( 'No caching plugin that needs configuring was found.', 'sureforms' ),
+				'message'     => '',
+				'cta_label'   => '',
+				'cta_url'     => '',
+				'dismissible' => false,
+			];
+		} elseif ( ! in_array( 'caching_plugin', $dismissed, true ) ) {
+			$warnings[] = [
+				'id'          => 'caching_plugin',
+				'status'      => 'warning',
+				'title'       => sprintf(
+					/* translators: %s: caching plugin name. */
+					__( '%s may interfere with your forms.', 'sureforms' ),
+					$caching_plugin
+				),
+				'message'     => __( 'Caching and JavaScript optimisation can serve a stale copy of your form or load its scripts out of order.', 'sureforms' ),
+				'cta_label'   => __( 'Help Me Fix', 'sureforms' ),
+				'cta_url'     => 'https://sureforms.com/docs/how-to-set-up-sureforms-with-caching-plugins/',
+				'cta_action'  => 'help_me_fix',
+				'dismissible' => true,
+			];
+		}
+
+		// Warnings first: the point of the panel is what needs attention, with the
+		// passing checks below as reassurance rather than as the headline.
+		$items = array_merge( $warnings, $passing );
+
+		$this->track_action_item_impressions( $warnings );
+
+		/**
+		 * Filter the dashboard action items.
+		 *
+		 * Each entry needs id, status ('warning' or 'success'), title, message,
+		 * cta_label, cta_url and dismissible. Only ids in
+		 * handle_dismiss_action_item()'s allowlist can actually be dismissed, so
+		 * adding a dismissible item here also needs a line there.
+		 *
+		 * @since 2.12.6
+		 *
+		 * @param array<int,array<string,mixed>> $items Action items.
+		 */
+		return Helper::apply_filters_as_array( 'srfm_action_items', $items );
+	}
+
+	/**
+	 * Dismiss one action item.
+	 *
+	 * Hooked - wp_ajax_srfm_dismiss_action_item.
+	 *
+	 * Only items get_action_items() marks dismissible can be dismissed, so a
+	 * crafted request cannot silence a genuine fault.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	public function handle_dismiss_action_item() {
+		if ( ! Helper::current_user_can() ) {
+			wp_send_json_error( [ 'message' => __( 'Unauthorized user.', 'sureforms' ) ], 403 );
+			return;
+		}
+
+		if ( ! check_ajax_referer( 'srfm_dismiss_action_item', 'nonce', false ) ) {
+			wp_send_json_error( [ 'message' => __( 'Invalid nonce.', 'sureforms' ) ], 403 );
+			return;
+		}
+
+		$item_id = isset( $_POST['item_id'] ) ? sanitize_key( wp_unslash( $_POST['item_id'] ) ) : '';
+
+		if ( ! $this->dismiss_action_item( $item_id ) ) {
+			wp_send_json_error( [ 'message' => __( 'Invalid parameters.', 'sureforms' ) ], 400 );
+			return;
+		}
+
+		wp_send_json_success();
+	}
+
+	/**
+	 * Nonce-protected URL that repairs the entries table.
+	 *
+	 * Shared by both notice surfaces so there is one repair route, one nonce and one
+	 * place that counts the click. Private, so it stays off the public API and out of
+	 * the test-coverage gate.
+	 *
+	 * @since 2.12.6
+	 * @return string
+	 */
+	private function get_database_repair_url() {
+		return wp_nonce_url(
+			admin_url( 'admin-post.php?action=srfm_repair_entries_table' ),
+			'srfm_repair_entries_table'
+		);
+	}
+
+	/**
+	 * The database notice body, which differs by what the repair will actually do.
+	 *
+	 * Two outcomes are possible and they are not equivalent to the person clicking:
+	 * when the entries table exists under a different prefix — a changed
+	 * `$table_prefix`, a restored dump, a security plugin that renamed tables and
+	 * skipped ours — the repair renames it back and every stored entry comes with
+	 * it. When there is nothing to adopt, the repair creates an empty table and the
+	 * old submissions are not recoverable from here.
+	 *
+	 * Promising the wrong one is how a maintenance prompt turns into a complaint, so
+	 * the copy states which is about to happen.
+	 *
+	 * @since 2.12.6
+	 * @return string
+	 */
+	private function get_database_notice_message() {
+		if ( '' !== Register::get_adoptable_entries_table() ) {
+			return __( 'SureForms found your form entries stored under a different database table prefix. Reconnecting them takes a moment, and your existing entries will be kept.', 'sureforms' );
+		}
+
+		return __( 'SureForms needs to update your database before it can save new form entries. This only takes a moment and will not change your forms or existing content. Entries submitted before now cannot be recovered from here.', 'sureforms' );
+	}
+
+	/**
+	 * Count one sighting of the database notice, at most once per user per day.
+	 *
+	 * While the table is missing the notice renders on every admin page load, on two
+	 * surfaces. Counting each render would rewrite the autoloaded `srfm_options` blob
+	 * on every pageview of a site that is already broken, and one site left unfixed
+	 * would dominate the aggregate. Throttling to a day per user answers the question
+	 * that matters — how many people are seeing this — for one write.
+	 *
+	 * @since 2.12.6
+	 * @return void
+	 */
+	private function track_database_notice_impression() {
+		$user_id = get_current_user_id();
+
+		if ( ! $user_id ) {
+			return;
+		}
+
+		$key = 'srfm_db_notice_seen_' . $user_id;
+
+		if ( get_transient( $key ) ) {
+			return;
+		}
+
+		set_transient( $key, 1, DAY_IN_SECONDS );
+
+		Analytics::events()->track( 'database_error_notice_shown', 'entries' );
+	}
+
+	/**
+	 * Build the setup-card payload (uncached). See get_form_setup_card().
+	 *
+	 * @since 2.12.4
+	 * @return array<string,mixed>|null Card payload, or null when there is no candidate.
+	 */
+	private static function compute_form_setup_card() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || ! post_type_exists( SRFM_FORMS_POST_TYPE ) ) {
+			return null;
+		}
+
+		// Negative cache. Deliberately not a `defined( 'ASTRA_SITES_VER' )` check:
+		// Starter Templates defines that constant in its main plugin file, so it only
+		// exists while the plugin is active, yet neither its uninstall.php nor its
+		// deactivation hook removes the import marker. Gating on the constant would
+		// silently switch this feature off for the very people it targets — anyone who
+		// imported a starter template and then removed the one-shot import plugin.
+		if ( 'no' === get_transient( self::NO_IMPORTED_FORMS_TRANSIENT ) ) {
+			return null;
+		}
+
+		// Only forms created from an Astra Sites starter template — those carry the
+		// marker Starter Templates stamps on imported posts (self::ASTRA_SITES_IMPORT_META).
+		// Prime post + meta caches (the loop reads title, permalink and edit link
+		// per candidate) so this is a single query, not a follow-up per form.
+		$query = new \WP_Query(
+			[
+				'post_type'              => SRFM_FORMS_POST_TYPE,
+				'post_status'            => [ 'publish', 'draft', 'pending' ],
+				'posts_per_page'         => 10,
+				// ID breaks the tie: a starter-template import creates several forms
+				// within the same second, so post_date alone leaves "the newest form"
+				// up to MySQL and it can differ between page loads.
+				'orderby'                => [
+					'date' => 'DESC',
+					'ID'   => 'DESC',
+				],
+				'no_found_rows'          => true,
+				'update_post_meta_cache' => true,
+				'update_post_term_cache' => false,
+				'meta_query'             => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded to 10 recent forms; dashboard-only.
+					[
+						'key'     => self::ASTRA_SITES_IMPORT_META,
+						'compare' => 'EXISTS',
+					],
+				],
+			]
+		);
+
+		// Nothing on this site carries the marker — remember that, so the query does
+		// not repeat on every load. Keyed on the query result rather than on anything
+		// user-specific, so it is safe to share, and invalidated the moment a post is
+		// stamped (see invalidate_starter_template_cache()).
+		if ( empty( $query->posts ) ) {
+			set_transient( self::NO_IMPORTED_FORMS_TRANSIENT, 'no', WEEK_IN_SECONDS );
+		}
+
+		foreach ( $query->posts as $post ) {
+			$form_id = (int) $post->ID;
+
+			if ( ! current_user_can( 'edit_post', $form_id ) ) {
+				continue;
+			}
+
+			$edit_link = get_edit_post_link( $form_id, 'raw' );
+
+			if ( empty( $edit_link ) ) {
+				continue;
+			}
+
+			// The steps are shown as optional next-steps — their completion is not
+			// computed, so the widget simply lists the actions the owner can take.
+			return [
+				'id'           => $form_id,
+				'title'        => get_the_title( $form_id ),
+				'edit_url'     => $edit_link,
+				// Deep-links to the email-notification panel where supported; falls
+				// back to opening the editor when the focus handler isn't present.
+				'email_url'    => add_query_arg( 'srfm_focus', 'notifications', $edit_link ),
+				// Deep-links to the Form Confirmation panel (the Thank You message).
+				'thankyou_url' => add_query_arg( 'srfm_focus', 'thankyou', $edit_link ),
+				// Front-end instant-form page. get_permalink() only yields a working
+				// URL for published forms; a draft/pending form has no public URL, so
+				// omit the view link there (the empty() guard hides the icon).
+				'view_url'     => 'publish' === $post->post_status ? (string) get_permalink( $form_id ) : '',
+			];
+		}
+
+		return null;
+	}
+
+	/**
+	 * Build the Thank You prompt payload (uncached). See get_thankyou_prompt_forms().
+	 *
+	 * @since 2.12.4
+	 * @return array<int,array<string,mixed>> One entry, or none.
+	 */
+	private static function compute_thankyou_prompt_forms() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) || ! post_type_exists( SRFM_FORMS_POST_TYPE ) ) {
+			return [];
+		}
+
+		// Negative cache — this notice renders on every admin screen, so keeping the
+		// query off installs that can never match is what matters here. See
+		// self::NO_IMPORTED_FORMS_TRANSIENT for why this is not gated on whether
+		// Starter Templates is still active: the marker outlives the plugin.
+		if ( 'no' === get_transient( self::NO_IMPORTED_FORMS_TRANSIENT ) ) {
+			return [];
+		}
+
+		// Only forms imported from a Starter Templates (Astra Sites) starter
+		// template — see self::ASTRA_SITES_IMPORT_META. Prime post + meta caches
+		// (the loop reads meta, title and creation time per candidate) so this is a
+		// single query rather than the main query plus a follow-up per form.
+		$query = new \WP_Query(
+			[
+				'post_type'              => SRFM_FORMS_POST_TYPE,
+				'post_status'            => 'publish',
+				'posts_per_page'         => 10,
+				// ID breaks the tie — an import creates several forms in the same
+				// second, so post_date alone makes "newest" MySQL-dependent.
+				'orderby'                => [
+					'date' => 'DESC',
+					'ID'   => 'DESC',
+				],
+				'no_found_rows'          => true,
+				'update_post_meta_cache' => true,
+				'update_post_term_cache' => false,
+				'meta_query'             => [ // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Bounded to 10 recent forms; admin-notice only.
+					[
+						'key'     => self::ASTRA_SITES_IMPORT_META,
+						'compare' => 'EXISTS',
+					],
+				],
+			]
+		);
+
+		// Nothing on this site carries the marker — remember that, so the query does
+		// not repeat on every load. Keyed on the query result rather than on anything
+		// user-specific, so it is safe to share, and invalidated the moment a post is
+		// stamped (see invalidate_starter_template_cache()).
+		if ( empty( $query->posts ) ) {
+			set_transient( self::NO_IMPORTED_FORMS_TRANSIENT, 'no', WEEK_IN_SECONDS );
+		}
+
+		$prompts = [];
+		$now     = time();
+
+		foreach ( $query->posts as $post ) {
+			$form_id = (int) $post->ID;
+
+			if ( ! current_user_can( 'edit_post', $form_id ) ) {
+				continue;
+			}
+
+			$steps = [
+				// A destination for replies: an enabled notification with a recipient.
+				'replies'  => ! self::form_has_reply_destination( $form_id ),
+				// The thank-you message is still the shipped default.
+				'thankyou' => self::is_default_confirmation_message( $form_id ),
+			];
+
+			// Nothing left to finish — no card for this form.
+			if ( ! $steps['replies'] && ! $steps['thankyou'] ) {
+				continue;
+			}
+
+			$edit_link = get_edit_post_link( $form_id, 'raw' );
+
+			if ( empty( $edit_link ) ) {
+				continue;
+			}
+
+			$created  = get_post_time( 'U', true, $form_id );
+			$days_ago = is_int( $created ) ? (int) floor( ( $now - $created ) / DAY_IN_SECONDS ) : 0;
+
+			$prompts[] = [
+				'id'           => $form_id,
+				'title'        => get_the_title( $form_id ),
+				'days_ago'     => max( 0, $days_ago ),
+				'steps'        => $steps,
+				'edit_url'     => $edit_link,
+				// The editor reads srfm_focus to open the matching settings tab:
+				// "notifications" lands on Email Notification (where the reply
+				// destination is set, so the CTA can actually clear that step) and
+				// "thankyou" on Form Confirmation.
+				'replies_url'  => add_query_arg( 'srfm_focus', 'notifications', $edit_link ),
+				'thankyou_url' => add_query_arg( 'srfm_focus', 'thankyou', $edit_link ),
+			];
+
+			// One card is enough — surface only the latest form needing setup.
+			break;
+		}
+
+		return $prompts;
+	}
+
+	/**
+	 * Build the Thank You notice's inner markup (title, sentence, action buttons).
+	 *
+	 * @param array<string,mixed> $form Prompt payload from get_thankyou_prompt_forms().
+	 *
+	 * @since 2.12.4
+	 * @return string
+	 */
+	private static function build_thankyou_notice_markup( $form ) {
+		// The prompt only surfaces starter-template imports (see the meta gate), so
+		// the form was created for the user rather than by them. Kept generic — no
+		// per-step claim — so it is always accurate whatever the user has since
+		// changed, while the action buttons point to the specific things to finish.
+		$sentence = __( 'We’ve already created this form for you. Finish customising it so it’s ready to collect real submissions.', 'sureforms' );
+
+		return self::build_srfm_notice_markup(
+			sprintf(
+				/* translators: %s: form name. */
+				__( 'Finish setting up “%s”', 'sureforms' ),
+				$form['title']
+			),
+			$sentence,
+			[
+				[
+					'text'     => __( 'Edit form', 'sureforms' ),
+					'url'      => $form['edit_url'],
+					'primary'  => true,
+					'class'    => 'srfm-ty-edit-form',
+					'external' => true,
+				],
+				[
+					'text'     => __( 'Edit the Thank You message', 'sureforms' ),
+					'url'      => $form['thankyou_url'],
+					'class'    => 'srfm-ty-edit-thankyou',
+					'external' => true,
+				],
+				[
+					'text'     => __( 'Set where replies go', 'sureforms' ),
+					'url'      => $form['replies_url'],
+					'class'    => 'srfm-ty-set-replies',
+					'external' => true,
+				],
+			]
+		);
+	}
+
+	/**
+	 * Build the shared SureForms admin-notice body: title, sentence, action row.
+	 *
+	 * One builder for every SureForms notice so they cannot drift into looking like
+	 * two different plugins. Everything is escaped here rather than by the caller —
+	 * the notices library runs the result through wp_kses_post(), which would strip
+	 * anything richer anyway.
+	 *
+	 * @param string                         $title   Notice heading.
+	 * @param string                         $text    Supporting sentence.
+	 * @param array<int,array<string,mixed>> $actions Action links. Each accepts
+	 *                                                text, url, and optionally
+	 *                                                primary, class, external,
+	 *                                                dismiss and snooze (seconds).
+	 * @since 2.12.6
+	 * @return string
+	 */
+	private static function build_srfm_notice_markup( $title, $text, $actions ) {
+		ob_start();
+		?>
+		<p class="srfm-notice__title"><?php echo esc_html( $title ); ?></p>
+		<p class="srfm-notice__text"><?php echo esc_html( $text ); ?></p>
+		<p class="srfm-notice__actions">
+			<?php
+			foreach ( $actions as $action ) {
+				if ( empty( $action['text'] ) || ! isset( $action['url'] ) ) {
+					continue;
+				}
+
+				$classes = [ 'button' ];
+
+				if ( ! empty( $action['primary'] ) ) {
+					$classes[] = 'button-primary';
+				}
+
+				// astra-notice-close is what the library binds its dismiss handler to.
+				if ( ! empty( $action['dismiss'] ) ) {
+					$classes[] = 'astra-notice-close';
+				}
+
+				if ( ! empty( $action['class'] ) ) {
+					$classes[] = $action['class'];
+				}
+				?>
+				<a
+					class="<?php echo esc_attr( implode( ' ', $classes ) ); ?>"
+					href="<?php echo esc_url( $action['url'] ); ?>"
+					<?php echo empty( $action['snooze'] ) ? '' : ' data-repeat-notice-after="' . esc_attr( (string) $action['snooze'] ) . '"'; ?>
+					<?php echo empty( $action['external'] ) ? '' : ' target="_blank" rel="noopener noreferrer"'; ?>
+				><?php echo esc_html( $action['text'] ); ?></a>
+				<?php
+			}
+			?>
+		</p>
+		<?php
+		return (string) ob_get_clean();
+	}
+
+	/**
 	 * Determine whether a notice callback is owned by SureForms.
 	 *
 	 * Recognises object methods on classes in the `SRFM` / `SRFM_PRO` namespaces
@@ -2253,66 +4095,6 @@ JS;
 		}
 		$page = sanitize_key( wp_unslash( $_GET['page'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only screen detection, no state change.
 		return 0 === strpos( $page, 'sureforms' ) || 0 === strpos( $page, 'srfm' );
-	}
-
-	/**
-	 * Build the shared HTML markup for admin notices.
-	 *
-	 * @since 2.5.2
-	 *
-	 * All text parameters must be pre-escaped by the caller (e.g. via esc_html__()).
-	 * URL parameters must be pre-escaped via esc_url().
-	 *
-	 * @param string $heading      The notice heading text (pre-escaped).
-	 * @param string $message      The notice body text (pre-escaped).
-	 * @param string $cta_url      The primary CTA URL (pre-escaped).
-	 * @param string $cta_text     The primary CTA button text (pre-escaped).
-	 * @param string $snooze_text  The snooze button text (pre-escaped).
-	 * @param string $dismiss_text    The dismiss button text (pre-escaped).
-	 * @param int    $snooze_duration Snooze duration in seconds for the data-repeat-notice-after attribute.
-	 * @param bool   $external_cta   Whether the CTA opens in a new tab and also dismisses the notice
-	 *                               via the astra-notice-close class. Default false.
-	 * @return string The notice HTML markup.
-	 */
-	private function build_notice_markup( $heading, $message, $cta_url, $cta_text, $snooze_text, $dismiss_text, $snooze_duration, $external_cta = false ) {
-		$image_path = esc_url( SRFM_URL . 'admin/assets/sureforms-logo.png' );
-		$cta_class  = $external_cta ? 'astra-notice-close button-primary' : 'button-primary';
-		$cta_attrs  = $external_cta ? ' target="_blank" rel="noopener noreferrer"' : '';
-
-		return sprintf(
-			'<div class="notice-image">
-                <img src="%1$s" class="custom-logo" alt="SureForms" itemprop="logo">
-            </div>
-            <div class="notice-content">
-                <div class="notice-heading">
-                    %2$s
-                </div>
-                %3$s<br />
-                <div class="astra-review-notice-container">
-                    <a href="%4$s" class="%5$s"%6$s>
-                    %7$s
-                    </a>
-                <span class="dashicons dashicons-clock" aria-hidden="true"></span>
-                    <a href="#" data-repeat-notice-after="%8$s" class="astra-notice-close">
-                    %9$s
-                    </a>
-                <span class="dashicons dashicons-smiley" aria-hidden="true"></span>
-                    <a href="#" class="astra-notice-close">
-                    %10$s
-                    </a>
-                </div>
-            </div>',
-			$image_path,
-			$heading,
-			$message,
-			$cta_url,
-			esc_attr( $cta_class ),
-			$cta_attrs,
-			$cta_text,
-			$snooze_duration,
-			$snooze_text,
-			$dismiss_text
-		);
 	}
 
 	/**
@@ -2433,4 +4215,215 @@ JS;
 		return false;
 	}
 
+	/**
+	 * Nonced URL that dismisses one action item without JavaScript.
+	 *
+	 * The classic notice cannot use the AJAX dismissal the carousel uses, and
+	 * WordPress's own `is-dismissible` only hides the notice for that pageview.
+	 *
+	 * @param string $item_id Item to dismiss.
+	 * @since 2.12.6
+	 * @return string
+	 */
+	private function get_dismiss_action_item_url( $item_id ) {
+		return wp_nonce_url(
+			add_query_arg(
+				[
+					'action' => 'srfm_dismiss_action_item_link',
+					'item'   => $item_id,
+				],
+				admin_url( 'admin-post.php' )
+			),
+			'srfm_dismiss_action_item'
+		);
+	}
+
+	/**
+	 * Count one sighting of each warning, at most once per user per day.
+	 *
+	 * Throttled because the classic notice renders on every admin page: counting
+	 * each render would measure how much wp-admin someone browses, not how many
+	 * sites are affected. A day per user answers the question that matters -- how
+	 * many people are seeing this -- for one option write.
+	 *
+	 * Passing checks are not counted. "Nothing is wrong" is not an impression.
+	 *
+	 * @param array<int,array<string,mixed>> $warnings Warning items only.
+	 * @since 2.12.6
+	 * @return void
+	 */
+	private function track_action_item_impressions( $warnings ) {
+		if ( empty( $warnings ) || wp_doing_ajax() ) {
+			return;
+		}
+
+		$user_id = get_current_user_id();
+
+		if ( ! $user_id ) {
+			return;
+		}
+
+		$counts  = Helper::get_array_value( Helper::get_srfm_option( 'action_item_impressions', [] ) );
+		$changed = false;
+
+		foreach ( $warnings as $warning ) {
+			$item_id = Helper::get_string_value( $warning['id'] ?? '' );
+
+			if ( '' === $item_id ) {
+				continue;
+			}
+
+			$seen_key = 'srfm_action_item_seen_' . $item_id . '_' . $user_id;
+
+			if ( get_transient( $seen_key ) ) {
+				continue;
+			}
+
+			set_transient( $seen_key, 1, DAY_IN_SECONDS );
+
+			$counts[ $item_id ] = Helper::get_integer_value( $counts[ $item_id ] ?? 0 ) + 1;
+			$changed            = true;
+
+			// Cumulative, so $force = true: each new count is a new value and is
+			// re-sent, while an identical repeat short-circuits inside track().
+			Analytics::events()->track(
+				$item_id . '_notice_shown',
+				(string) $counts[ $item_id ],
+				[],
+				true
+			);
+		}
+
+		if ( $changed ) {
+			Helper::update_srfm_option( 'action_item_impressions', $counts );
+		}
+	}
+
+	/**
+	 * Pre-addressed support email for a run of failed submissions.
+	 *
+	 * Carries the details support would otherwise have to ask for, so the first
+	 * reply can be an answer rather than a questionnaire, along with the recent log
+	 * entries inline.
+	 *
+	 * The log is pasted into the body rather than attached because mailto has no
+	 * attachment parameter -- browsers drop any attempt to add one -- and it is a
+	 * tail rather than the whole file because a megabyte of JSON would exceed the
+	 * URL length every mail client enforces.
+	 *
+	 * @since 2.12.6
+	 * @return string
+	 */
+	private function get_support_mailto_url() {
+		$subject = sprintf(
+			/* translators: %s: site host. */
+			__( 'SureForms: form submissions are failing on %s', 'sureforms' ),
+			Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) )
+		);
+
+		$log   = Client_Logger::get_tail();
+		$body  = $this->get_support_message();
+		$body .= "\r\n\r\n" . '---' . "\r\n";
+
+		if ( '' === $log['text'] ) {
+			$body .= __( 'Debug log: no entries recorded.', 'sureforms' );
+		} else {
+			$body .= sprintf(
+				/* translators: 1: entries shown, 2: entries recorded. */
+				__( 'Debug log (most recent %1$d of %2$d entries)', 'sureforms' ),
+				$log['shown'],
+				$log['total']
+			) . "\r\n";
+
+			// Fenced so it survives a reply and reads as data rather than prose in
+			// clients that render Markdown.
+			$body .= '```' . "\r\n" . str_replace( "\n", "\r\n", $log['text'] ) . "\r\n" . '```';
+
+			if ( $log['shown'] < $log['total'] ) {
+				$body .= "\r\n\r\n" . __( 'Older entries were left out to keep this email within the length a mail client accepts. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
+			}
+		}
+
+		return 'mailto:support@sureforms.com?' . http_build_query(
+			[
+				'subject' => $subject,
+				'body'    => $body,
+			],
+			'',
+			'&',
+			PHP_QUERY_RFC3986
+		);
+	}
+
+	/**
+	 * Diagnostics block for the support email.
+	 *
+	 * Carries what support would otherwise have to ask for, so the first reply can
+	 * be an answer rather than a questionnaire.
+	 *
+	 * @since 2.12.6
+	 * @return string
+	 */
+	private function get_support_message() {
+		global $wp_version;
+
+		$count = Client_Logger::get_fault_streak();
+
+		$lines = [
+			__( 'Hello SureForms support,', 'sureforms' ),
+			'',
+			sprintf(
+				/* translators: %d: number of consecutive failed submissions. */
+				_n(
+					'SureForms has recorded %d form submission in a row that could not be completed.',
+					'SureForms has recorded %d form submissions in a row that could not be completed.',
+					$count,
+					'sureforms'
+				),
+				$count
+			),
+			'',
+			'---',
+			__( 'Site details', 'sureforms' ),
+			'Site: ' . home_url(),
+			'SureForms: ' . SRFM_VER,
+			'SureForms Pro: ' . ( Helper::has_pro() && defined( 'SRFM_PRO_VER' ) ? SRFM_PRO_VER : __( 'not active', 'sureforms' ) ),
+			'WordPress: ' . Helper::get_string_value( $wp_version ),
+			'PHP: ' . PHP_VERSION,
+			'Caching: ' . ( '' !== Helper::get_active_caching_plugin() ? Helper::get_active_caching_plugin() : __( 'none detected', 'sureforms' ) ),
+			'Consecutive failures: ' . $count,
+		];
+
+		return implode( "\r\n", $lines );
+	}
+
+	/**
+	 * Record one dismissal, shared by the AJAX and no-JS entry points.
+	 *
+	 * Allowlisted, so only advisory items can be dismissed. A run of failed
+	 * submissions is a fault and must stay put until it actually resolves --
+	 * otherwise a crafted request could silence the one message that matters.
+	 *
+	 * @param string $item_id Item to dismiss.
+	 * @since 2.12.6
+	 * @return bool False when the id is not dismissible.
+	 */
+	private function dismiss_action_item( $item_id ) {
+		if ( ! in_array( $item_id, [ 'caching_plugin' ], true ) ) {
+			return false;
+		}
+
+		$dismissed = Helper::get_array_value( Helper::get_srfm_option( 'dismissed_action_items', [] ) );
+
+		if ( ! in_array( $item_id, $dismissed, true ) ) {
+			$dismissed[] = $item_id;
+			Helper::update_srfm_option( 'dismissed_action_items', $dismissed );
+
+			// Recorded here rather than at each caller: both the cross in the
+			// dashboard panel and the no-JS link in the classic notice land here.
+			Analytics::events()->track( $item_id . '_notice_dismiss', 'dismissed' );
+		}
+
+		return true;
+	}
 }

@@ -22,7 +22,31 @@ import Separator from '@Components/separator';
 import { applyFilters } from '@wordpress/hooks';
 import SRFMHelpText from '@Components/help-text';
 
-const SRFMNumberControl = ( props ) => {
+const SRFM_NUMBER_CONTROL_DEFAULTS = {
+	label: __( 'Margin', 'sureforms' ),
+	className: '',
+	allowReset: true,
+	isShiftStepEnabled: true,
+	max: Infinity,
+	min: -Infinity,
+	resetFallbackValue: '',
+	placeholder: null,
+	unit: [ 'px', 'em' ],
+	displayUnit: true,
+	responsive: false,
+	showControlHeader: true,
+	inlineControl: true,
+	dynamicContentType: 'text',
+	enableDynamicContent: false,
+	// name: attribute name as a string,  // a prop used when dynamic content support needs to be added to an instance of this control.
+	help: false,
+};
+
+// Reads `props.*` throughout and forwards the whole object, so the defaults-merge
+// idiom is kept deliberately rather than destructuring every reference. No call
+// site passes an explicit `undefined` for a defaulted key.
+const SRFMNumberControl = ( rawProps ) => {
+	const props = { ...SRFM_NUMBER_CONTROL_DEFAULTS, ...rawProps };
 	const [ panelNameForHook, setPanelNameForHook ] = useState( null );
 	const panelRef = useRef( null );
 	// Add and remove the CSS on the drop and remove of the component.
@@ -257,26 +281,6 @@ const SRFMNumberControl = ( props ) => {
 			{ controlAfterDomElement }
 		</div>
 	);
-};
-
-SRFMNumberControl.defaultProps = {
-	label: __( 'Margin', 'sureforms' ),
-	className: '',
-	allowReset: true,
-	isShiftStepEnabled: true,
-	max: Infinity,
-	min: -Infinity,
-	resetFallbackValue: '',
-	placeholder: null,
-	unit: [ 'px', 'em' ],
-	displayUnit: true,
-	responsive: false,
-	showControlHeader: true,
-	inlineControl: true,
-	dynamicContentType: 'text',
-	enableDynamicContent: false,
-	// name: attribute name as a string,  // a prop used when dynamic content support needs to be added to an instance of this control.
-	help: false,
 };
 
 export default SRFMNumberControl;

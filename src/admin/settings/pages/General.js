@@ -216,6 +216,41 @@ const AdminNotificationContent = ( {
 };
 
 /**
+ * Form Views & Conversion tracking settings section.
+ *
+ * @param {Object}   props
+ * @param {Object}   props.generalTabOptions    - General settings.
+ * @param {Function} props.updateGlobalSettings - Settings update handler.
+ */
+const FormViewsTrackingContent = ( {
+	generalTabOptions,
+	updateGlobalSettings,
+} ) => {
+	return (
+		<Switch
+			label={ {
+				heading: __(
+					'Show views and conversion rate',
+					'sureforms'
+				),
+				description: __(
+					'Adds the Views and Conversion Rate columns to the Forms list. A view is counted once per page visit when the form appears on screen, and the conversion rate is the share of those views that ended in a submission. Counting starts the first time you turn this on, so submissions received before then are not counted towards the rate. Turning it off afterwards only hides the columns — counting continues, so the figures are up to date if you switch it back on.',
+					'sureforms'
+				),
+			} }
+			value={ generalTabOptions.srfm_form_views_tracking }
+			onChange={ ( value ) =>
+				updateGlobalSettings(
+					'srfm_form_views_tracking',
+					value,
+					'general-settings'
+				)
+			}
+		/>
+	);
+};
+
+/**
  * Usage Tracking / Analytics settings section.
  *
  * @param {Object}   props
@@ -261,11 +296,162 @@ const UsageTrackingContent = ( {
 	);
 };
 
+/**
+ * Debug logging settings section.
+ *
+ * @param {Object}   props
+ * @param {Object}   props.generalTabOptions    - General settings.
+ * @param {Function} props.updateGlobalSettings - Settings update handler.
+ * @param {Object}   props.logMeta              - Server-reported log size and expiry.
+ * @param {Function} props.setLogMeta           - Updates the reported log status.
+ */
+// Mirrors Client_Logger::MAX_FILE_SIZE. Once the file is full it stops accepting
+// lines rather than evicting the repro someone is trying to capture, so the UI has
+// to say so — silently dropping new entries is the one bad outcome here.
+const MAX_LOG_SIZE = 1048576;
+
+const LogsContent = ( {
+	generalTabOptions,
+	updateGlobalSettings,
+	logMeta,
+	setLogMeta,
+} ) => {
+	const [ clearing, setClearing ] = useState( false );
+	const [ confirmingClear, setConfirmingClear ] = useState( false );
+
+	const nonce = window?.srfm_admin?.client_logs_nonce ?? '';
+	const ajaxUrl = window?.srfm_admin?.ajax_url ?? '';
+	const downloadUrl = `${ ajaxUrl }?action=srfm_download_logs&_wpnonce=${ nonce }`;
+
+	const formatSize = ( bytes ) => {
+		if ( bytes < 1024 ) {
+			return `${ bytes } B`;
+		}
+		if ( bytes < 1048576 ) {
+			return `${ Math.round( bytes / 1024 ) } KB`;
+		}
+		return `${ ( bytes / 1048576 ).toFixed( 1 ) } MB`;
+	};
+
+	const handleClear = async () => {
+		if ( clearing ) {
+			return;
+		}
+
+		// Two-step rather than a native confirm(): this deletes the only evidence
+		// anyone has during an active investigation, and a blocking dialog in
+		// wp-admin is worse than an inline second click.
+		if ( ! confirmingClear ) {
+			setConfirmingClear( true );
+			return;
+		}
+
+		setConfirmingClear( false );
+		setClearing( true );
+		try {
+			const response = await fetch(
+				`${ ajaxUrl }?action=srfm_clear_logs&_wpnonce=${ nonce }`,
+				{ method: 'POST', credentials: 'same-origin' }
+			);
+
+			// fetch only rejects on a network failure, so a 403 from a stale nonce
+			// or a 500 resolves normally. Without this the toast said the log was
+			// cleared and the size was zeroed -- hiding the row -- while the file
+			// was still on disk.
+			if ( ! response.ok ) {
+				throw new Error( `HTTP ${ response.status }` );
+			}
+
+			setLogMeta( { ...logMeta, size: 0 } );
+			toast.success( __( 'Log cleared.', 'sureforms' ) );
+		} catch ( error ) {
+			toast.error( __( 'Could not clear the log.', 'sureforms' ) );
+		} finally {
+			setClearing( false );
+		}
+	};
+
+	return (
+		<>
+			<Switch
+				label={ {
+					heading: __( 'Enable logs', 'sureforms' ),
+					description: __(
+						'Records form submission failures reported by the browser, so you can send the log to support instead of reading the console. Nothing is written while your forms are working, and submitted values are never stored.',
+						'sureforms'
+					),
+				} }
+				value={ generalTabOptions.srfm_enable_logs }
+				onChange={ ( value ) =>
+					updateGlobalSettings(
+						'srfm_enable_logs',
+						value,
+						'general-settings'
+					)
+				}
+			/>
+			{ generalTabOptions.srfm_enable_logs && (
+				<div className="flex items-center gap-3">
+					<Button
+						variant="outline"
+						size="md"
+						tag="a"
+						href={ downloadUrl }
+						className="bg-background-secondary no-underline hover:no-underline"
+					>
+						{ __( 'Download log', 'sureforms' ) }
+					</Button>
+					<Button
+						variant="ghost"
+						size="md"
+						onClick={ handleClear }
+						disabled={ clearing }
+						aria-busy={ clearing }
+						icon={ clearing && <Loader /> }
+						iconPosition="left"
+						{ ...( confirmingClear && {
+							destructive: true,
+						} ) }
+					>
+						{ confirmingClear
+							? __( 'Confirm delete', 'sureforms' )
+							: __( 'Clear', 'sureforms' ) }
+					</Button>
+					{ confirmingClear && ! clearing && (
+						<Button
+							variant="ghost"
+							size="md"
+							onClick={ () => setConfirmingClear( false ) }
+						>
+							{ __( 'Cancel', 'sureforms' ) }
+						</Button>
+					) }
+					{ logMeta?.size >= MAX_LOG_SIZE && (
+						<span className="text-sm text-support-error">
+							{ __(
+								'Log is full — download and clear it to keep recording.',
+								'sureforms'
+							) }
+						</span>
+					) }
+					{ logMeta?.size > 0 && logMeta.size < MAX_LOG_SIZE && (
+						<span className="text-sm text-text-secondary">
+							{ formatSize( logMeta.size ) }
+						</span>
+					) }
+				</div>
+			) }
+		</>
+	);
+};
+
 const GeneralPage = ( {
 	loading,
 	generalTabOptions,
 	emailTabOptions,
 	updateGlobalSettings,
+	logMeta,
+	setLogMeta,
 } ) => {
 	// Detect if user arrived from the Learn section (email-notification lesson).
 	const [ isLearnSource ] = useState(
@@ -330,11 +516,33 @@ const GeneralPage = ( {
 			/>
 			<ContentSection
 				loading={ loading }
+				title={ __( 'Form Views & Conversion', 'sureforms' ) }
+				content={
+					<FormViewsTrackingContent
+						generalTabOptions={ generalTabOptions }
+						updateGlobalSettings={ updateGlobalSettings }
+					/>
+				}
+			/>
+			<ContentSection
+				loading={ loading }
 				title={ __( 'Anonymous Analytics', 'sureforms' ) }
 				content={
 					<UsageTrackingContent
 						generalTabOptions={ generalTabOptions }
 						updateGlobalSettings={ updateGlobalSettings }
+					/>
+				}
+			/>
+			<ContentSection
+				loading={ loading }
+				title={ __( 'Logs', 'sureforms' ) }
+				content={
+					<LogsContent
+						generalTabOptions={ generalTabOptions }
+						updateGlobalSettings={ updateGlobalSettings }
+						logMeta={ logMeta }
+						setLogMeta={ setLogMeta }
 					/>
 				}
 			/>

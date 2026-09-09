@@ -36,7 +36,8 @@ const FormsListingPage = () => {
 		resetFilters: resetUrlFilters,
 	} = useFormsFilters();
 
-	const { sortBy, sortOrder, handleSort, getSortDirection } = useFormsSort();
+	const { sortBy, sortOrder, handleSort, getSortDirection, resetSort } =
+		useFormsSort();
 
 	const { currentPage, perPage, setCurrentPage, setPerPage } =
 		useFormsPagination();
@@ -92,6 +93,25 @@ const FormsListingPage = () => {
 
 	// Extract data from API response
 	const forms = formsData?.forms || [];
+	// Server-evaluated per request, so the columns and the rows always agree.
+	const viewColumnsEnabled = Boolean( formsData?.views_enabled );
+
+	// Whether the server actually ordered by the requested metric. It falls back to
+	// date order both when the feature is switched off and when the site is past the
+	// metric-sort ceiling (>500 forms) — in either case the header would otherwise
+	// keep an active sort arrow on a column whose order was silently ignored, which
+	// reads as a broken sort. Reset the sort once we know it was not applied.
+	const metricSortApplied = Boolean( formsData?.metric_sort_applied );
+	useEffect( () => {
+		if (
+			! isLoading &&
+			formsData &&
+			[ 'views', 'conversion_rate' ].includes( sortBy ) &&
+			! metricSortApplied
+		) {
+			resetSort();
+		}
+	}, [ isLoading, formsData, metricSortApplied, sortBy, resetSort ] );
 	const paginationData = {
 		total: formsData?.total || 0,
 		totalPages: Math.max( 1, formsData?.total_pages || 0 ),
@@ -610,6 +630,9 @@ const FormsListingPage = () => {
 								) : (
 									<FormsTable
 										data={ forms }
+										showViewColumns={
+											viewColumnsEnabled
+										}
 										selectedItems={ selectedForms }
 										onToggleAll={ handleToggleAll }
 										onChangeRowSelection={

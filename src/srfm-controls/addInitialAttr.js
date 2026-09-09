@@ -46,7 +46,7 @@ const addInitialAttr = ( ChildComponent ) => {
 		useEffect( () => {
 			const newBlockId = clientId.substr( 0, 8 );
 			const attributeObject = { block_id: newBlockId };
-			const getAllBlocks = select( 'core/editor' )?.getBlocks();
+			const getAllBlocks = select( 'core/block-editor' )?.getBlocks();
 			const { blockIds, clientIds } = getAllBlocks
 				? getUniqId( getAllBlocks )
 				: { blockIds: [], clientIds: [] };

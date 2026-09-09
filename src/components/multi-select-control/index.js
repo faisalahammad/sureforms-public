@@ -13,19 +13,14 @@ const propTypes = {
 	setAttributes: PropTypes.func,
 };
 
-const defaultProps = {
-	label: '',
-	options: [],
-	data: {
-		label: '',
-		value: [],
-	},
-	isSearchable: false,
-	setAttributes: () => {},
-};
-
 export default function SRFMMultiSelectControl( props ) {
-	const { label, options, data, isSearchable, setAttributes } = props;
+	const {
+		label = '',
+		options = [],
+		data = { label: '', value: [] },
+		isSearchable = false,
+		setAttributes = () => {},
+	} = props;
 	const [ panelNameForHook, setPanelNameForHook ] = useState( null );
 	const panelRef = useRef( null );
 	const { getSelectedBlock } = select( 'core/block-editor' );
@@ -85,4 +80,3 @@ export default function SRFMMultiSelectControl( props ) {
 }
 
 SRFMMultiSelectControl.propTypes = propTypes;
-SRFMMultiSelectControl.defaultProps = defaultProps;

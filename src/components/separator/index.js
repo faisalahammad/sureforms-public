@@ -17,10 +17,7 @@ const propTypes = {
 	disabledTopSpace: PropTypes.bool,
 };
 
-const defaultProps = {
-	disabledTopSpace: false,
-};
-export default function Separator( { disabledTopSpace } ) {
+export default function Separator( { disabledTopSpace = false } ) {
 	const [ panelNameForHook, setPanelNameForHook ] = useState( null );
 	const panelRef = useRef( null );
 	// Add and remove the CSS on the drop and remove of the component.
@@ -62,4 +59,3 @@ export default function Separator( { disabledTopSpace } ) {
 }
 
 Separator.propTypes = propTypes;
-Separator.defaultProps = defaultProps;

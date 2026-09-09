@@ -485,6 +485,15 @@ class Front_End {
 		// Block IDs that produced a verified payment on this submission.
 		$verified_block_ids = [];
 
+		// Field keys of every payment field seen in this submission, and the
+		// subset whose payment we actually verified below. A payment field's
+		// value is only a trustworthy payment-record id once verified here; any
+		// field left unverified is cleared before it reaches the submission data,
+		// so the {form-payment} smart tag can never resolve a client-supplied id
+		// to an arbitrary payment row.
+		$payment_field_names  = [];
+		$verified_field_names = [];
+
 		// Loop through form data to find payment fields.
 		foreach ( $form_data as $field_name => $field_value ) {
 			// Check if field name contains "-lbl-" pattern.
@@ -504,6 +513,8 @@ class Front_End {
 			if ( ! ( strpos( $name_parts[0], 'srfm-payment-' ) === 0 ) ) {
 				continue;
 			}
+
+			$payment_field_names[] = $field_name;
 
 			// Value will be in the form of the json string.
 			$payment_value = json_decode( $field_value, true );
@@ -552,6 +563,16 @@ class Front_End {
 				$form_data[ $field_name ] = $payment_response['payment_id'];
 
 				$verified_block_ids[ Helper::get_string_value( $block_id ) ] = true;
+
+				$verified_field_names[ $field_name ] = true;
+			}
+		}
+
+		// Deny-by-default: drop any payment field we did not verify this request,
+		// so its raw client value cannot later be read back as a payment-record id.
+		foreach ( $payment_field_names as $payment_field_name ) {
+			if ( ! isset( $verified_field_names[ $payment_field_name ] ) ) {
+				$form_data[ $payment_field_name ] = '';
 			}
 		}
 
@@ -1142,10 +1163,11 @@ class Front_End {
 	/**
 	 * Fail closed when a form's payment field carries no verified payment.
 	 *
-	 * Payment verification above is driven entirely by what the client submitted: strip
-	 * the srfm-payment-* field from the POST body and every branch simply `continue`d,
-	 * so the entry was created, notifications fired and nothing was paid. The
-	 * requirement therefore has to come from the stored form config instead.
+	 * SECURITY INVARIANT — the payment requirement must come from the stored form
+	 * config, never from the submitted payload. Verification driven by what the client
+	 * sent can only confirm the payments it was given; it cannot know about one that
+	 * was never presented. Deriving the requirement from the saved form keeps a
+	 * submission that carries no payment field from being treated as complete.
 	 *
 	 * @param array<mixed>       $form_data          Form data.
 	 * @param array<string,true> $verified_block_ids Payment block IDs verified on this submission.

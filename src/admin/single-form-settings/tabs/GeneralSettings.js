@@ -12,6 +12,11 @@ import { applyFilters } from '@wordpress/hooks';
 import Dialog from '../components/dialog/Dialog';
 import { FormRestrictionProvider } from '../components/form-restrictions/context';
 import { prepareBlockSlugs } from '@Utils/Helpers';
+import {
+	srfmDeepLinkFocus,
+	SRFM_DEEP_LINK_TABS,
+	deepLinkState,
+} from '../deep-link';
 
 let prevMetaHash = '';
 
@@ -48,7 +53,7 @@ function GeneralSettings( props ) {
 
 		setOpen( false );
 
-		if ( btoa( JSON.stringify( sureformsKeys ) ) !== prevMetaHash ) {
+		if ( JSON.stringify( sureformsKeys ) !== prevMetaHash ) {
 			createNotice(
 				'warning',
 				__(
@@ -219,7 +224,7 @@ function GeneralSettings( props ) {
 			if ( tabId ) {
 				setPopupTab( tabId );
 				setOpen( true );
-				prevMetaHash = btoa( JSON.stringify( sureformsKeys ) );
+				prevMetaHash = JSON.stringify( sureformsKeys );
 			}
 		};
 
@@ -237,6 +242,41 @@ function GeneralSettings( props ) {
 			);
 		};
 	}, [ sureformsKeys ] );
+
+	// Deep-link support: open a specific Form Settings tab when the editor is
+	// reached with ?srfm_focus=... — the dashboard "Finish setting up" notice CTA
+	// uses this so "Edit the thank-you message" lands on Form Confirmation.
+	//
+	// This component only mounts once the Form Options panel is open; the editor
+	// root (Editor.js) is responsible for ensuring that (sidebar + panel). Once
+	// mounted, this fires a single synchronous dispatch to the sibling listener
+	// effect above (declared first, so React registers it before this one runs)
+	// and sets the shared deepLinkState.consumed — which stops the root's opener
+	// loop and prevents a later panel remount reopening the dialog over the user's
+	// work.
+	useEffect( () => {
+		if ( deepLinkState.consumed ) {
+			return;
+		}
+
+		const tabId = Object.prototype.hasOwnProperty.call(
+			SRFM_DEEP_LINK_TABS,
+			srfmDeepLinkFocus
+		)
+			? SRFM_DEEP_LINK_TABS[ srfmDeepLinkFocus ]
+			: null;
+
+		if ( ! tabId ) {
+			return;
+		}
+
+		deepLinkState.consumed = true;
+		window.dispatchEvent(
+			new CustomEvent( 'srfm-open-form-settings', {
+				detail: { tabId },
+			} )
+		);
+	}, [] );
 
 	return (
 		<>

@@ -750,6 +750,41 @@ class Helper {
 	}
 
 	/**
+	 * Resolve the submitting user, surviving REST's nonce-less de-authentication.
+	 *
+	 * The public form endpoints authenticate with the HMAC Submit_Token rather than
+	 * a nonce, because the form markup is page-cacheable and core answers a nonce
+	 * that fails verification with a hard 403 — a value baked into a cached page
+	 * would break submissions once it aged out.
+	 *
+	 * The trade-off is that `rest_cookie_check_errors()` treats a cookie-carrying
+	 * REST request with no nonce as anonymous and calls `wp_set_current_user( 0 )`
+	 * before dispatch. So `get_current_user_id()` returns 0 during a submission even
+	 * when the visitor is signed in, which silently drops entry attribution and
+	 * blanks every `{user_*}` smart tag.
+	 *
+	 * `wp_validate_auth_cookie()` reads the logged-in cookie directly and is
+	 * unaffected by that reset. It verifies the cookie's HMAC, so the identity is
+	 * authenticated, not merely asserted — this is the same check core itself uses
+	 * for cookie auth, and the pattern already used by the Pro login route.
+	 *
+	 * Returns 0 for genuinely anonymous submissions, so callers can keep treating
+	 * falsy as "not logged in".
+	 *
+	 * @since 2.12.6
+	 * @return int User ID, or 0 when the submitter is not signed in.
+	 */
+	public static function get_submitting_user_id() {
+		$user_id = get_current_user_id();
+
+		if ( $user_id ) {
+			return $user_id;
+		}
+
+		return absint( wp_validate_auth_cookie( '', 'logged_in' ) );
+	}
+
+	/**
 	 * Check if the current user has a given capability.
 	 *
 	 * @param string       $capability The capability to check.
@@ -2172,6 +2207,62 @@ class Helper {
 	 */
 	public static function get_block_name_from_field( $field_name ) {
 		return implode( '-', array_slice( explode( '-', explode( '-lbl-', $field_name )[0] ), 0, 2 ) );
+	}
+
+	/**
+	 * The active caching plugin, if there is one.
+	 *
+	 * Caching matters to SureForms because a cached page serves the same HTML to
+	 * everyone: the submission token is embedded at render time, and an
+	 * aggressively cached or JS-combining setup can serve a stale token or reorder
+	 * the scripts a form depends on. This is what surfaces that to the site owner
+	 * before it turns into "my form stopped working".
+	 *
+	 * Detection is by plugin path, mirroring is_any_smtp_plugin_active(), including
+	 * the multisite network-active merge.
+	 *
+	 * @since 2.12.6
+	 * @return string Human-readable plugin name, or '' when none is active.
+	 */
+	public static function get_active_caching_plugin() {
+		$caching_plugins = [
+			'litespeed-cache/litespeed-cache.php'        => 'LiteSpeed Cache',
+			'wp-rocket/wp-rocket.php'                    => 'WP Rocket',
+			'w3-total-cache/w3-total-cache.php'          => 'W3 Total Cache',
+			'wp-super-cache/wp-cache.php'                => 'WP Super Cache',
+			'wp-fastest-cache/wpFastestCache.php'        => 'WP Fastest Cache',
+			'autoptimize/autoptimize.php'                => 'Autoptimize',
+			'sg-cachepress/sg-cachepress.php'            => 'SiteGround Optimizer',
+			'wp-optimize/wp-optimize.php'                => 'WP-Optimize',
+			'cache-enabler/cache-enabler.php'            => 'Cache Enabler',
+			'comet-cache/comet-cache.php'                => 'Comet Cache',
+			'hummingbird-performance/wp-hummingbird.php' => 'Hummingbird',
+			'breeze/breeze.php'                          => 'Breeze',
+			'nitropack/main.php'                         => 'NitroPack',
+			'swift-performance-lite/performance.php'     => 'Swift Performance Lite',
+			'wp-cloudflare-page-cache/wp-cloudflare-page-cache.php' => 'Super Page Cache',
+			'flying-press/flying-press.php'              => 'FlyingPress',
+			'redis-cache/redis-cache.php'                => 'Redis Object Cache',
+			'powered-cache/powered-cache.php'            => 'Powered Cache',
+			'docket-cache/docket-cache.php'              => 'Docket Cache',
+			'seraphinite-accelerator/plugin_root.php'    => 'Seraphinite Accelerator',
+		];
+
+		$active_plugins = (array) get_option( 'active_plugins', [] );
+
+		// For multisite, merge sitewide active plugins.
+		if ( is_multisite() ) {
+			$network_plugins = (array) get_site_option( 'active_sitewide_plugins', [] );
+			$active_plugins  = array_merge( $active_plugins, array_keys( $network_plugins ) );
+		}
+
+		foreach ( $caching_plugins as $path => $name ) {
+			if ( in_array( $path, $active_plugins, true ) ) {
+				return $name;
+			}
+		}
+
+		return '';
 	}
 
 	/**
