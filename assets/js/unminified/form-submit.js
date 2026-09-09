@@ -800,7 +800,13 @@ async function afterSubmit( formStatus, form ) {
 	const startedAt = performance.now();
 
 	try {
-		const response = await fetch( afterSubmitUrl, { method: 'GET' } );
+		// keepalive lets the request complete after the document starts
+		// unloading, which is exactly what a redirect confirmation does. The
+		// request is a GET with no body, so the 64KB keepalive cap does not apply.
+		const response = await fetch( afterSubmitUrl, {
+			method: 'GET',
+			keepalive: true,
+		} );
 
 		const status = response.status;
 		const durationMs = Math.round( performance.now() - startedAt );
@@ -1189,6 +1195,16 @@ async function handleFormSubmission(
 				formStatus?.data?.submission_settings?.after_submission ||
 				oldAfterSubmission;
 
+			// Dispatched before the branches below, because the 'different page'
+			// and 'custom url' branches call redirectToUrl() and the resulting
+			// unload cancels an in-flight fetch. Issuing it afterwards meant the
+			// request was aborted on every redirect-mode submission, so the
+			// after-submission process never ran. Kept out of the branches so it
+			// still covers all submission modes.
+			if ( formStatus?.data?.after_submit ) {
+				afterSubmit( formStatus, form );
+			}
+
 			if ( submitType === 'same page' ) {
 				showSuccessMessage(
 					successContainer,
@@ -1227,10 +1243,6 @@ async function handleFormSubmission(
 
 				// Re-enable submit button after redirect.
 				enableSubmitButton( form );
-			}
-			// Moving afterSubmit action out of specific method so it should work for all submission mode
-			if ( formStatus?.data?.after_submit ) {
-				afterSubmit( formStatus, form );
 			}
 		} else {
 			const errorData = formStatus?.data || {};
