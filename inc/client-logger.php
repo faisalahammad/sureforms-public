@@ -103,6 +103,18 @@ class Client_Logger {
 	public const CATEGORIES = [ 'submission', 'notification', 'integration' ];
 
 	/**
+	 * Memoised get_tail() results for this request, keyed by character budget.
+	 *
+	 * A class property rather than a static inside the method so append() and
+	 * clear() can invalidate it: a request that writes to the log and then reads a
+	 * tail must not be handed the tail from before the write.
+	 *
+	 * @var array<int,array{text:string,shown:int,total:int}>
+	 * @since x.x.x
+	 */
+	private static $tail_memo = [];
+
+	/**
 	 * Whether client error logging is currently switched on.
 	 *
 	 * On by default, including on installs whose stored settings predate the
@@ -329,8 +341,14 @@ class Client_Logger {
 		}
 
 		return [
-			'at'     => Helper::get_integer_value( $failures['submission']['at'] ?? 0 ),
-			'streak' => $acked,
+			// The last fault time, not the acknowledgement time. Kept under this
+			// key because callers already read it as "when the thing happened".
+			'at'       => Helper::get_integer_value( $failures['submission']['at'] ?? 0 ),
+			// When the owner reported it. Separate, because the two answer
+			// different questions and are usually seconds apart on a fresh fault
+			// and days apart on an old one.
+			'acked_at' => Helper::get_integer_value( $failures['submission']['acked_at'] ?? 0 ),
+			'streak'   => $acked,
 		];
 	}
 
@@ -362,8 +380,13 @@ class Client_Logger {
 	 * Hooked - srfm_form_submit, which fires only on the success path.
 	 *
 	 * Only the submission category is cleared. A submission getting through says
-	 * nothing about whether its notification email sent or its integrations ran,
-	 * so those clear when they next succeed or when the owner reports them.
+	 * nothing about whether its notification email sent or its integrations ran.
+	 * Notification clears on its own path, in Form_Submit::send_email(), once every
+	 * recipient for a submission has sent. Integration has no success signal to
+	 * clear on yet -- the failures are recorded by pro through
+	 * Form_Submit::log_integration_failure() and there is no matching
+	 * "it worked" call -- so that category still clears only when the owner
+	 * reports it.
 	 *
 	 * @since 2.12.6
 	 * @return void
@@ -407,6 +430,9 @@ class Client_Logger {
 	 * @return bool True when the line was written.
 	 */
 	public static function append( array $entry ) {
+		// Any write invalidates a memoised tail, whether or not this one lands.
+		self::$tail_memo = [];
+
 		// Checked here as well as at the route, so the guard sits on the function
 		// that writes rather than only on today's single caller. Without it any
 		// future caller writes to disk on a site that never switched logging on.
@@ -458,10 +484,12 @@ class Client_Logger {
 	/**
 	 * The most recent whole log lines, up to a character budget.
 	 *
-	 * For pasting into a support email, where the transport imposes the limit: a
-	 * mailto URL has to survive percent-encoding and every mail client's own
-	 * length cap, so only a tail fits. Newest entries are the ones that describe
-	 * the failure being reported, so the tail is the useful end.
+	 * An excerpt for reading and pasting. The budget is the caller's: the details
+	 * dialog shows it on screen and copies it to a clipboard, neither of which has
+	 * a length limit worth designing around, while an excerpt embedded anywhere
+	 * length-bound needs a smaller one. Newest entries are the ones that describe
+	 * the failure being reported, so the tail is the useful end and the oldest are
+	 * what a smaller budget drops.
 	 *
 	 * Whole lines only -- half a JSON object helps nobody.
 	 *
@@ -470,6 +498,17 @@ class Client_Logger {
 	 * @return array{text:string,shown:int,total:int}
 	 */
 	public static function get_tail( $max_chars = 1200 ) {
+		// Memoised per request and per budget. get_action_items() asks once per
+		// open failure category and runs twice per admin request -- building the
+		// localisation payload and again in the classic renderer -- so a site with
+		// three open failures was reading a file capped at 1 MB six times to render
+		// one page.
+		$max_chars = (int) $max_chars;
+
+		if ( isset( self::$tail_memo[ $max_chars ] ) ) {
+			return self::$tail_memo[ $max_chars ];
+		}
+
 		$empty = [
 			'text'  => '',
 			'shown' => 0,
@@ -479,6 +518,8 @@ class Client_Logger {
 		$path = self::get_log_path( false );
 
 		if ( '' === $path || ! file_exists( $path ) ) {
+			self::$tail_memo[ $max_chars ] = $empty;
+
 			return $empty;
 		}
 
@@ -486,6 +527,8 @@ class Client_Logger {
 		$lines = file( $path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES );
 
 		if ( ! is_array( $lines ) || empty( $lines ) ) {
+			self::$tail_memo[ $max_chars ] = $empty;
+
 			return $empty;
 		}
 
@@ -506,11 +549,13 @@ class Client_Logger {
 			$used += $length;
 		}
 
-		return [
+		self::$tail_memo[ $max_chars ] = [
 			'text'  => implode( "\n", $kept ),
 			'shown' => count( $kept ),
 			'total' => $total,
 		];
+
+		return self::$tail_memo[ $max_chars ];
 	}
 
 	/**
@@ -548,6 +593,8 @@ class Client_Logger {
 	 * @return bool
 	 */
 	public static function clear() {
+		self::$tail_memo = [];
+
 		$path = self::get_log_path( false );
 
 		if ( '' === $path || ! file_exists( $path ) ) {
@@ -609,7 +656,11 @@ class Client_Logger {
 			// disabled the feature until an admin cleared it. A real key is
 			// `srfm-input-lbl-<base64>`, far inside this bound.
 			foreach ( array_slice( $raw['field_keys'], 0, 100 ) as $field_key ) {
-				$keys[] = mb_substr( sanitize_text_field( Helper::get_string_value( $field_key ) ), 0, self::MAX_KEY_LENGTH );
+				// Through scrub_text() like every other free-text value. A key is
+				// supposed to be `srfm-input-lbl-<base64>`, but the array arrives
+				// from the browser and nothing server-side guarantees that, so a
+				// caller is free to put an address or a token in one.
+				$keys[] = mb_substr( self::scrub_text( Helper::get_string_value( $field_key ) ), 0, self::MAX_KEY_LENGTH );
 			}
 
 			$entry['field_keys'] = $keys;
@@ -630,6 +681,13 @@ class Client_Logger {
 	 * string. Whitespace is collapsed as a log-injection guard, matching
 	 * inc/ai-form-builder/ai-helper.php.
 	 *
+	 * Removes, in order: URL query strings and fragments; everything past a URL's
+	 * first path segment, because a webhook credential sits in the path as often
+	 * as in the query; the value following a name that identifies a credential;
+	 * email addresses; and long digit runs. What it cannot remove is a name, a
+	 * street address or a free-text message body -- those have no shape to match,
+	 * so the log excerpt this produces should still be treated as personal data.
+	 *
 	 * @param string $text Raw text.
 	 * @since 2.12.6
 	 * @return string
@@ -642,6 +700,20 @@ class Client_Logger {
 		// Drop query strings and fragments wholesale rather than allowlisting
 		// parameters. A token after # is just as sensitive as one after ?.
 		$text = (string) preg_replace( '#(https?://[^\s?\#]+)[?\#]\S*#i', '$1', $text );
+
+		// Keep the origin and the first path segment, drop the rest. A webhook
+		// credential is as often in the path as in the query -- Slack and Discord
+		// both put theirs there -- and the rule above keeps paths verbatim.
+		$text = (string) preg_replace( '#(https?://[^\s/]+(?:/[^\s/]*)?)/\S+#i', '$1/[path]', $text );
+
+		// Credentials named in the text itself, whether or not they sit in a URL:
+		// `api_key=…`, `Authorization: Bearer …`, `"token": "…"`. Matched on the
+		// name so the value's shape does not have to be guessed.
+		$text = (string) preg_replace(
+			'/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret|token|bearer|password|passwd|pwd|auth)["\']?\s*(?:[:=]|\s)\s*["\']?)[^\s"\',;&]{6,}/i',
+			'$1[redacted]',
+			$text
+		);
 
 		// Email addresses.
 		$text = (string) preg_replace( '/[\w.+-]+@[\w-]+\.[\w.-]+/', '[email]', $text );

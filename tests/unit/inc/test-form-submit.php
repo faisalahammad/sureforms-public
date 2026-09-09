@@ -590,6 +590,143 @@ class Test_Form_Submit extends TestCase {
 	}
 
 	/**
+	 * A notification getting through clears the notification fault.
+	 *
+	 * Nothing else retired that category. Client_Logger::clear_category() had one
+	 * caller, reset_fault_streak(), hardcoded to 'submission', and the notice is
+	 * deliberately not dismissible -- so a site that had fixed its SMTP kept an
+	 * undismissable banner on every admin page until somebody opened a support
+	 * ticket. wp_mail() is short-circuited rather than actually sent, because the
+	 * assertion is about what a success does, not about delivery.
+	 */
+	public function test_send_email_clears_the_notification_fault_on_success() {
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::record_failure( 'notification', 0, 'Contact Form' );
+
+		$this->assertArrayHasKey(
+			'notification',
+			Client_Logger::get_open_failures(),
+			'Precondition: the fault is standing before the send.'
+		);
+
+		$form_id = wp_insert_post(
+			[
+				'post_type'   => 'sureforms_form',
+				'post_title'  => 'Notification Recovery',
+				'post_status' => 'publish',
+			]
+		);
+
+		update_post_meta(
+			$form_id,
+			'_srfm_email_notification',
+			[
+				[
+					'id'     => 1,
+					'status' => true,
+				],
+			]
+		);
+
+		// Fixed, valid message, so the test does not depend on the template
+		// parser; and a short-circuited wp_mail(), so nothing is actually sent.
+		$parsed = static function () {
+			return [
+				'to'      => 'owner@example.com',
+				'subject' => 'New entry',
+				'message' => 'An entry arrived.',
+				'headers' => [],
+			];
+		};
+		$sent   = static function () {
+			return true;
+		};
+
+		add_filter( 'srfm_email_notification', $parsed, 99 );
+		add_filter( 'pre_wp_mail', $sent, 99 );
+
+		Form_Submit::send_email( $form_id, [] );
+
+		remove_filter( 'pre_wp_mail', $sent, 99 );
+		remove_filter( 'srfm_email_notification', $parsed, 99 );
+
+		$this->assertArrayNotHasKey(
+			'notification',
+			Client_Logger::get_open_failures(),
+			'A notification that sent must retire the notification fault.'
+		);
+
+		wp_delete_post( $form_id, true );
+		delete_option( Client_Logger::FAILURES_OPTION );
+	}
+
+	/**
+	 * A notification still failing leaves the fault standing.
+	 *
+	 * The mirror of the test above, and the reason the flag is read after the loop
+	 * rather than inside it: one recipient succeeding while another fails is still
+	 * a failure, and clearing on the success would erase the report.
+	 *
+	 * Failure is forced with an empty recipient rather than a failing transport.
+	 * send_email() falls back to PHP's mail() when wp_mail() returns false, and
+	 * mail() is not filterable -- on a machine with a working sendmail it succeeds
+	 * and the send is not a failure at all. An empty destination fails in every
+	 * environment.
+	 */
+	public function test_send_email_keeps_the_notification_fault_on_failure() {
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::record_failure( 'notification', 0, 'Contact Form' );
+
+		$form_id = wp_insert_post(
+			[
+				'post_type'   => 'sureforms_form',
+				'post_title'  => 'Notification Still Broken',
+				'post_status' => 'publish',
+			]
+		);
+
+		update_post_meta(
+			$form_id,
+			'_srfm_email_notification',
+			[
+				[
+					'id'     => 1,
+					'status' => true,
+				],
+			]
+		);
+
+		$parsed = static function () {
+			return [
+				'to'      => '',
+				'subject' => 'New entry',
+				'message' => 'An entry arrived.',
+				'headers' => [],
+			];
+		};
+		$failed = static function () {
+			return false;
+		};
+
+		add_filter( 'srfm_email_notification', $parsed, 99 );
+		add_filter( 'pre_wp_mail', $failed, 99 );
+
+		Form_Submit::send_email( $form_id, [] );
+
+		remove_filter( 'pre_wp_mail', $failed, 99 );
+		remove_filter( 'srfm_email_notification', $parsed, 99 );
+
+		$this->assertArrayHasKey(
+			'notification',
+			Client_Logger::get_open_failures(),
+			'A notification that did not send must leave the fault standing.'
+		);
+
+		wp_delete_post( $form_id, true );
+		delete_option( Client_Logger::FAILURES_OPTION );
+	}
+
+	/**
 	 * Test field_unique_validation is callable.
 	 */
 	public function test_field_unique_validation() {

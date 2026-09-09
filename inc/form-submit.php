@@ -1030,7 +1030,10 @@ class Form_Submit {
 	public static function send_email( $id, $submission_data, $form_data = [] ) {
 		$email_notification = get_post_meta( intval( $id ), '_srfm_email_notification' );
 		$is_mail_sent       = false;
-		$emails             = [];
+		// Any recipient failing counts as a failure for the whole submission, so
+		// this is set inside the loop and only read after it.
+		$notification_failed = false;
+		$emails              = [];
 
 		// Filter to determine whether the email notification should be sent.
 		$email_notification = apply_filters( 'srfm_email_notification_should_send', $email_notification, $submission_data, $form_data );
@@ -1102,6 +1105,10 @@ class Form_Submit {
 							$sent = mail( $parsed['to'], $parsed['subject'], $parsed['message'], $parsed['headers'] );
 						}
 						$email_report = ob_get_clean(); // Catch any printed notice/errors/message for reports.
+
+						if ( true !== $sent ) {
+							$notification_failed = true;
+						}
 
 						if ( is_int( $log_key ) ) {
 							if ( true === $sent ) {
@@ -1182,6 +1189,17 @@ class Form_Submit {
 			if ( empty( $emails ) ) {
 				$entries_db_instance->reset_logs();
 				$entries_db_instance->add_log( __( 'No emails were sent.', 'sureforms' ) );
+			}
+
+			// The notification fault clears when notifications work again. Nothing
+			// else retired it: Client_Logger::clear_category() had a single caller
+			// hardcoded to 'submission', and the notice is deliberately not
+			// dismissible, so a site that had fixed its SMTP kept an undismissable
+			// banner on every admin page until somebody opened a support ticket.
+			// Held until the loop is done because one recipient succeeding while
+			// another fails is still a failure.
+			if ( ! empty( $emails ) && ! $notification_failed ) {
+				Client_Logger::clear_category( 'notification' );
 			}
 		}
 

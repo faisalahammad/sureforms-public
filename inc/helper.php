@@ -2238,14 +2238,24 @@ class Helper {
 	 * Falls back to the general guide rather than returning nothing, so the notice
 	 * always has somewhere to send them.
 	 *
-	 * @since 2.12.6
+	 * @since x.x.x
 	 * @return string Absolute documentation URL.
 	 */
 	public static function get_caching_plugin_doc_url() {
 		$entry = self::get_active_caching_plugin_entry();
 		$slug  = null === $entry || '' === $entry[1] ? 'how-to-set-up-sureforms-with-caching-plugins' : $entry[1];
 
-		return 'https://sureforms.com/docs/' . $slug . '/';
+		// Through the central builder rather than hardcoding the domain, so the
+		// link carries the same UTM attribution as every other doc link and a
+		// domain change is one edit. utm_content is the slug, so the notice can be
+		// told which guide people actually open.
+		return self::get_sureforms_website_url(
+			'docs/' . $slug . '/',
+			[
+				'utm_medium'  => 'form_checks_notice',
+				'utm_content' => $slug,
+			]
+		);
 	}
 
 	/**
@@ -2787,7 +2797,16 @@ class Helper {
 	 * array on purpose: keyed separately they drift, and a doc link that silently
 	 * degrades to the generic page is the kind of regression nobody reports.
 	 *
-	 * @since 2.12.6
+	 * Order is precedence: the first active plugin in this list wins. The six with
+	 * their own guide are listed first on purpose, so a site running two caching
+	 * plugins is pointed at the specific guide rather than whichever plugin the
+	 * old alphabetical order happened to reach first. That flips the winner on a
+	 * few pairs -- WP Fastest Cache over WP Super Cache, SiteGround Optimizer and
+	 * Autoptimize over their partners -- and in each case the new winner is the
+	 * one that has something to say. Reordering this array changes which guide a
+	 * two-plugin site sees.
+	 *
+	 * @since x.x.x
 	 * @return array<string,array{0:string,1:string}>
 	 */
 	private static function get_known_caching_plugins() {
@@ -2819,9 +2838,10 @@ class Helper {
 	 * The active caching plugin's entry, if there is one.
 	 *
 	 * Detection is by plugin path, mirroring is_any_smtp_plugin_active(), including
-	 * the multisite network-active merge.
+	 * the multisite network-active merge. First match in
+	 * get_known_caching_plugins() wins; that array's order is the precedence.
 	 *
-	 * @since 2.12.6
+	 * @since x.x.x
 	 * @return array{0:string,1:string}|null Name and doc slug, or null when none is active.
 	 */
 	private static function get_active_caching_plugin_entry() {

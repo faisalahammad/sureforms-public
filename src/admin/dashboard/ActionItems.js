@@ -6,17 +6,15 @@ import {
 	TriangleAlert,
 	ChevronUp,
 	ChevronDown,
-	Check,
-	Copy,
-	X,
 } from 'lucide-react';
 
 /**
  * Dashboard panel listing what SureForms has checked on this site.
  *
- * Follows SureRank's Page Checks: one row per check, warnings first with a fix
- * link and an Ignore control, passing checks below as a green tick. Row markup
- * mirrors SureRank's CheckCard so the two plugins look like siblings.
+ * Follows SureRank's Page Checks: one row per problem, with a fix link and, for
+ * advisory rows, an Ignore control. Row markup mirrors SureRank's CheckCard so
+ * the two plugins look like siblings. Passing checks are not listed -- a panel
+ * confirming nothing is wrong is something people learn to skip.
  *
  * Rows are supplied fully formed by the server (see Admin::get_action_items()),
  * so adding a check needs no change here.
@@ -39,15 +37,6 @@ const ICONS = {
 export default () => {
 	const [ dismissed, setDismissed ] = useState( [] );
 	const [ open, setOpen ] = useState( true );
-	// The item whose details are being read, or null. Holds the item rather than a
-	// boolean so the dialog keeps rendering the right one while it closes.
-	const [ details, setDetails ] = useState( null );
-	const [ copied, setCopied ] = useState( false );
-	// Separate from `copied`, which reverts after a couple of seconds so the button
-	// stops claiming "Copied". This one does not revert: the support form is only
-	// useful to someone who has the diagnostics on their clipboard, and that stays
-	// true after the label has gone back.
-	const [ copiedOnce, setCopiedOnce ] = useState( false );
 
 	const items = ( srfm_admin?.action_items || [] ).filter(
 		( item ) => ! dismissed.includes( item.id )
@@ -102,7 +91,7 @@ export default () => {
 				},
 			  ]
 			: [] ),
-		...( item.cta_label
+		...( item.cta_label && item.cta_url
 			? [
 				{
 					name: item.cta_action,
@@ -121,61 +110,8 @@ export default () => {
 			: [] ),
 	];
 
-	const handleCopy = ( item ) => async () => {
-		const text = item.details || '';
-
-		try {
-			// Both flavours. A rich-text composer -- Gmail's, for one -- drops the
-			// newlines out of plain text, which is what turned the diagnostics into
-			// one paragraph; pasting HTML keeps every break, and <pre> keeps the
-			// log's columns lined up. A plain-text field still gets the text.
-			//
-			// Escaped here because the source is a log holding whatever a server put
-			// in an error message. It is never trusted as markup.
-			const html = `<pre style="font-family:monospace;white-space:pre-wrap;word-break:break-word;margin:0">${ text
-				.replace( /&/g, '&amp;' )
-				.replace( /</g, '&lt;' )
-				.replace( />/g, '&gt;' ) }</pre>`;
-
-			if ( window.ClipboardItem && navigator.clipboard?.write ) {
-				await navigator.clipboard.write( [
-					new window.ClipboardItem( {
-						'text/plain': new Blob( [ text ], {
-							type: 'text/plain',
-						} ),
-						'text/html': new Blob( [ html ], {
-							type: 'text/html',
-						} ),
-					} ),
-				] );
-			} else {
-				// No ClipboardItem: the formatting is lost, which still beats
-				// copying nothing.
-				await navigator.clipboard.writeText( text );
-			}
-
-			setCopied( true );
-			// Only on success. A refused clipboard must not unlock the support form,
-			// or someone arrives at it with nothing to paste.
-			setCopiedOnce( true );
-			// Reverts on its own: a button stuck on "Copied" says nothing about the
-			// next click.
-			setTimeout( () => setCopied( false ), 2000 );
-		} catch ( e ) {
-			// Clipboard access can be refused outright (an insecure origin, a
-			// permission policy). The text is on screen and selectable, so there is
-			// nothing to recover -- just do not claim it was copied.
-			setCopied( false );
-		}
-
-		post( 'srfm_notice_response', srfm_admin?.notice_response_nonce, {
-			notice_id: item.id,
-			button: 'copy_details',
-		} );
-	};
-
-	// The support link carries the log in its body, so the click just opens a
-	// composed message -- no download to trigger, nothing to intercept.
+	// Opens the dialog rather than navigating: the details are read here before
+	// anything is sent. Nothing to download, nothing to intercept.
 	const handleFix = ( item, action ) => () =>
 		post( 'srfm_notice_response', srfm_admin?.notice_response_nonce, {
 			notice_id: item.id,
@@ -242,7 +178,7 @@ export default () => {
 										variant="link"
 										size="xs"
 										onClick={ handleIgnore( item ) }
-										className="font-medium no-underline hover:underline focus:outline-none focus:[box-shadow:none] [&>span]:px-0 text-text-secondary shrink-0"
+										className="font-medium no-underline hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1 focus:[box-shadow:none] [&>span]:px-0 text-text-secondary shrink-0"
 									>
 										{ __( 'Ignore', 'sureforms' ) }
 									</Button>
@@ -257,33 +193,50 @@ export default () => {
 										// a new tab -- and a control that navigates is
 										// the wrong element for something that opens a
 										// panel in place.
+										//
+										// The dialog itself lives in
+										// admin/assets/js/notice-response.js and is
+										// called through window.srfmOpenDetails. It is
+										// framework-free, appends to document.body --
+										// so it is not subject to a containing block
+										// established by an ancestor transform, which
+										// is what kept an overlay rendered in here
+										// from ever appearing -- and it already has to
+										// exist for the classic wp-admin notices. A
+										// second copy in React is how two surfaces end
+										// up with different keyboard behaviour,
+										// different contrast and two sets of the same
+										// strings.
 										action.dialog ? (
 											<button
 												key={ action.name }
 												type="button"
 												onClick={ () => {
-													setCopied( false );
-													// Each failure is its own report,
-													// so the copy has to be made again
-													// for this one.
-													setCopiedOnce( false );
-													setDetails( item );
 													handleFix(
 														item,
 														action.name
 													)();
+													window.srfmOpenDetails?.( {
+														noticeId: item.id,
+														text: item.details,
+														supportUrl:
+															item.support_url,
+													} );
 												} }
-												className={ `bg-transparent border-0 p-0 cursor-pointer text-xs font-medium no-underline hover:underline${
+												className={ `bg-transparent border-0 p-0 cursor-pointer text-xs font-medium no-underline hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1${
 													index > 0
 														? ' text-text-secondary'
-														: ' text-text-interactive'
+														: ' text-link-primary hover:text-link-primary-hover'
 												}` }
 											>
 												{ action.label }
 											</button>
 										) : (
 											<Button
-												key={ action.name }
+												key={
+													action.name ||
+													`${ item.id }-${ index }`
+												}
 												variant="link"
 												size="xs"
 												tag="a"
@@ -292,11 +245,22 @@ export default () => {
 													target: '_blank',
 													rel: 'noopener noreferrer',
 												} ) }
-												onClick={ handleFix(
-													item,
-													action.name
-												) }
-												className={ `font-medium no-underline hover:underline focus:outline-none focus:[box-shadow:none] [&>span]:px-0${
+												// Only when the server named one.
+												// An unnamed action posts
+												// "undefined" as the button and is
+												// rejected by the allowlist anyway.
+												{ ...( action.name && {
+													onClick: handleFix(
+														item,
+														action.name
+													),
+												} ) }
+												// Underlined on hover only, matching
+												// Quick Access below it. Three
+												// underlined links stacked in a narrow
+												// column read as a block of noise
+												// rather than as actions.
+												className={ `font-medium no-underline hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1 focus:[box-shadow:none] [&>span]:px-0${
 													index > 0
 														? ' text-text-secondary'
 														: ''
@@ -310,130 +274,6 @@ export default () => {
 							) }
 						</div>
 					) ) }
-				</div>
-			) }
-			{ /* Read before send: the same text a support request needs, so it can
-			     be pasted rather than described.
-
-			     A plain overlay rather than force-ui's Dialog because the identical
-			     modal has to exist for the classic wp-admin notices, which have no
-			     React. One implementation, one behaviour, nothing to keep in step. */ }
-			{ !! details && (
-				<div
-					className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/50 p-4"
-					role="presentation"
-					onClick={ ( e ) => {
-						// Backdrop only. A click inside the panel must not close it
-						// while someone is selecting the text.
-						if ( e.target === e.currentTarget ) {
-							setDetails( null );
-						}
-					} }
-				>
-					<div
-						className="w-full max-w-2xl rounded-lg bg-background-primary p-4 shadow-lg"
-						role="dialog"
-						aria-modal="true"
-						aria-label={ __( 'Details', 'sureforms' ) }
-					>
-						<div className="flex items-start justify-between gap-2">
-							<Label size="sm" className="font-semibold">
-								{ __( 'Details', 'sureforms' ) }
-							</Label>
-							<button
-								type="button"
-								onClick={ () => setDetails( null ) }
-								aria-label={ __( 'Close', 'sureforms' ) }
-								className="flex items-center bg-transparent border-0 p-0.5 cursor-pointer text-icon-secondary hover:text-icon-primary"
-							>
-								<X className="size-4" />
-							</button>
-						</div>
-						<Label
-							size="xs"
-							variant="help"
-							className="font-normal block pt-1"
-						>
-							{ __(
-								'What we recorded about this problem. Copy it into your support request so we can start from the cause rather than a description of it.',
-								'sureforms'
-							) }
-						</Label>
-						{ /* Selectable and scrollable: clipboard access can be
-						     refused, and then selecting by hand is the only way
-						     through. */ }
-						<pre className="mt-3 mb-0 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background-secondary p-3 text-xs text-text-secondary">
-							{ details.details || '' }
-						</pre>
-						<div className="flex items-center justify-end gap-2 pt-3">
-							<Button
-								variant="outline"
-								size="sm"
-								icon={
-									copied ? (
-										<Check className="size-4" />
-									) : (
-										<Copy className="size-4" />
-									)
-								}
-								onClick={ handleCopy( details ) }
-							>
-								{ copied
-									? __( 'Copied', 'sureforms' )
-									: __( 'Copy details', 'sureforms' ) }
-							</Button>
-							{ /* Locked until the details are on the clipboard. The
-							     support form asks for them, and arriving with nothing
-							     to paste means describing the failure from memory.
-
-							     Not an anchor while it is locked: `disabled` on an
-							     <a> does nothing at all -- it still navigates -- so
-							     the href only exists once the copy has been made. */ }
-							{ copiedOnce ? (
-								<Button
-									variant="primary"
-									size="sm"
-									tag="a"
-									href={ details.support_url }
-									target="_blank"
-									rel="noopener noreferrer"
-									onClick={ () => {
-										// Records the click, which is also what
-										// stands the notice down until something
-										// new fails.
-										handleFix(
-											details,
-											'contact_support'
-										)();
-										// The form opens in its own tab, so the
-										// dialog has nothing left to show. Leaving
-										// it up means coming back to a panel still
-										// asking to be dealt with.
-										setDetails( null );
-									} }
-									// It is a button, not a link in prose. Rendering
-									// it as an anchor is what brings the underline
-									// with it, and wp-admin's own anchor styles reach
-									// inside.
-									className="no-underline hover:no-underline"
-								>
-									{ __( 'Contact Support', 'sureforms' ) }
-								</Button>
-							) : (
-								<Button
-									variant="primary"
-									size="sm"
-									disabled
-									title={ __(
-										'Copy the details first, so you have them to paste.',
-										'sureforms'
-									) }
-								>
-									{ __( 'Contact Support', 'sureforms' ) }
-								</Button>
-							) }
-						</div>
-					</div>
 				</div>
 			) }
 		</div>
