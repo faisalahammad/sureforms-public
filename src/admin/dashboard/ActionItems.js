@@ -1,5 +1,11 @@
 import { __ } from '@wordpress/i18n';
-import { useState } from '@wordpress/element';
+import {
+	useState,
+	useRef,
+	useMemo,
+	useEffect,
+	useLayoutEffect,
+} from '@wordpress/element';
 import { Button, Dialog, Label } from '@bsf/force-ui';
 import {
 	CircleCheck,
@@ -9,20 +15,6 @@ import {
 	Check,
 	Copy,
 } from 'lucide-react';
-
-// Translated in PHP and handed to both surfaces, so the same sentence is not
-// written as __() here and again in admin/assets/js/notice-response.js -- which
-// looks identical to translators until the first edit to either, after which one
-// surface silently reverts to English.
-const DIALOG = srfm_admin?.details_dialog || {};
-
-// Whether copying is possible at all. On a plain-HTTP admin navigator.clipboard
-// does not exist, so the copy step cannot be a precondition for anything -- see
-// the unlock reasoning on handleCopy.
-const canCopy = !! (
-	navigator.clipboard &&
-	( navigator.clipboard.write || navigator.clipboard.writeText )
-);
 
 /**
  * Dashboard panel listing what SureForms has checked on this site.
@@ -51,6 +43,27 @@ const ICONS = {
 };
 
 export default () => {
+	// Read here rather than at module scope. Optional chaining does not protect
+	// against an undeclared identifier, so a bundle enqueued without its localize
+	// data would throw at module eval and take the whole dashboard down instead of
+	// just this panel.
+	const dialogLabels = useMemo(
+		() => ( typeof srfm_admin === 'undefined' ? {} : srfm_admin?.details_dialog || {} ),
+		[]
+	);
+
+	// Whether copying is possible at all. On a plain-HTTP admin
+	// navigator.clipboard does not exist, so the copy step cannot be a
+	// precondition for anything -- see the unlock reasoning in handleCopy.
+	const canCopy = useMemo(
+		() =>
+			!! (
+				navigator.clipboard &&
+				( navigator.clipboard.write || navigator.clipboard.writeText )
+			),
+		[]
+	);
+
 	const [ dismissed, setDismissed ] = useState( [] );
 	const [ open, setOpen ] = useState( true );
 	// The item whose details are being read, or null.
@@ -64,6 +77,72 @@ export default () => {
 	// What the hint line says. Doubles as the live region for the unlock, which
 	// changes the label, the icon and whether Contact Support works at once.
 	const [ hint, setHint ] = useState( '' );
+
+	// force-ui's Dialog.Panel renders FloatingOverlay in place in the React tree
+	// -- FloatingPortal is used only by Dialog.Portal, which Panel does not use.
+	// Left there, the overlay is a descendant of the Form Checks card inside the
+	// dashboard's Container nesting, and position:fixed resolves against the
+	// nearest ancestor establishing a containing block, which is what kept an
+	// overlay rendered in here from ever appearing. Portalling to
+	// #srfm-dialog-root rather than document.body matters: tailwind.config.js
+	// scopes every utility behind an :is() allowlist that includes that id, so
+	// body would render the dialog with no styling at all.
+	const [ dialogRoot, setDialogRoot ] = useState( null );
+
+	useLayoutEffect( () => {
+		let root = document.getElementById( 'srfm-dialog-root' );
+
+		if ( ! root ) {
+			root = document.createElement( 'div' );
+			root.id = 'srfm-dialog-root';
+			document.body.appendChild( root );
+		}
+
+		setDialogRoot( root );
+	}, [] );
+
+	// Dialog.Panel forwards only className, so aria-labelledby cannot be passed to
+	// the node it puts role="dialog" on. Wired here instead, against the ids set
+	// on Title and Description below -- without it the dialog has no accessible
+	// name at all.
+	const titleId = 'srfm-details-title';
+	const descriptionId = 'srfm-details-description';
+
+	useEffect( () => {
+		if ( ! details || ! dialogRoot ) {
+			return;
+		}
+
+		const node = dialogRoot.querySelector( '[role="dialog"]' );
+
+		if ( ! node ) {
+			return;
+		}
+
+		node.setAttribute( 'aria-labelledby', titleId );
+		node.setAttribute( 'aria-describedby', descriptionId );
+	}, [ details, dialogRoot ] );
+
+	// Initial focus on Copy details rather than whatever FloatingFocusManager
+	// reaches first, which is the close cross.
+	const copyRef = useRef( null );
+
+	useEffect( () => {
+		if ( ! details ) {
+			return;
+		}
+
+		const timer = window.setTimeout( () => copyRef.current?.focus(), 50 );
+
+		return () => window.clearTimeout( timer );
+	}, [ details ] );
+
+	// Low: an uncleared label timer crosses itself on two copies inside 2s, and
+	// leaves a setState pending on a possibly-unmounted tree when the dialog is
+	// closed inside that window.
+	const revertRef = useRef( 0 );
+
+	useEffect( () => () => window.clearTimeout( revertRef.current ), [] );
 
 	const items = ( srfm_admin?.action_items || [] ).filter(
 		( item ) => ! dismissed.includes( item.id )
@@ -174,10 +253,11 @@ export default () => {
 
 			setCopied( true );
 			setCopiedOnce( true );
-			setHint( DIALOG.unlocked || '' );
+			setHint( dialogLabels.unlocked || '' );
 			// Reverts on its own: a button stuck on "Copied" says nothing about the
 			// next click.
-			setTimeout( () => setCopied( false ), 2000 );
+			window.clearTimeout( revertRef.current );
+			revertRef.current = window.setTimeout( () => setCopied( false ), 2000 );
 
 			// Reported inside the try, so the event means a copy happened rather
 			// than a copy was attempted. The classic notice records it the same way.
@@ -194,7 +274,7 @@ export default () => {
 			// working action. The text is on screen and selectable either way.
 			setCopied( false );
 			setCopiedOnce( true );
-			setHint( DIALOG.copyFailed || '' );
+			setHint( dialogLabels.copyFailed || '' );
 		}
 	};
 
@@ -298,23 +378,40 @@ export default () => {
 										// strings from the same PHP array.
 										action.dialog ? (
 											<button
-												key={ action.name }
+												key={
+													action.name ||
+													`${ item.id }-${ index }`
+												}
 												type="button"
 												onClick={ () => {
-													handleFix(
-														item,
-														action.name
-													)();
+													// Only when the server named
+													// one: an unnamed action posts
+													// "undefined" and 400s.
+													if ( action.name ) {
+														handleFix(
+															item,
+															action.name
+														)();
+													}
 													setCopied( false );
 													// Each failure is its own
 													// report, so the copy has to
 													// be made again for this one.
-													setCopiedOnce( false );
+													// Pre-unlocked where the
+													// clipboard does not exist,
+													// matching the vanilla dialog:
+													// otherwise a plain-HTTP admin
+													// gets a dead button whose
+													// only explanation is revealed
+													// by clicking a Copy that
+													// cannot work.
+													setCopiedOnce( ! canCopy );
 													setHint(
 														canCopy
-															? DIALOG.copyFirst ||
+															? dialogLabels.copyFirst ||
 																	''
-															: ''
+															: dialogLabels.copyFailed ||
+																	''
 													);
 													setDetails( item );
 												} }
@@ -372,83 +469,113 @@ export default () => {
 				</div>
 			) }
 			{ /* Read before send: the same text a support request needs, so it can
-			     be pasted rather than described. force-ui's Dialog portals out of
-			     the panel, which is what an overlay rendered in place could not do,
-			     and it carries the focus trap, scroll lock and return-focus. */ }
+			     be pasted rather than described.
+
+			     exitOnClickOutside is passed explicitly -- force-ui defaults it to
+			     false, so without it a backdrop click does nothing, where the
+			     classic dialog closes. */ }
 			<Dialog
 				design="simple"
 				exitOnEsc
+				exitOnClickOutside
 				scrollLock
 				open={ !! details }
-				setOpen={ closeDetails }
+				setOpen={ ( next ) => {
+					// The boolean matters: discarding it means a future trigger or
+					// a library change calling setOpen(true) would close this.
+					if ( ! next ) {
+						closeDetails();
+					}
+				} }
 			>
-				<Dialog.Backdrop />
-				{ /* Wider than force-ui's default w-120: this holds a diagnostics block
-				     and a fenced log, and 480px wraps almost every line of it. */ }
-				<Dialog.Panel className="gap-0 w-[50rem] max-w-[calc(100vw-2rem)]">
-					<Dialog.Header>
-						<div className="flex items-center justify-between">
-							<Dialog.Title>
-								{ DIALOG.title || __( 'Details', 'sureforms' ) }
-							</Dialog.Title>
-							<Dialog.CloseButton onClick={ closeDetails } />
-						</div>
-						<Dialog.Description>
-							{ DIALOG.description || '' }
-						</Dialog.Description>
-					</Dialog.Header>
-					<Dialog.Body className="mt-3">
-						{ /* Selectable and scrollable: clipboard access can be
+				{ !! dialogRoot && (
+					<Dialog.Portal root={ dialogRoot }>
+						<Dialog.Backdrop />
+						{ /* Wider than force-ui's default w-120: this holds a
+						     diagnostics block and a fenced log, and 480px wraps
+						     almost every line of it. */ }
+						<Dialog.Panel className="gap-0 w-[50rem] max-w-[calc(100vw-2rem)]">
+							<Dialog.Header>
+								<div className="flex items-center justify-between">
+									<Dialog.Title id={ titleId }>
+										{ dialogLabels.title || __( 'Details', 'sureforms' ) }
+									</Dialog.Title>
+									{ /* force-ui hardcodes an untranslated
+							     aria-label="Close dialog"; it sits before the prop
+							     spread, so this overrides it. */ }
+									<Dialog.CloseButton
+										onClick={ closeDetails }
+										aria-label={
+											dialogLabels.close ||
+									__( 'Close', 'sureforms' )
+										}
+									/>
+								</div>
+								<Dialog.Description id={ descriptionId }>
+									{ dialogLabels.description || '' }
+								</Dialog.Description>
+							</Dialog.Header>
+							<Dialog.Body className="mt-3">
+								{ /* Selectable and scrollable: clipboard access can be
 						     refused, and then selecting by hand is the only way
 						     through. tabIndex because Chromium and WebKit do not
 						     make a scroll container focusable on their own, so
 						     without it a keyboard user cannot reach the very thing
 						     the dialog exists to show. */ }
-						<pre
-							tabIndex={ 0 }
-							role="region"
-							aria-label={ DIALOG.logRegion || '' }
-							className="m-0 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background-secondary p-3 text-xs text-text-secondary"
-						>
-							{ details?.details || '' }
-						</pre>
-					</Dialog.Body>
-					<Dialog.Footer className="justify-between">
-						{ /* Visible text, not a title attribute: a title never fires
+								<pre
+									tabIndex={ 0 }
+									{ ...( dialogLabels.logRegion && {
+										role: 'region',
+										'aria-label': dialogLabels.logRegion,
+									} ) }
+									className="m-0 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background-secondary p-3 text-xs text-text-secondary"
+								>
+									{ details?.details || '' }
+								</pre>
+							</Dialog.Body>
+							<Dialog.Footer className="justify-between">
+								{ /* Visible text, not a title attribute: a title never fires
 						     on keyboard focus and is commonly dropped by screen
 						     readers on an unavailable control, so the sentence
 						     saying why the button is inert could not be read by
 						     anyone. role="status" so the unlock is announced. */ }
-						<Label
-							size="xs"
-							variant="neutral"
-							role="status"
-							className="font-normal text-text-secondary"
-						>
-							{ hint }
-						</Label>
-						<div className="flex items-center gap-2">
-							<Button
-								variant="outline"
-								size="sm"
-								icon={
-									copied ? (
-										<Check className="size-4" />
-									) : (
-										<Copy className="size-4" />
-									)
-								}
-								onClick={
-									details ? handleCopy( details ) : undefined
-								}
-							>
-								{ copied
-									? DIALOG.copied ||
+								<Label
+									size="xs"
+									tag="p"
+									variant="neutral"
+									role="status"
+									className="font-normal text-text-secondary m-0 min-h-5"
+								>
+									{ /* A space rather than '', and tag="p"
+									     rather than the default label: force-ui's
+									     Label returns null on falsy children, so
+									     the region did not exist on open and was
+									     inserted with its text already set, which
+									     is generally not announced. */ }
+									{ hint || ' ' }
+								</Label>
+								<div className="flex items-center gap-2">
+									<Button
+										variant="outline"
+										size="sm"
+										icon={
+											copied ? (
+												<Check className="size-4" />
+											) : (
+												<Copy className="size-4" />
+											)
+										}
+										onClick={
+											details ? handleCopy( details ) : undefined
+										}
+									>
+										{ copied
+											? dialogLabels.copied ||
 									  __( 'Copied', 'sureforms' )
-									: DIALOG.copy ||
+											: dialogLabels.copy ||
 									  __( 'Copy details', 'sureforms' ) }
-							</Button>
-							{ /* Not rendered at all without a destination. An empty
+									</Button>
+									{ /* Not rendered at all without a destination. An empty
 							     href resolves to the current document, so the click
 							     would open a duplicate of this page and still
 							     acknowledge the failure -- standing the notice down
@@ -459,7 +586,7 @@ export default () => {
 							     Not an anchor while it is locked either: `disabled`
 							     on an <a> does nothing at all, so the href only
 							     exists once the copy has been made. */ }
-							{ !! details?.support_url &&
+									{ !! details?.support_url &&
 								( copiedOnce ? (
 									<Button
 										variant="primary"
@@ -483,18 +610,20 @@ export default () => {
 										} }
 										className="no-underline hover:no-underline"
 									>
-										{ DIALOG.contact ||
+										{ dialogLabels.contact ||
 											__( 'Contact Support', 'sureforms' ) }
 									</Button>
 								) : (
 									<Button variant="primary" size="sm" disabled>
-										{ DIALOG.contact ||
+										{ dialogLabels.contact ||
 											__( 'Contact Support', 'sureforms' ) }
 									</Button>
 								) ) }
-						</div>
-					</Dialog.Footer>
-				</Dialog.Panel>
+								</div>
+							</Dialog.Footer>
+						</Dialog.Panel>
+					</Dialog.Portal>
+				) }
 			</Dialog>
 		</div>
 	);

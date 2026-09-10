@@ -204,6 +204,9 @@ class Admin {
 		// in place before admin_enqueue_scripts localizes it.
 		add_action( 'admin_init', [ $this, 'register_database_repair_notice' ], 5 );
 		add_action( 'admin_notices', [ $this, 'render_action_item_notices' ] );
+		// Late priority so the items are built after anything hooking
+		// srfm_action_items has had a chance to register.
+		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_action_item_styles' ], 20 );
 		add_action( 'admin_notices', [ $this, 'render_database_repair_notice' ] );
 		add_action( 'admin_post_srfm_repair_entries_table', [ $this, 'handle_database_repair' ] );
 		// Display notices on traditional WordPress admin pages.
@@ -3491,7 +3494,6 @@ JS;
 		}
 
 		$this->enqueue_notice_response_script();
-		$this->enqueue_action_item_styles();
 
 		foreach ( $items as $item ) {
 			$status = Helper::get_string_value( $item['status'] ?? '' );
@@ -3713,7 +3715,14 @@ JS;
 		// entity would be sent to the server verbatim. Decoded to one raw form here,
 		// and each renderer escapes it for its own context.
 		foreach ( $items as $index => $item ) {
-			foreach ( [ 'cta_url', 'guide_url' ] as $key ) {
+			// A filter may hand back an object. isset() on it returns false, which
+			// would slip the item past both the URL normalisation and the
+			// sanitize_key() below without any sign that it had.
+			if ( ! is_array( $item ) ) {
+				continue;
+			}
+
+			foreach ( [ 'cta_url', 'guide_url', 'support_url' ] as $key ) {
 				if ( ! isset( $item[ $key ] ) ) {
 					continue;
 				}
@@ -3772,53 +3781,26 @@ JS;
 	}
 
 	/**
-	 * The details dialog's strings.
-	 *
-	 * One array, two consumers: the classic wp-admin dialog in
-	 * notice-response.js, and the dashboard's force-ui one. Declared here rather
-	 * than inline in each, because the same sentence written as `__()` in PHP and
-	 * again in JSX looks identical to translators until the first edit to either,
-	 * after which one surface silently reverts to English.
-	 *
-	 * @since x.x.x
-	 * @return array<string,string>
-	 */
-	private function get_details_dialog_labels() {
-		return [
-			'title'       => __( 'Details', 'sureforms' ),
-			'description' => __( 'What we recorded about this problem. Copy it into your support request so we can start from the cause rather than a description of it.', 'sureforms' ),
-			'copy'        => __( 'Copy details', 'sureforms' ),
-			'copied'      => __( 'Copied', 'sureforms' ),
-			'contact'     => __( 'Contact Support', 'sureforms' ),
-			'close'       => __( 'Close', 'sureforms' ),
-			// Shown beside the buttons rather than as a title attribute:
-			// pointer-events:none suppresses the native tooltip, a title
-			// never fires on keyboard focus, and screen readers commonly
-			// drop it on an unavailable control -- so the sentence saying
-			// why the button is inert could not be read by anyone.
-			'copyFirst'   => __( 'Copy the details first, so you have them to paste.', 'sureforms' ),
-			// The unlock changes the label, the icon and whether Contact
-			// Support works, none of which was announced. This goes in a
-			// role="status" node so it is.
-			'unlocked'    => __( 'Copied. Contact Support is now available.', 'sureforms' ),
-			'copyFailed'  => __( 'Your browser would not let us copy. Select the text above and copy it by hand.', 'sureforms' ),
-			// The scrollable diagnostics block is focusable, so it needs a name of
-			// its own.
-			'logRegion'   => __( 'Recorded diagnostics', 'sureforms' ),
-		];
-	}
-
-	/**
 	 * The stylesheet for the notice carousel and the details dialog.
 	 *
 	 * In a stylesheet rather than inline style assignments in
 	 * notice-response.js, so the rules use logical properties, an RTL sheet can
 	 * override them, and a site can restyle the dialog without patching a script.
 	 *
+	 * Only the classic wp-admin surface needs these. The SureForms dashboard's
+	 * dialog is force-ui's, styled by the Tailwind build, so nothing here reaches
+	 * it -- the two surfaces share their strings, not their markup.
+	 *
 	 * Attached to a registered handle with no file of its own, which is the WP way
-	 * to ship CSS tied to one script, and it means both surfaces get the same rules
-	 * from one place: the classic notices, and the SureForms dashboard, where the
-	 * React panel calls the same dialog.
+	 * to ship CSS tied to one script.
+	 *
+	 * Hooked to admin_enqueue_scripts rather than called from the renderer.
+	 * admin_notices fires from admin-header.php after admin_print_styles has
+	 * flushed the head, so enqueuing there reached the page only through core's
+	 * late-styles pass in the footer -- and until that parsed, every stacked notice
+	 * rendered expanded before collapsing to one, the carousel controls overlapped
+	 * the notice text, and the defensive `display: none` on the hidden payload was
+	 * inert, which is the exact window that rule exists for.
 	 *
 	 * The buttons are painted explicitly. They carry core's `button` classes for
 	 * their shape and focus behaviour, and core paints those with
@@ -3830,8 +3812,29 @@ JS;
 	 * @since x.x.x
 	 * @return void
 	 */
-	private function enqueue_action_item_styles() {
+	public function enqueue_action_item_styles() {
 		if ( wp_style_is( 'srfm-action-items', 'enqueued' ) ) {
+			return;
+		}
+
+		if ( ! Helper::current_user_can() ) {
+			return;
+		}
+
+		// Nothing to style unless a notice is actually going to render. Cheap to
+		// ask: get_action_items() is memoised for the request.
+		$has_notice = false;
+
+		foreach ( $this->get_action_items() as $item ) {
+			$status = Helper::get_string_value( is_array( $item ) ? $item['status'] ?? '' : '' );
+
+			if ( 'success' !== $status && '' !== $status ) {
+				$has_notice = true;
+				break;
+			}
+		}
+
+		if ( ! $has_notice ) {
 			return;
 		}
 
@@ -3956,6 +3959,43 @@ JS;
 CSS;
 
 		wp_add_inline_style( 'srfm-action-items', $css );
+	}
+
+	/**
+	 * The details dialog's strings.
+	 *
+	 * One array, two consumers: the classic wp-admin dialog in
+	 * notice-response.js, and the dashboard's force-ui one. Declared here rather
+	 * than inline in each, because the same sentence written as `__()` in PHP and
+	 * again in JSX looks identical to translators until the first edit to either,
+	 * after which one surface silently reverts to English.
+	 *
+	 * @since x.x.x
+	 * @return array<string,string>
+	 */
+	private function get_details_dialog_labels() {
+		return [
+			'title'       => __( 'Details', 'sureforms' ),
+			'description' => __( 'What we recorded about this problem. Copy it into your support request so we can start from the cause rather than a description of it.', 'sureforms' ),
+			'copy'        => __( 'Copy details', 'sureforms' ),
+			'copied'      => __( 'Copied', 'sureforms' ),
+			'contact'     => __( 'Contact Support', 'sureforms' ),
+			'close'       => __( 'Close', 'sureforms' ),
+			// Shown beside the buttons rather than as a title attribute:
+			// pointer-events:none suppresses the native tooltip, a title
+			// never fires on keyboard focus, and screen readers commonly
+			// drop it on an unavailable control -- so the sentence saying
+			// why the button is inert could not be read by anyone.
+			'copyFirst'   => __( 'Copy the details first, so you have them to paste.', 'sureforms' ),
+			// The unlock changes the label, the icon and whether Contact
+			// Support works, none of which was announced. This goes in a
+			// role="status" node so it is.
+			'unlocked'    => __( 'Copied. Contact Support is now available.', 'sureforms' ),
+			'copyFailed'  => __( 'Your browser would not let us copy. Select the text above and copy it by hand.', 'sureforms' ),
+			// The scrollable diagnostics block is focusable, so it needs a name of
+			// its own.
+			'logRegion'   => __( 'Recorded diagnostics', 'sureforms' ),
+		];
 	}
 
 	/**
@@ -4987,7 +5027,7 @@ CSS;
 	}
 
 	/**
-	 * Diagnostics block for the support email.
+	 * Diagnostics block for the support report.
 	 *
 	 * Carries what support would otherwise have to ask for, so the first reply can
 	 * be an answer rather than a questionnaire.
@@ -5049,12 +5089,20 @@ CSS;
 			]
 		);
 
-		// Only when there is one. A repeat report is worth knowing about at the top
-		// of a ticket: the same category having been reported before means the last
-		// answer did not hold, which is a different conversation from a first
-		// report. Stored as time() -- a UTC epoch, comparable with the sibling
-		// 'at' -- and formatted here with wp_date() so it reads in the site's
-		// timezone rather than the server's.
+		// Only when there is one. A repeat report is worth knowing about: the same
+		// category having been reported before means the last answer did not hold,
+		// which is a different conversation from a first report. Appended with the
+		// rest of the site details rather than raised to the top, because it is
+		// context for them rather than a headline.
+		//
+		// Survives only until the next success in that category, because
+		// clear_category() unsets the whole record -- so in practice it is
+		// reachable for 'integration', which has no success signal, and transient
+		// for the other two.
+		//
+		// Stored as time(), a UTC epoch comparable with the sibling 'at', and
+		// formatted here with wp_date() so it reads in the site's timezone rather
+		// than the server's.
 		$acked_at = Helper::get_integer_value( $failures[ $category ]['acked_at'] ?? 0 );
 
 		if ( $acked_at > 0 ) {

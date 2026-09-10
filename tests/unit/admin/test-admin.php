@@ -1345,10 +1345,16 @@ class Test_Admin extends TestCase {
 
 		$pagenow = $previous_pagenow;
 
-		$start = strpos( $html, 'srfm-notice-details' );
-		$this->assertNotFalse( $start, 'The hidden payload must render.' );
+		// The div's own contents, not the rest of the output: the template emits
+		// newlines of its own around it, so measuring from here to end-of-output
+		// passed even when the payload itself was a single line.
+		$this->assertSame(
+			1,
+			preg_match( '#<div[^>]*class="srfm-notice-details"[^>]*>(.*?)</div>#s', $html, $matches ),
+			'The hidden payload must render.'
+		);
 
-		$payload = substr( $html, $start );
+		$payload = $matches[1];
 
 		$this->assertStringNotContainsString( "\r", $payload, 'Bare LF only.' );
 		$this->assertGreaterThan(
@@ -1395,8 +1401,11 @@ class Test_Admin extends TestCase {
 			$block,
 			'The newest entry must survive the trim.'
 		);
+		// No trailing space: the fixture is '…fill the log ' . $i inside a JSON
+		// line, so the next character is always a quote and 'fill the log 0 '
+		// could never appear -- the assertion passed whichever end was trimmed.
 		$this->assertStringNotContainsString(
-			'fill the log 0 ',
+			'fill the log 0"',
 			$block,
 			'The oldest entries are what the bound drops.'
 		);
@@ -1468,6 +1477,10 @@ class Test_Admin extends TestCase {
 		// An item with no guide keeps Contact Support primary.
 		delete_option( Client_Logger::FAILURES_OPTION );
 		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
+		// Without this the render above has already populated the memo, and the
+		// assertion below is satisfied by the stale list rather than by the
+		// fixture it just set up.
+		Admin::reset_action_items_cache();
 
 		$pagenow = 'plugins.php';
 		ob_start();
@@ -1479,6 +1492,19 @@ class Test_Admin extends TestCase {
 			'/class="button button-primary"[^>]*data-srfm-button="view_details"/',
 			$alone,
 			'With no guide, View details leads and stays primary.'
+		);
+
+		// Proof this rendered the fixture rather than the memo from the render
+		// above: that list held two items, one of them the notification guide.
+		$this->assertSame(
+			1,
+			substr_count( $alone, 'srfm-action-item-notice' ),
+			'Only the submission failure is recorded, so only it may render.'
+		);
+		$this->assertStringNotContainsString(
+			'help_me_fix',
+			$alone,
+			'A stale list would still carry the notification guide.'
 		);
 	}
 

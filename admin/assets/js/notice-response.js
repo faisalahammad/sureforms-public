@@ -308,19 +308,35 @@
 			navigator.clipboard.write;
 
 		if ( supportsRich ) {
-			const item = new window.ClipboardItem( {
-				'text/plain': new Blob( [ text ], { type: 'text/plain' } ),
-				'text/html': new Blob( [ detailsAsHtml( text ) ], {
-					type: 'text/html',
-				} ),
-			} );
+			// Both of these throw synchronously, not through the promise:
+			// ClipboardItem's constructor on an unsupported MIME type, and
+			// clipboard.write() on a bad argument in Chromium or a stale user
+			// gesture in WebKit. Outside a try, the exception leaves copyDetails
+			// and the click handler with neither callback run -- so the caller
+			// never unlocks and the notice keeps no working action.
+			try {
+				const item = new window.ClipboardItem( {
+					'text/plain': new Blob( [ text ], { type: 'text/plain' } ),
+					'text/html': new Blob( [ detailsAsHtml( text ) ], {
+						type: 'text/html',
+					} ),
+				} );
 
-			navigator.clipboard.write( [ item ] ).then( done, nope );
+				navigator.clipboard.write( [ item ] ).then( done, nope );
+			} catch ( e ) {
+				nope();
+			}
+
 			return;
 		}
 
 		if ( navigator.clipboard && navigator.clipboard.writeText ) {
-			navigator.clipboard.writeText( text ).then( done, nope );
+			try {
+				navigator.clipboard.writeText( text ).then( done, nope );
+			} catch ( e ) {
+				nope();
+			}
+
 			return;
 		}
 
@@ -333,15 +349,20 @@
 	/**
 	 * Show what would be sent to support, before anything is sent.
 	 *
-	 * The one implementation of this dialog. It appends to document.body, so it is
-	 * not subject to a containing block established by an ancestor transform or
-	 * filter, and it is framework-free, so the React dashboard panel can call it
-	 * through window.srfmOpenDetails rather than carrying a second copy. A second
-	 * copy is how two surfaces end up with different keyboard behaviour, different
-	 * contrast and two sets of the same strings.
+	 * The dialog for the classic wp-admin notices. The SureForms dashboard has its
+	 * own, built on force-ui's Dialog, because there is no React on these screens
+	 * and no force-ui bundle either -- so the two surfaces are separate
+	 * implementations by necessity. They read their strings from one PHP array
+	 * (Admin::get_details_dialog_labels(), reaching here as
+	 * srfmNoticeResponse.details and the dashboard as srfm_admin.details_dialog),
+	 * so the copy cannot drift even though the markup does.
 	 *
-	 * Every string comes from srfmNoticeResponse.details, so the labels are
-	 * translated in PHP once and neither caller carries user-facing English.
+	 * This one appends to document.body, so it is not subject to a containing
+	 * block established by an ancestor transform or filter.
+	 *
+	 * The fallbacks below are English, because a plain admin script has no
+	 * gettext runtime to fall back to; they are reached only if the localize data
+	 * is missing entirely.
 	 *
 	 * Read with textContent and written with textContent, never innerHTML: the log
 	 * contains whatever a server or a browser put in an error message, and that is
@@ -657,12 +678,13 @@
 		} );
 	}
 
-	// The dashboard panel is React and this file is not, so it calls in here rather
-	// than carrying its own copy of the dialog. One implementation, one set of
-	// strings, one keyboard behaviour.
-	window.srfmOpenDetails = showDetails;
-
 	document.addEventListener( 'click', function ( e ) {
+		// A click whose target is not an Element -- text nodes, some synthetic
+		// events -- has no closest() and would throw out of the handler.
+		if ( ! e.target || typeof e.target.closest !== 'function' ) {
+			return;
+		}
+
 		const trigger = e.target.closest( '[data-srfm-details-for]' );
 
 		if ( ! trigger ) {
