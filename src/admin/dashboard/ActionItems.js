@@ -15,6 +15,7 @@ import {
 	Check,
 	Copy,
 } from 'lucide-react';
+import safeUrl from './utils/safeUrl';
 
 /**
  * Dashboard panel listing what SureForms has checked on this site.
@@ -113,18 +114,25 @@ export default () => {
 			return;
 		}
 
-		const node = dialogRoot.querySelector( '[role="dialog"]' );
-
-		if ( ! node ) {
-			return;
-		}
-
-		node.setAttribute( 'aria-labelledby', titleId );
-		node.setAttribute( 'aria-describedby', descriptionId );
+		// Both of them. There are two role="dialog" nodes in the portal, not one:
+		// force-ui's outer motion div hardcodes it, and floating-ui's useRole()
+		// puts it on the inner floating element too. querySelector returns the
+		// outer scroll wrapper, so naming only that left the panel focus is
+		// actually trapped inside unnamed. Scoped to dialogRoot because that id is
+		// shared with other dialogs in this codebase.
+		dialogRoot
+			.querySelectorAll( '[role="dialog"]' )
+			.forEach( ( node ) => {
+				node.setAttribute( 'aria-labelledby', titleId );
+				node.setAttribute( 'aria-describedby', descriptionId );
+			} );
 	}, [ details, dialogRoot ] );
 
 	// Initial focus on Copy details rather than whatever FloatingFocusManager
-	// reaches first, which is the close cross.
+	// reaches first, which is the close cross. The ref has to be attached to the
+	// Button as well as declared -- force-ui's Button is forwardRef and applies it
+	// to the rendered tag, and without the attribute this was a permanent no-op
+	// that the optional chaining hid.
 	const copyRef = useRef( null );
 
 	useEffect( () => {
@@ -133,6 +141,35 @@ export default () => {
 		}
 
 		const timer = window.setTimeout( () => copyRef.current?.focus(), 50 );
+
+		return () => window.clearTimeout( timer );
+	}, [ details ] );
+
+	// Finding 1: force-ui always passes returnFocus to FloatingFocusManager as
+	// `refs.reference` -- a ref object that always exists, so its `c?.reference`
+	// guard is always truthy -- whose `.current` is null because no trigger prop
+	// is used. FloatingFocusManager's getReturnElement() only takes its correct
+	// `getPreviouslyFocusedElement()` path when returnFocus is a boolean, so
+	// passing the object defeats the library's own default and every close path
+	// drops focus to <body>. Restored by hand instead.
+	const openerRef = useRef( null );
+
+	useEffect( () => {
+		if ( details ) {
+			return;
+		}
+
+		const opener = openerRef.current;
+
+		if ( ! opener || typeof opener.focus !== 'function' ) {
+			return;
+		}
+
+		openerRef.current = null;
+
+		// After the library has finished its own restore attempt on unmount,
+		// otherwise it lands on the detached fallback span afterwards.
+		const timer = window.setTimeout( () => opener.focus(), 0 );
 
 		return () => window.clearTimeout( timer );
 	}, [ details ] );
@@ -192,7 +229,7 @@ export default () => {
 				{
 					name: item.guide_action,
 					label: item.guide_label,
-					url: item.guide_url,
+					url: safeUrl( item.guide_url ),
 					external: true,
 				},
 			  ]
@@ -202,7 +239,7 @@ export default () => {
 				{
 					name: item.cta_action,
 					label: item.cta_label,
-					url: item.cta_url,
+					url: safeUrl( item.cta_url ),
 					// An item carrying details opens them here rather than
 					// navigating: the point is to read the diagnostics before
 					// sending them anywhere. cta_url stays as the fallback the
@@ -383,7 +420,15 @@ export default () => {
 													`${ item.id }-${ index }`
 												}
 												type="button"
-												onClick={ () => {
+												onClick={ ( event ) => {
+													// Captured before the dialog
+													// mounts: force-ui defeats
+													// FloatingFocusManager's own
+													// return-focus, so nothing
+													// else remembers this.
+													openerRef.current =
+														event.currentTarget;
+
 													// Only when the server named
 													// one: an unnamed action posts
 													// "undefined" and 400s.
@@ -556,6 +601,7 @@ export default () => {
 								</Label>
 								<div className="flex items-center gap-2">
 									<Button
+										ref={ copyRef }
 										variant="outline"
 										size="sm"
 										icon={
@@ -586,13 +632,15 @@ export default () => {
 							     Not an anchor while it is locked either: `disabled`
 							     on an <a> does nothing at all, so the href only
 							     exists once the copy has been made. */ }
-									{ !! details?.support_url &&
+									{ !! safeUrl( details?.support_url ) &&
 								( copiedOnce ? (
 									<Button
 										variant="primary"
 										size="sm"
 										tag="a"
-										href={ details.support_url }
+										href={ safeUrl(
+											details.support_url
+										) }
 										target="_blank"
 										rel="noopener noreferrer"
 										onClick={ () => {
