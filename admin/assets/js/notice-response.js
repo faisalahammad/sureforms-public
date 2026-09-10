@@ -370,9 +370,7 @@
 			{};
 
 		const overlay = document.createElement( 'div' );
-		overlay.style.cssText =
-			'position:fixed;inset:0;z-index:999999;display:flex;align-items:center;' +
-			'justify-content:center;background:rgba(0,0,0,.5);padding:16px;';
+		overlay.className = 'srfm-details-overlay';
 
 		// Restored on close. Without it the trigger is gone from the tab order and
 		// a keyboard user starts again from the top of the page (WCAG 2.4.3).
@@ -396,19 +394,16 @@
 		// title in an aria-label, which announces it twice.
 		panel.setAttribute( 'aria-labelledby', ids + '-title' );
 		panel.setAttribute( 'aria-describedby', ids + '-desc' );
-		panel.style.cssText =
-			'background:#fff;border-radius:8px;padding:16px;width:100%;' +
-			'max-width:720px;box-shadow:0 10px 30px rgba(0,0,0,.2);';
+		panel.className = 'srfm-details-panel';
 
 		const heading = document.createElement( 'h2' );
 		heading.id = ids + '-title';
 		heading.textContent = labels.title || 'Details';
-		heading.style.cssText = 'margin:0 0 4px;font-size:14px;';
 
 		const description = document.createElement( 'p' );
 		description.id = ids + '-desc';
 		description.textContent = labels.description || '';
-		description.style.cssText = 'margin:0 0 12px;color:#50575e;';
+		description.className = 'srfm-details-description';
 
 		// Selectable and scrollable, because clipboard access can be refused and
 		// then selecting by hand is the only way through. tabindex because Chromium
@@ -420,23 +415,16 @@
 		pre.tabIndex = 0;
 		pre.setAttribute( 'role', 'region' );
 		pre.setAttribute( 'aria-label', labels.logRegion || 'Diagnostics' );
-		pre.style.cssText =
-			'margin:0;max-height:320px;overflow:auto;white-space:pre-wrap;' +
-			'word-break:break-word;background:#f6f7f7;padding:12px;' +
-			'border-radius:6px;font-size:12px;';
 
 		const actions = document.createElement( 'p' );
-		actions.style.cssText =
-			'display:flex;gap:8px;align-items:center;flex-wrap:wrap;' +
-			'justify-content:flex-end;margin:12px 0 0;';
+		actions.className = 'srfm-details-actions';
 
 		// Visible, not a title attribute. pointer-events:none suppresses the native
 		// tooltip, a title never fires on keyboard focus, and screen readers
 		// commonly drop it on an unavailable control -- so the sentence explaining
 		// why the button is inert could not be read by anyone.
 		const hint = document.createElement( 'span' );
-		hint.style.cssText =
-			'margin-inline-end:auto;font-size:12px;color:#4b5563;';
+		hint.className = 'srfm-details-hint';
 		hint.textContent = canCopy ? labels.copyFirst || '' : '';
 
 		// Doubles as the live region for the unlock. Copying changes three things at
@@ -446,7 +434,7 @@
 
 		const copy = document.createElement( 'button' );
 		copy.type = 'button';
-		copy.className = 'button';
+		copy.className = 'button srfm-details-copy';
 		copy.textContent = labels.copy || 'Copy details';
 
 		// Locked until the details are on the clipboard. The support form asks for
@@ -465,7 +453,7 @@
 		const contact = supportUrl ? document.createElement( 'a' ) : null;
 
 		if ( contact ) {
-			contact.className = 'button button-primary';
+			contact.className = 'button button-primary srfm-details-contact';
 			contact.target = '_blank';
 			contact.rel = 'noopener noreferrer';
 			contact.textContent = labels.contact || 'Contact Support';
@@ -476,10 +464,10 @@
 				return;
 			}
 
+			// The dimming and the pointer-events block hang off aria-disabled in the
+			// stylesheet, so the state is declared once rather than in two places.
 			contact.removeAttribute( 'href' );
 			contact.setAttribute( 'aria-disabled', 'true' );
-			contact.style.opacity = '0.6';
-			contact.style.pointerEvents = 'none';
 		}
 
 		function unlockContact() {
@@ -489,8 +477,6 @@
 
 			contact.href = supportUrl;
 			contact.removeAttribute( 'aria-disabled' );
-			contact.style.opacity = '';
-			contact.style.pointerEvents = '';
 		}
 
 		// Locked only where copying can actually happen. Where it cannot, the copy
@@ -505,7 +491,7 @@
 
 		const close = document.createElement( 'button' );
 		close.type = 'button';
-		close.className = 'button-link';
+		close.className = 'button-link srfm-details-close';
 		close.textContent = labels.close || 'Close';
 
 		let revert = 0;

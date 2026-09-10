@@ -1635,14 +1635,67 @@ class Test_Admin extends TestCase {
 	 * pointed at an inbox and has no destination left to change.
 	 */
 	public function test_get_support_contact_url_is_tagged_and_filterable() {
+		// An address of its own: make_user() does not set one, and an admin with no
+		// email is exactly the case the empty fallback exists for.
+		$admin = $this->make_user( 'administrator' );
+		wp_update_user(
+			[
+				'ID'         => $admin,
+				'user_email' => 'owner@example.org',
+			]
+		);
+		wp_set_current_user( $admin );
+
 		$method = new ReflectionMethod( Admin::class, 'get_support_contact_url' );
 		$method->setAccessible( true );
 
 		$url = $method->invoke( Admin::get_instance(), 'notification' );
 
-		$this->assertStringStartsWith( 'https://sureforms.com/contact/', $url );
+		$this->assertStringStartsWith( 'https://sureforms.com/form/troubleshooting-form/', $url );
 		$this->assertStringContainsString( 'utm_content=notification', $url );
 		$this->assertStringContainsString( 'utm_campaign=contact_support', $url );
+
+		parse_str( (string) wp_parse_url( $url, PHP_URL_QUERY ), $query );
+
+		// Prefilled, so the person reporting a fault does not retype what SureForms
+		// already knows.
+		$this->assertSame( 'Email notification failure', $query['subject'] ?? '' );
+		$this->assertSame(
+			Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) ),
+			$query['site_url'] ?? ''
+		);
+		$this->assertSame( 'owner@example.org', $query['mail'] ?? '', 'The admin address prefills the form.' );
+
+		// An admin with no usable address still gets a working link, with the field
+		// left empty rather than carrying a broken value into the form.
+		$no_email = $this->make_user( 'administrator' );
+		wp_set_current_user( $no_email );
+
+		parse_str(
+			(string) wp_parse_url( $method->invoke( Admin::get_instance(), 'notification' ), PHP_URL_QUERY ),
+			$without
+		);
+
+		$this->assertSame( '', $without['mail'] ?? 'missing' );
+		$this->assertSame( 'Email notification failure', $without['subject'] ?? '' );
+
+		wp_set_current_user( $admin );
+
+		// One subject per category, matched against the form's own options -- so
+		// these are machine values and must not be translated.
+		$subject = static function ( $category ) use ( $method ) {
+			parse_str(
+				(string) wp_parse_url( $method->invoke( Admin::get_instance(), $category ), PHP_URL_QUERY ),
+				$parsed
+			);
+			return $parsed['subject'] ?? '';
+		};
+
+		$this->assertSame( 'Form submission failure', $subject( 'submission' ) );
+		$this->assertSame( 'Integration failure', $subject( 'integration' ) );
+		// srfm_action_items is public, so an item can carry any category or none.
+		$this->assertSame( 'Other', $subject( 'something-else' ) );
+		$this->assertSame( 'Other', $subject( '' ) );
 
 		// Different check, different tag -- otherwise the parameter says nothing.
 		$this->assertStringContainsString(

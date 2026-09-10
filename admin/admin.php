@@ -97,7 +97,7 @@ class Admin {
 	 *
 	 * @since x.x.x
 	 */
-	private const SUPPORT_CONTACT_URL = 'https://sureforms.com/contact/';
+	private const SUPPORT_CONTACT_URL = 'https://sureforms.com/form/troubleshooting-form/';
 
 	/**
 	 * Dashboard widget entries data.
@@ -1815,6 +1815,7 @@ JS;
 			'ajax_url'                     => admin_url( 'admin-ajax.php' ),
 			'client_logs_nonce'            => Helper::current_user_can() ? wp_create_nonce( 'srfm_client_logs' ) : '',
 			'action_items'                 => $this->get_action_items(),
+			'details_dialog'               => $this->get_details_dialog_labels(),
 			'notice_response_nonce'        => Helper::current_user_can() ? wp_create_nonce( 'srfm_notice_response' ) : '',
 			'dismiss_action_item_nonce'    => Helper::current_user_can() ? wp_create_nonce( 'srfm_dismiss_action_item' ) : '',
 			'sf_plugin_manager_nonce'      => wp_create_nonce( 'sf_plugin_manager_nonce' ),
@@ -1929,12 +1930,6 @@ JS;
 				'version'      => SRFM_VER,
 			];
 			wp_enqueue_script( SRFM_SLUG . $asset_handle, SRFM_URL . 'assets/build/dashboard.js', $script_info['dependencies'], SRFM_VER, true );
-
-			// The Form Checks panel's View details button calls into the dialog this
-			// script defines, rather than the panel carrying a second copy in React.
-			// Enqueued here because the classic notices this file normally rides on
-			// are deliberately not rendered on the SureForms dashboard.
-			$this->enqueue_notice_response_script();
 
 			wp_localize_script( SRFM_SLUG . $asset_handle, 'scIcons', [ 'path' => SRFM_URL . 'assets/build/icon-assets' ] );
 
@@ -2826,28 +2821,7 @@ JS;
 				],
 				// Details modal chrome, translated here so the script carries no
 				// user-facing English of its own.
-				'details'  => [
-					'title'       => __( 'Details', 'sureforms' ),
-					'description' => __( 'What we recorded about this problem. Copy it into your support request so we can start from the cause rather than a description of it.', 'sureforms' ),
-					'copy'        => __( 'Copy details', 'sureforms' ),
-					'copied'      => __( 'Copied', 'sureforms' ),
-					'contact'     => __( 'Contact Support', 'sureforms' ),
-					'close'       => __( 'Close', 'sureforms' ),
-					// Shown beside the buttons rather than as a title attribute:
-					// pointer-events:none suppresses the native tooltip, a title
-					// never fires on keyboard focus, and screen readers commonly
-					// drop it on an unavailable control -- so the sentence saying
-					// why the button is inert could not be read by anyone.
-					'copyFirst'   => __( 'Copy the details first, so you have them to paste.', 'sureforms' ),
-					// The unlock changes the label, the icon and whether Contact
-					// Support works, none of which was announced. This goes in a
-					// role="status" node so it is.
-					'unlocked'    => __( 'Copied. Contact Support is now available.', 'sureforms' ),
-					'copyFailed'  => __( 'Your browser would not let us copy. Select the text above and copy it by hand.', 'sureforms' ),
-					// The scrollable diagnostics block is focusable, so it needs a
-					// name of its own.
-					'logRegion'   => __( 'Recorded diagnostics', 'sureforms' ),
-				],
+				'details'  => $this->get_details_dialog_labels(),
 			]
 		);
 	}
@@ -3517,7 +3491,7 @@ JS;
 		}
 
 		$this->enqueue_notice_response_script();
-		$this->print_action_item_carousel_styles();
+		$this->enqueue_action_item_styles();
 
 		foreach ( $items as $item ) {
 			$status = Helper::get_string_value( $item['status'] ?? '' );
@@ -3798,42 +3772,190 @@ JS;
 	}
 
 	/**
-	 * Styles for the stacked-notice carousel.
+	 * The details dialog's strings.
 	 *
-	 * In a stylesheet rather than eight inline style assignments in
-	 * notice-response.js, so the rules use logical properties and an RTL sheet can
-	 * override them. The reserved room on the trailing edge is a custom property
-	 * the script measures and sets, because a translated counter is wider than
-	 * "1 of 4" and a fixed value lets a long form title run under the buttons.
+	 * One array, two consumers: the classic wp-admin dialog in
+	 * notice-response.js, and the dashboard's force-ui one. Declared here rather
+	 * than inline in each, because the same sentence written as `__()` in PHP and
+	 * again in JSX looks identical to translators until the first edit to either,
+	 * after which one surface silently reverts to English.
 	 *
-	 * Printed only when at least one notice is about to render, and only from this
-	 * renderer -- print_srfm_notice_styles() is hooked to
-	 * astra_notice_before_markup_* and never fires for these.
+	 * @since x.x.x
+	 * @return array<string,string>
+	 */
+	private function get_details_dialog_labels() {
+		return [
+			'title'       => __( 'Details', 'sureforms' ),
+			'description' => __( 'What we recorded about this problem. Copy it into your support request so we can start from the cause rather than a description of it.', 'sureforms' ),
+			'copy'        => __( 'Copy details', 'sureforms' ),
+			'copied'      => __( 'Copied', 'sureforms' ),
+			'contact'     => __( 'Contact Support', 'sureforms' ),
+			'close'       => __( 'Close', 'sureforms' ),
+			// Shown beside the buttons rather than as a title attribute:
+			// pointer-events:none suppresses the native tooltip, a title
+			// never fires on keyboard focus, and screen readers commonly
+			// drop it on an unavailable control -- so the sentence saying
+			// why the button is inert could not be read by anyone.
+			'copyFirst'   => __( 'Copy the details first, so you have them to paste.', 'sureforms' ),
+			// The unlock changes the label, the icon and whether Contact
+			// Support works, none of which was announced. This goes in a
+			// role="status" node so it is.
+			'unlocked'    => __( 'Copied. Contact Support is now available.', 'sureforms' ),
+			'copyFailed'  => __( 'Your browser would not let us copy. Select the text above and copy it by hand.', 'sureforms' ),
+			// The scrollable diagnostics block is focusable, so it needs a name of
+			// its own.
+			'logRegion'   => __( 'Recorded diagnostics', 'sureforms' ),
+		];
+	}
+
+	/**
+	 * The stylesheet for the notice carousel and the details dialog.
+	 *
+	 * In a stylesheet rather than inline style assignments in
+	 * notice-response.js, so the rules use logical properties, an RTL sheet can
+	 * override them, and a site can restyle the dialog without patching a script.
+	 *
+	 * Attached to a registered handle with no file of its own, which is the WP way
+	 * to ship CSS tied to one script, and it means both surfaces get the same rules
+	 * from one place: the classic notices, and the SureForms dashboard, where the
+	 * React panel calls the same dialog.
+	 *
+	 * The buttons are painted explicitly. They carry core's `button` classes for
+	 * their shape and focus behaviour, and core paints those with
+	 * `var(--wp-admin-theme-color)` -- so without this the dialog renders in
+	 * whichever admin colour scheme the user picked, which on a default install is
+	 * blue, on a SureForms panel that is otherwise entirely brand orange. Same
+	 * approach and same values as print_srfm_notice_styles().
 	 *
 	 * @since x.x.x
 	 * @return void
 	 */
-	private function print_action_item_carousel_styles() {
-		?>
-		<style id="srfm-action-item-carousel-styles">
-			.srfm-action-item-carousel { position: relative; }
-			.srfm-action-item-carousel .srfm-action-item-notice { padding-inline-end: var(--srfm-carousel-reserve, 130px); }
-			/* [hidden] is only a UA rule. WordPress sets display on .notice, and a
-			third-party admin sheet doing something like `.notice div { display: block }`
-			would put the raw diagnostics on screen inside the notice. */
-			.srfm-action-item-carousel .srfm-action-item-notice[hidden] { display: none; }
-			.srfm-notice-details { display: none; }
-			.srfm-action-item-carousel-nav {
-				position: absolute;
-				top: 8px;
-				inset-inline-end: 12px;
-				margin: 0;
-				display: flex;
-				align-items: center;
-				gap: 8px;
-			}
-		</style>
-		<?php
+	private function enqueue_action_item_styles() {
+		if ( wp_style_is( 'srfm-action-items', 'enqueued' ) ) {
+			return;
+		}
+
+		wp_register_style( 'srfm-action-items', false, [], SRFM_VER );
+		wp_enqueue_style( 'srfm-action-items' );
+
+		$css = <<<'CSS'
+.srfm-action-item-carousel { position: relative; }
+.srfm-action-item-carousel .srfm-action-item-notice { padding-inline-end: var(--srfm-carousel-reserve, 130px); }
+/* [hidden] is only a UA rule. WordPress sets display on .notice, and a third-party
+   admin sheet doing something like `.notice div { display: block }` would put the
+   raw diagnostics on screen inside the notice. */
+.srfm-action-item-carousel .srfm-action-item-notice[hidden] { display: none; }
+.srfm-notice-details { display: none; }
+.srfm-action-item-carousel-nav {
+	position: absolute;
+	top: 8px;
+	inset-inline-end: 12px;
+	margin: 0;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+.srfm-details-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 999999;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(0, 0, 0, .5);
+	padding: 16px;
+}
+.srfm-details-panel {
+	background: #fff;
+	border-radius: 8px;
+	padding: 16px;
+	width: 100%;
+	max-width: 800px;
+	box-shadow: 0 10px 30px rgba(0, 0, 0, .2);
+}
+.srfm-details-panel h2 { margin: 0 0 4px; font-size: 14px; }
+.srfm-details-panel .srfm-details-description { margin: 0 0 12px; color: #50575e; }
+.srfm-details-panel pre {
+	margin: 0;
+	max-height: 320px;
+	overflow: auto;
+	white-space: pre-wrap;
+	word-break: break-word;
+	background: #f6f7f7;
+	padding: 12px;
+	border-radius: 6px;
+	font-size: 12px;
+}
+.srfm-details-actions {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	margin: 12px 0 0;
+}
+.srfm-details-hint {
+	margin-inline-end: auto;
+	font-size: 12px;
+	color: #4b5563;
+}
+/* Core paints .button with the admin colour scheme, so these say what they are
+   rather than inheriting whichever scheme the user picked. */
+.srfm-details-panel .srfm-details-close.button-link {
+	color: #50575e;
+	text-decoration: none;
+}
+.srfm-details-panel .srfm-details-close.button-link:hover,
+.srfm-details-panel .srfm-details-close.button-link:focus {
+	color: #1e1e1e;
+}
+.srfm-details-panel .srfm-details-copy.button {
+	background: #fff;
+	border-color: #c3c4c7;
+	color: #1e1e1e;
+}
+.srfm-details-panel .srfm-details-copy.button:hover,
+.srfm-details-panel .srfm-details-copy.button:focus {
+	background: #f6f7f7;
+	border-color: #8c8f94;
+	color: #1e1e1e;
+}
+.srfm-details-panel .srfm-details-contact.button-primary,
+.srfm-details-panel .srfm-details-contact.button-primary:hover,
+.srfm-details-panel .srfm-details-contact.button-primary:focus {
+	background: #D54407;
+	border-color: #D54407;
+	color: #fff;
+	box-shadow: none;
+	text-shadow: none;
+	text-decoration: none;
+}
+.srfm-details-panel .srfm-details-contact.button-primary:hover,
+.srfm-details-panel .srfm-details-contact.button-primary:focus {
+	background: #C83B00;
+	border-color: #C83B00;
+}
+/* Grey rather than a dimmed orange fill. Core sets the disabled text colour with
+   !important, so an orange background here leaves grey on orange at 1.31:1 --
+   and a control that cannot be used should not wear the primary colour anyway.
+   This is what core gives every other disabled button, and what force-ui renders
+   for the same state on the dashboard, so the two surfaces agree. */
+.srfm-details-panel .srfm-details-contact.button-primary[aria-disabled="true"],
+.srfm-details-panel .srfm-details-contact.button-primary[aria-disabled="true"]:hover,
+.srfm-details-panel .srfm-details-contact.button-primary[aria-disabled="true"]:focus {
+	background: #f6f7f7;
+	border-color: #dcdcde;
+	pointer-events: none;
+	box-shadow: none;
+}
+.srfm-details-panel .button:focus {
+	outline: 2px solid #D54407;
+	outline-offset: 1px;
+	box-shadow: none;
+}
+CSS;
+
+		wp_add_inline_style( 'srfm-action-items', $css );
 	}
 
 	/**
@@ -4634,6 +4756,13 @@ JS;
 	 * failure and a caching advisory are different problems and it is worth knowing
 	 * which one drives the tickets.
 	 *
+	 * Prefilled with what SureForms already knows -- the admin's address, which
+	 * failure it is, and the site host -- so the person reporting a fault does not
+	 * retype it. Worth knowing that the address travels in the query string, so it
+	 * reaches browser history and any referrer along the way; it is the site
+	 * owner's own address going to SureForms' own form, which is the flow this
+	 * button exists for.
+	 *
 	 * Built with add_query_arg rather than string concatenation, so it stays
 	 * correct if the constant ever gains a query string of its own.
 	 *
@@ -4643,8 +4772,29 @@ JS;
 	 * @return string
 	 */
 	private function get_support_contact_url( $category ) {
+		// Deliberately not translated. These are matched against the options on the
+		// troubleshooting form, so they are machine values, not copy -- a German
+		// site sending "E-Mail-Benachrichtigungsfehler" would arrive as an
+		// unrecognised subject and land in the wrong queue.
+		$subjects = [
+			'submission'   => 'Form submission failure',
+			'notification' => 'Email notification failure',
+			'integration'  => 'Integration failure',
+		];
+
+		$user = wp_get_current_user();
+
 		$url = add_query_arg(
 			[
+				// Prefills the form, so the person reporting a fault does not retype
+				// what SureForms already knows. Empty rather than absent when the
+				// address is unusable, so the form still opens.
+				'mail'         => is_email( $user->user_email ) ? $user->user_email : '',
+				// Falls back to "Other" for a category SureForms does not define --
+				// srfm_action_items is public, so an item can carry any category or
+				// none.
+				'subject'      => $subjects[ $category ] ?? 'Other',
+				'site_url'     => Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) ),
 				'utm_source'   => 'sureforms',
 				'utm_medium'   => 'form_checks',
 				'utm_campaign' => 'contact_support',

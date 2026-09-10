@@ -1,12 +1,28 @@
 import { __ } from '@wordpress/i18n';
 import { useState } from '@wordpress/element';
-import { Button, Label } from '@bsf/force-ui';
+import { Button, Dialog, Label } from '@bsf/force-ui';
 import {
 	CircleCheck,
 	TriangleAlert,
 	ChevronUp,
 	ChevronDown,
+	Check,
+	Copy,
 } from 'lucide-react';
+
+// Translated in PHP and handed to both surfaces, so the same sentence is not
+// written as __() here and again in admin/assets/js/notice-response.js -- which
+// looks identical to translators until the first edit to either, after which one
+// surface silently reverts to English.
+const DIALOG = srfm_admin?.details_dialog || {};
+
+// Whether copying is possible at all. On a plain-HTTP admin navigator.clipboard
+// does not exist, so the copy step cannot be a precondition for anything -- see
+// the unlock reasoning on handleCopy.
+const canCopy = !! (
+	navigator.clipboard &&
+	( navigator.clipboard.write || navigator.clipboard.writeText )
+);
 
 /**
  * Dashboard panel listing what SureForms has checked on this site.
@@ -37,6 +53,17 @@ const ICONS = {
 export default () => {
 	const [ dismissed, setDismissed ] = useState( [] );
 	const [ open, setOpen ] = useState( true );
+	// The item whose details are being read, or null.
+	const [ details, setDetails ] = useState( null );
+	const [ copied, setCopied ] = useState( false );
+	// Separate from `copied`, which reverts after a couple of seconds so the button
+	// stops claiming "Copied". This one does not revert: the support form is only
+	// useful to someone holding the diagnostics, and that stays true after the
+	// label has gone back.
+	const [ copiedOnce, setCopiedOnce ] = useState( false );
+	// What the hint line says. Doubles as the live region for the unlock, which
+	// changes the label, the icon and whether Contact Support works at once.
+	const [ hint, setHint ] = useState( '' );
 
 	const items = ( srfm_admin?.action_items || [] ).filter(
 		( item ) => ! dismissed.includes( item.id )
@@ -109,6 +136,69 @@ export default () => {
 			  ]
 			: [] ),
 	];
+
+	const handleCopy = ( item ) => async () => {
+		const text = item.details || '';
+
+		try {
+			// Both flavours. A rich-text composer drops the newlines out of plain
+			// text, which is what turns the diagnostics into one paragraph; pasting
+			// HTML keeps every break, and <pre> keeps the log's columns lined up. A
+			// plain-text field still gets the text.
+			//
+			// Escaped here because the source is a log holding whatever a server put
+			// in an error message. It is never trusted as markup.
+			const html = `<pre style="font-family:monospace;white-space:pre-wrap;word-break:break-word;margin:0">${ text
+				.replace( /&/g, '&amp;' )
+				.replace( /</g, '&lt;' )
+				.replace( />/g, '&gt;' ) }</pre>`;
+
+			if ( window.ClipboardItem && navigator.clipboard?.write ) {
+				await navigator.clipboard.write( [
+					new window.ClipboardItem( {
+						'text/plain': new Blob( [ text ], {
+							type: 'text/plain',
+						} ),
+						'text/html': new Blob( [ html ], {
+							type: 'text/html',
+						} ),
+					} ),
+				] );
+			} else if ( navigator.clipboard?.writeText ) {
+				// No ClipboardItem: the formatting is lost, which still beats
+				// copying nothing.
+				await navigator.clipboard.writeText( text );
+			} else {
+				throw new Error( 'no clipboard' );
+			}
+
+			setCopied( true );
+			setCopiedOnce( true );
+			setHint( DIALOG.unlocked || '' );
+			// Reverts on its own: a button stuck on "Copied" says nothing about the
+			// next click.
+			setTimeout( () => setCopied( false ), 2000 );
+
+			// Reported inside the try, so the event means a copy happened rather
+			// than a copy was attempted. The classic notice records it the same way.
+			post( 'srfm_notice_response', srfm_admin?.notice_response_nonce, {
+				notice_id: item.id,
+				button: 'copy_details',
+			} );
+		} catch ( e ) {
+			// Refused outright, or no clipboard API at all. Do not claim it was
+			// copied -- but do release Contact Support. It is the only route that
+			// acknowledges the failure, these items are not dismissible, and only a
+			// submission failure ever clears itself, so keeping it locked behind a
+			// clipboard that cannot work leaves an undismissable notice with no
+			// working action. The text is on screen and selectable either way.
+			setCopied( false );
+			setCopiedOnce( true );
+			setHint( DIALOG.copyFailed || '' );
+		}
+	};
+
+	const closeDetails = () => setDetails( null );
 
 	// Opens the dialog rather than navigating: the details are read here before
 	// anything is sent. Nothing to download, nothing to intercept.
@@ -194,19 +284,18 @@ export default () => {
 										// the wrong element for something that opens a
 										// panel in place.
 										//
-										// The dialog itself lives in
-										// admin/assets/js/notice-response.js and is
-										// called through window.srfmOpenDetails. It is
-										// framework-free, appends to document.body --
-										// so it is not subject to a containing block
-										// established by an ancestor transform, which
-										// is what kept an overlay rendered in here
-										// from ever appearing -- and it already has to
-										// exist for the classic wp-admin notices. A
-										// second copy in React is how two surfaces end
-										// up with different keyboard behaviour,
-										// different contrast and two sets of the same
-										// strings.
+										// force-ui's Dialog rather than an overlay
+										// rendered in place. An overlay here is a
+										// descendant of the panel's Container nesting,
+										// and position:fixed resolves against the
+										// nearest ancestor establishing a containing
+										// block -- which is why one rendered here never
+										// appeared. Dialog portals out, and brings the
+										// focus trap, scroll lock and return-focus with
+										// it. The classic wp-admin notices keep their
+										// own framework-free dialog, because there is
+										// no React on those screens; both read their
+										// strings from the same PHP array.
 										action.dialog ? (
 											<button
 												key={ action.name }
@@ -216,12 +305,18 @@ export default () => {
 														item,
 														action.name
 													)();
-													window.srfmOpenDetails?.( {
-														noticeId: item.id,
-														text: item.details,
-														supportUrl:
-															item.support_url,
-													} );
+													setCopied( false );
+													// Each failure is its own
+													// report, so the copy has to
+													// be made again for this one.
+													setCopiedOnce( false );
+													setHint(
+														canCopy
+															? DIALOG.copyFirst ||
+																	''
+															: ''
+													);
+													setDetails( item );
 												} }
 												className={ `bg-transparent border-0 p-0 cursor-pointer text-xs font-medium no-underline hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1${
 													index > 0
@@ -276,6 +371,131 @@ export default () => {
 					) ) }
 				</div>
 			) }
+			{ /* Read before send: the same text a support request needs, so it can
+			     be pasted rather than described. force-ui's Dialog portals out of
+			     the panel, which is what an overlay rendered in place could not do,
+			     and it carries the focus trap, scroll lock and return-focus. */ }
+			<Dialog
+				design="simple"
+				exitOnEsc
+				scrollLock
+				open={ !! details }
+				setOpen={ closeDetails }
+			>
+				<Dialog.Backdrop />
+				{ /* Wider than force-ui's default w-120: this holds a diagnostics block
+				     and a fenced log, and 480px wraps almost every line of it. */ }
+				<Dialog.Panel className="gap-0 w-[50rem] max-w-[calc(100vw-2rem)]">
+					<Dialog.Header>
+						<div className="flex items-center justify-between">
+							<Dialog.Title>
+								{ DIALOG.title || __( 'Details', 'sureforms' ) }
+							</Dialog.Title>
+							<Dialog.CloseButton onClick={ closeDetails } />
+						</div>
+						<Dialog.Description>
+							{ DIALOG.description || '' }
+						</Dialog.Description>
+					</Dialog.Header>
+					<Dialog.Body className="mt-3">
+						{ /* Selectable and scrollable: clipboard access can be
+						     refused, and then selecting by hand is the only way
+						     through. tabIndex because Chromium and WebKit do not
+						     make a scroll container focusable on their own, so
+						     without it a keyboard user cannot reach the very thing
+						     the dialog exists to show. */ }
+						<pre
+							tabIndex={ 0 }
+							role="region"
+							aria-label={ DIALOG.logRegion || '' }
+							className="m-0 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background-secondary p-3 text-xs text-text-secondary"
+						>
+							{ details?.details || '' }
+						</pre>
+					</Dialog.Body>
+					<Dialog.Footer className="justify-between">
+						{ /* Visible text, not a title attribute: a title never fires
+						     on keyboard focus and is commonly dropped by screen
+						     readers on an unavailable control, so the sentence
+						     saying why the button is inert could not be read by
+						     anyone. role="status" so the unlock is announced. */ }
+						<Label
+							size="xs"
+							variant="neutral"
+							role="status"
+							className="font-normal text-text-secondary"
+						>
+							{ hint }
+						</Label>
+						<div className="flex items-center gap-2">
+							<Button
+								variant="outline"
+								size="sm"
+								icon={
+									copied ? (
+										<Check className="size-4" />
+									) : (
+										<Copy className="size-4" />
+									)
+								}
+								onClick={
+									details ? handleCopy( details ) : undefined
+								}
+							>
+								{ copied
+									? DIALOG.copied ||
+									  __( 'Copied', 'sureforms' )
+									: DIALOG.copy ||
+									  __( 'Copy details', 'sureforms' ) }
+							</Button>
+							{ /* Not rendered at all without a destination. An empty
+							     href resolves to the current document, so the click
+							     would open a duplicate of this page and still
+							     acknowledge the failure -- standing the notice down
+							     without anything having been reported. Reachable
+							     through srfm_action_items for an item carrying
+							     details but no support_url.
+
+							     Not an anchor while it is locked either: `disabled`
+							     on an <a> does nothing at all, so the href only
+							     exists once the copy has been made. */ }
+							{ !! details?.support_url &&
+								( copiedOnce ? (
+									<Button
+										variant="primary"
+										size="sm"
+										tag="a"
+										href={ details.support_url }
+										target="_blank"
+										rel="noopener noreferrer"
+										onClick={ () => {
+											// Records the click, which is also
+											// what stands the notice down until
+											// something new fails.
+											handleFix(
+												details,
+												'contact_support'
+											)();
+											// The form opens in its own tab, so
+											// the dialog has nothing left to
+											// show.
+											closeDetails();
+										} }
+										className="no-underline hover:no-underline"
+									>
+										{ DIALOG.contact ||
+											__( 'Contact Support', 'sureforms' ) }
+									</Button>
+								) : (
+									<Button variant="primary" size="sm" disabled>
+										{ DIALOG.contact ||
+											__( 'Contact Support', 'sureforms' ) }
+									</Button>
+								) ) }
+						</div>
+					</Dialog.Footer>
+				</Dialog.Panel>
+			</Dialog>
 		</div>
 	);
 };
