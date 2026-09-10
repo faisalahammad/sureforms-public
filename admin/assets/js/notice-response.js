@@ -36,6 +36,13 @@
 	}
 
 	function sendResponse( noticeId, button ) {
+		// Guarded like the carousel's read of the same global: this file is
+		// enqueued from several places and a missing localize object should not
+		// throw out of a click handler.
+		if ( typeof srfmNoticeResponse === 'undefined' ) {
+			return;
+		}
+
 		const body = new FormData();
 		body.append( 'action', 'srfm_notice_response' );
 		body.append( 'nonce', srfmNoticeResponse.nonce );
@@ -128,6 +135,13 @@
 		const wrap = document.createElement( 'div' );
 		wrap.className = 'srfm-action-item-carousel';
 
+		// Positioning and spacing live in the stylesheet the renderer prints, so
+		// an RTL sheet can override them and nothing here is a magic number.
+		// Declared above adopt() because adopt() reads it and runs before the
+		// controls are assembled.
+		const nav = document.createElement( 'p' );
+		nav.className = 'srfm-action-item-carousel-nav';
+
 		/**
 		 * Put the cards inside the wrapper, wherever they currently are.
 		 *
@@ -135,9 +149,17 @@
 		 * and that runs after this file's DOMContentLoaded handler -- so wrapping
 		 * once at build time left the wrapper behind, empty and zero-height, with
 		 * the controls positioned against it off the side of the screen and the
-		 * reserved padding matching nothing. Re-checking is cheap, only moves
-		 * anything when something else has moved it, and also survives a plugin
-		 * that relocates notices later.
+		 * reserved padding matching nothing.
+		 *
+		 * Driven by a MutationObserver rather than from render(). Called only from
+		 * render() it could not fire for a relocation that happens after the first
+		 * paint -- reaching it needed an arrow click, and a relocation is exactly
+		 * what strands the arrows: the cards move away carrying their `hidden`
+		 * attribute while nav stays behind, leaving one notice visible, the rest
+		 * permanently hidden, and no control the user can reach to recover. On a
+		 * surface whose only job is showing faults that is worse than not having a
+		 * carousel. The every() check makes this idempotent, so the observer
+		 * seeing its own writes is harmless.
 		 */
 		function adopt() {
 			if (
@@ -148,18 +170,37 @@
 				return;
 			}
 
-			cards[ 0 ].parentNode.insertBefore( wrap, cards[ 0 ] );
+			// Anchor on the first card still outside the wrapper. cards[0] may
+			// already be inside it, and wrap.insertBefore( wrap, … ) is a
+			// HierarchyRequestError; a card that was removed rather than moved has
+			// no parentNode at all, and dereferencing it would throw out of
+			// render() before the visibility loop ran.
+			const anchor = cards.filter( function ( notice ) {
+				return notice.parentNode && notice.parentNode !== wrap;
+			} )[ 0 ];
+
+			if ( ! anchor ) {
+				return;
+			}
+
+			// Moving the wrapper runs the DOM remove steps over its subtree, which
+			// blurs whatever inside it had focus -- and nav is inside it, so the
+			// arrow the user just pressed loses focus in exactly the case adopt()
+			// exists for.
+			const active = nav.ownerDocument.activeElement;
+			const focused = nav.contains( active ) ? active : null;
+
+			anchor.parentNode.insertBefore( wrap, anchor );
 			cards.forEach( function ( notice ) {
 				wrap.appendChild( notice );
 			} );
+
+			if ( focused ) {
+				focused.focus();
+			}
 		}
 
 		adopt();
-
-		// Positioning and spacing live in the stylesheet the renderer prints, so
-		// an RTL sheet can override them and nothing here is a magic number.
-		const nav = document.createElement( 'p' );
-		nav.className = 'srfm-action-item-carousel-nav';
 
 		const isRtl =
 			document.documentElement.getAttribute( 'dir' ) === 'rtl' ||
@@ -241,6 +282,17 @@
 			render();
 			measure();
 		}, 0 );
+
+		// And keep watching. A plugin acting on window.load, an admin-notice
+		// manager or a screen-options re-layout can move the notices at any point,
+		// and adopt() driven only from a click cannot recover from that -- the
+		// click it needs is the thing the move breaks.
+		if ( window.MutationObserver ) {
+			new window.MutationObserver( function () {
+				adopt();
+				measure();
+			} ).observe( document.body, { childList: true, subtree: true } );
+		}
 	}
 
 	if ( document.readyState === 'loading' ) {

@@ -3440,7 +3440,12 @@ JS;
 		}
 
 		$this->enqueue_notice_response_script();
-		$this->print_action_item_carousel_styles();
+
+		// The carousel is the stylesheet's only consumer and notice-response.js
+		// bails below two cards, so a single open fault would ship inert CSS.
+		if ( $rendered > 1 ) {
+			$this->print_action_item_carousel_styles();
+		}
 
 		foreach ( $items as $item ) {
 			$status = Helper::get_string_value( $item['status'] ?? '' );
@@ -3456,8 +3461,17 @@ JS;
 			$class = 'error' === $status ? 'notice-error' : 'notice-warning';
 			?>
 			<div class="notice srfm-action-item-notice <?php echo esc_attr( $class ); ?>">
-				<p><strong><?php echo esc_html( $item['title'] ); ?></strong></p>
-				<p><?php echo esc_html( $item['message'] ); ?></p>
+				<?php
+				/*
+				 * Guarded like every sibling key. A filter item carrying only
+				 * id/status/cta_* is a shape this surface designs for, and reading
+				 * these unguarded is two PHP 8 undefined-key warnings plus an
+				 * esc_html( null ) deprecation on 8.1+. React tolerates the absence,
+				 * so leaving it would keep the two renderers disagreeing.
+				 */
+				?>
+				<p><strong><?php echo esc_html( Helper::get_string_value( $item['title'] ?? '' ) ); ?></strong></p>
+				<p><?php echo esc_html( Helper::get_string_value( $item['message'] ?? '' ) ); ?></p>
 				<?php
 				// Self-serve first, so the emphasis follows the order rather than the
 				// identity: whichever action leads is the primary button, and an item
@@ -3629,6 +3643,12 @@ JS;
 		// entity would be sent to the server verbatim. Decoded to one raw form here,
 		// and each renderer escapes it for its own context.
 		foreach ( $items as $index => $item ) {
+			// A filter may hand back an object. isset() on it returns false, which
+			// would slip the item past this pass and hand React an unchecked URL.
+			if ( ! is_array( $item ) ) {
+				continue;
+			}
+
 			foreach ( [ 'cta_url', 'guide_url' ] as $key ) {
 				if ( ! isset( $item[ $key ] ) ) {
 					continue;
@@ -4499,8 +4519,9 @@ JS;
 	private function get_support_email_url( $category = '', $form_title = '' ) {
 		$copy = $this->get_support_copy( $category );
 
+		// No translators comment here: makepot cannot attach one to a variable, and
+		// the real ones are on the literals inside get_support_copy().
 		$subject = sprintf(
-			/* translators: %s: site host. */
 			$copy['subject'],
 			Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) )
 		);

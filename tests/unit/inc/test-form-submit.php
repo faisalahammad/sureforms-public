@@ -601,13 +601,6 @@ class Test_Form_Submit extends TestCase {
 	 */
 	public function test_send_email_clears_the_notification_fault_on_success() {
 		delete_option( Client_Logger::FAILURES_OPTION );
-		Client_Logger::record_failure( 'notification', 0, 'Contact Form' );
-
-		$this->assertArrayHasKey(
-			'notification',
-			Client_Logger::get_open_failures(),
-			'Precondition: the fault is standing before the send.'
-		);
 
 		$form_id = wp_insert_post(
 			[
@@ -615,6 +608,17 @@ class Test_Form_Submit extends TestCase {
 				'post_title'  => 'Notification Recovery',
 				'post_status' => 'publish',
 			]
+		);
+
+		// Recorded against this form: clearing is scoped to the form the fault
+		// belongs to, because the counter is per category and the notice names a
+		// form.
+		Client_Logger::record_failure( 'notification', $form_id, 'Notification Recovery' );
+
+		$this->assertArrayHasKey(
+			'notification',
+			Client_Logger::get_open_failures(),
+			'Precondition: the fault is standing before the send.'
 		);
 
 		update_post_meta(
@@ -654,6 +658,151 @@ class Test_Form_Submit extends TestCase {
 			'notification',
 			Client_Logger::get_open_failures(),
 			'A notification that sent must retire the notification fault.'
+		);
+
+		wp_delete_post( $form_id, true );
+		delete_option( Client_Logger::FAILURES_OPTION );
+	}
+
+	/**
+	 * A different form's notification succeeding must not clear the fault.
+	 *
+	 * send_email() runs on the public submit path and the counter is per category
+	 * rather than per form, so without the scoping an anonymous submission of a
+	 * working form retires a standing fault on a broken one -- repeatable once per
+	 * admin page load, by anyone. The notice names a form, so this is visible.
+	 */
+	public function test_send_email_does_not_clear_another_forms_notification_fault() {
+		delete_option( Client_Logger::FAILURES_OPTION );
+
+		$broken  = wp_insert_post(
+			[
+				'post_type'   => 'sureforms_form',
+				'post_title'  => 'Broken Form',
+				'post_status' => 'publish',
+			]
+		);
+		$working = wp_insert_post(
+			[
+				'post_type'   => 'sureforms_form',
+				'post_title'  => 'Working Form',
+				'post_status' => 'publish',
+			]
+		);
+
+		Client_Logger::record_failure( 'notification', $broken, 'Broken Form' );
+
+		update_post_meta(
+			$working,
+			'_srfm_email_notification',
+			[
+				[
+					'id'     => 1,
+					'status' => true,
+				],
+			]
+		);
+
+		$parsed = static function () {
+			return [
+				'to'      => 'owner@example.com',
+				'subject' => 'New entry',
+				'message' => 'An entry arrived.',
+				'headers' => [],
+			];
+		};
+		$sent   = static function () {
+			return true;
+		};
+
+		add_filter( 'srfm_email_notification', $parsed, 99 );
+		add_filter( 'pre_wp_mail', $sent, 99 );
+
+		Form_Submit::send_email( $working, [] );
+
+		remove_filter( 'pre_wp_mail', $sent, 99 );
+		remove_filter( 'srfm_email_notification', $parsed, 99 );
+
+		$this->assertArrayHasKey(
+			'notification',
+			Client_Logger::get_open_failures(),
+			"A working form's success must not retire another form's fault."
+		);
+
+		wp_delete_post( $broken, true );
+		wp_delete_post( $working, true );
+		delete_option( Client_Logger::FAILURES_OPTION );
+	}
+
+	/**
+	 * One recipient succeeding while another fails is still a failure.
+	 *
+	 * This is the case the flag is hoisted out of the loop for, and the one
+	 * nothing covered: with the clear inside the loop, the succeeding recipient
+	 * would retire a fault the failing one had just recorded. Two notifications on
+	 * one form, the first delivering and the second not.
+	 */
+	public function test_send_email_keeps_the_notification_fault_on_a_mixed_loop() {
+		delete_option( Client_Logger::FAILURES_OPTION );
+
+		$form_id = wp_insert_post(
+			[
+				'post_type'   => 'sureforms_form',
+				'post_title'  => 'Mixed Notifications',
+				'post_status' => 'publish',
+			]
+		);
+
+		Client_Logger::record_failure( 'notification', $form_id, 'Mixed Notifications' );
+
+		update_post_meta(
+			$form_id,
+			'_srfm_email_notification',
+			[
+				[
+					'id'     => 1,
+					'status' => true,
+				],
+				[
+					'id'     => 2,
+					'status' => true,
+				],
+			]
+		);
+
+		// First recipient valid, second empty -- and an empty destination fails in
+		// every environment, where a failing transport does not, because
+		// send_email() falls back to PHP's mail().
+		$calls  = 0;
+		$parsed = static function () use ( &$calls ) {
+			$calls++;
+
+			return [
+				'to'      => 1 === $calls ? 'owner@example.com' : '',
+				'subject' => 'New entry',
+				'message' => 'An entry arrived.',
+				'headers' => [],
+			];
+		};
+
+		// Only the first send succeeds; the second falls through to mail( '' ).
+		$sent = static function () use ( &$calls ) {
+			return 1 === $calls;
+		};
+
+		add_filter( 'srfm_email_notification', $parsed, 99 );
+		add_filter( 'pre_wp_mail', $sent, 99 );
+
+		Form_Submit::send_email( $form_id, [] );
+
+		remove_filter( 'pre_wp_mail', $sent, 99 );
+		remove_filter( 'srfm_email_notification', $parsed, 99 );
+
+		$this->assertSame( 2, $calls, 'Both notifications must have been attempted.' );
+		$this->assertArrayHasKey(
+			'notification',
+			Client_Logger::get_open_failures(),
+			'One recipient failing leaves the fault standing, however many succeeded.'
 		);
 
 		wp_delete_post( $form_id, true );

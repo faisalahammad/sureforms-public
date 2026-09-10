@@ -109,7 +109,7 @@ class Client_Logger {
 	 * clear() can invalidate it: a request that writes to the log and then reads a
 	 * tail must not be handed the tail from before the write.
 	 *
-	 * @var array<int,array{text:string,shown:int,total:int}>
+	 * @var array<string,array{text:string,shown:int,total:int}>
 	 * @since x.x.x
 	 */
 	private static $tail_memo = [];
@@ -480,7 +480,10 @@ class Client_Logger {
 		// localisation payload and again in the classic renderer -- so a site with
 		// three open failures was reading a file capped at 1 MB six times to render
 		// one page.
-		$max_chars = (int) $max_chars;
+		// Keyed by blog as well as budget: get_log_path() hashes the blog id into
+		// the filename, so after a switch_to_blog() the same budget is a different
+		// file. Unreachable today; nothing switches blogs on this path.
+		$max_chars = get_current_blog_id() . ':' . (int) $max_chars;
 
 		if ( isset( self::$tail_memo[ $max_chars ] ) ) {
 			return self::$tail_memo[ $max_chars ];
@@ -637,7 +640,17 @@ class Client_Logger {
 				// supposed to be `srfm-input-lbl-<base64>`, but the array arrives
 				// from the browser and nothing server-side guarantees that, so a
 				// caller is free to put an address or a token in one.
-				$keys[] = mb_substr( self::scrub_text( Helper::get_string_value( $field_key ) ), 0, self::MAX_KEY_LENGTH );
+				//
+				// wp_check_invalid_utf8() is kept because scrub_text() is not a
+				// drop-in for sanitize_text_field(): invalid UTF-8 reaching
+				// wp_json_encode() in append() makes it return false and drop the
+				// whole line -- after record_failure() has already incremented the
+				// counter, leaving a banner with no log line behind it.
+				$keys[] = mb_substr(
+					self::scrub_text( wp_check_invalid_utf8( Helper::get_string_value( $field_key ) ) ),
+					0,
+					self::MAX_KEY_LENGTH
+				);
 			}
 
 			$entry['field_keys'] = $keys;
@@ -658,12 +671,18 @@ class Client_Logger {
 	 * string. Whitespace is collapsed as a log-injection guard, matching
 	 * inc/ai-form-builder/ai-helper.php.
 	 *
-	 * Removes, in order: URL query strings and fragments; everything past a URL's
-	 * first path segment, because a webhook credential sits in the path as often
-	 * as in the query; the value following a name that identifies a credential;
-	 * email addresses; and long digit runs. What it cannot remove is a name, a
-	 * street address or a free-text message body -- those have no shape to match,
-	 * so the log excerpt this produces should still be treated as personal data.
+	 * Removes, in order: JSON slash-escaping, so the rules below can see URLs at
+	 * all; credentials in a URL's userinfo; query strings and fragments; a foreign
+	 * URL's path past its first segment, keeping same-origin paths intact because
+	 * those are stack frames and the path is the diagnosis; the value following a
+	 * name that identifies a credential; email addresses; and long digit runs.
+	 *
+	 * A single-segment foreign path is truncated whole rather than kept, which is
+	 * the safe direction.
+	 *
+	 * What it cannot remove is a name, a street address or a free-text message
+	 * body -- those have no shape to match, so the log excerpt this produces
+	 * should still be treated as personal data.
 	 *
 	 * @param string $text Raw text.
 	 * @since 2.12.6
@@ -674,20 +693,58 @@ class Client_Logger {
 			return '';
 		}
 
+		// Clamped before the rules run, not after. Without it every pattern below
+		// is applied to whatever the caller sent, however long that is.
+		$text = mb_substr( $text, 0, self::MAX_TEXT_LENGTH * 4 );
+
+		// A WP REST error body arrives slash-escaped -- wp_json_encode() escapes
+		// "/" and WP_REST_Server::serve_request() does not pass
+		// JSON_UNESCAPED_SLASHES -- and two of the four body sinks log the raw
+		// response text rather than the decoded object. Without this every URL
+		// rule below misses every URL in the largest sink, including the webhook
+		// tokens they exist for.
+		$text = str_replace( '\\/', '/', $text );
+
+		// Credentials in the userinfo position, before the host rules see them.
+		$text = (string) preg_replace( '#(https?://)[^\s/@]+@#i', '$1[credentials]@', $text );
+
 		// Drop query strings and fragments wholesale rather than allowlisting
 		// parameters. A token after # is just as sensitive as one after ?.
-		$text = (string) preg_replace( '#(https?://[^\s?\#]+)[?\#]\S*#i', '$1', $text );
+		$text = (string) preg_replace( '#(https?://[^\s?\#]+)[?\#][^\s"\'<>,;)\]}]*#i', '$1', $text );
 
-		// Keep the origin and the first path segment, drop the rest. A webhook
-		// credential is as often in the path as in the query -- Slack and Discord
-		// both put theirs there -- and the rule above keeps paths verbatim.
-		$text = (string) preg_replace( '#(https?://[^\s/]+(?:/[^\s/]*)?)/\S+#i', '$1/[path]', $text );
+		$site_host = Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) );
 
-		// Credentials named in the text itself, whether or not they sit in a URL:
-		// `api_key=…`, `Authorization: Bearer …`, `"token": "…"`. Matched on the
-		// name so the value's shape does not have to be guessed.
+		// Keep the origin and the first path segment of a foreign URL, drop the
+		// rest: a webhook credential sits in the path as often as in the query,
+		// and Slack and Discord both put theirs there.
+		//
+		// Same-origin URLs are exempt. `source` is a stack frame, not a page
+		// address -- assets/js/unminified/form-submit.js takes
+		// error.stack.split( "\n" )[1] -- so truncating our own paths deletes the
+		// filename, the line and column, and which plugin threw, which is the
+		// whole diagnosis. A third-party credential is never same-origin.
+		$text = (string) preg_replace_callback(
+			'#(https?://)([^\s/]+)((?:/[^\s/]*)?)/[^\s"\'<>,;)\]}]+#i',
+			static function ( $matches ) use ( $site_host ) {
+				if ( '' !== $site_host && 0 === strcasecmp( $matches[2], $site_host ) ) {
+					return $matches[0];
+				}
+
+				return $matches[1] . $matches[2] . $matches[3] . '/[path]';
+			},
+			$text
+		);
+
+		// Credentials named in the text itself. The name is matched as a whole
+		// identifier, so a keyword with a prefix or suffix is still caught --
+		// AWS_SECRET_ACCESS_KEY, stripe_secret_key, X-Hub-Signature. And a
+		// separator is required, so ordinary prose survives: "Invalid token
+		// provided" and "password protected" are the most common things support
+		// reads out of this log, and an earlier version redacted both. `bearer`
+		// and `basic` are the exception, because those carry the value after a
+		// space with no separator at all.
 		$text = (string) preg_replace(
-			'/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret|token|bearer|password|passwd|pwd|auth)["\']?\s*(?:[:=]|\s)\s*["\']?)[^\s"\',;&]{6,}/i',
+			'/(\b[\w.-]*(?:api[_-]?key|key|secret|token|password|passwd|pwd|auth|credential|signature)[\w.-]*["\']?\s*[:=]\s*["\']?|\b(?:bearer|basic)\s+)[^\s"\',;&]{8,}/i',
 			'$1[redacted]',
 			$text
 		);

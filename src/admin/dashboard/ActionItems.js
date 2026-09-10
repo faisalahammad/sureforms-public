@@ -92,8 +92,10 @@ export default () => {
 					name: item.cta_action,
 					label: item.cta_label,
 					url: item.cta_url,
-					// A mailto: must open in the mail client, not a new tab.
-					external: ! item.cta_url?.startsWith( 'mailto:' ),
+					// A mailto: must open in the mail client, not a new tab. Matched
+					// case-insensitively, because a MAILTO: from the filter would
+					// otherwise get target="_blank" and open a blank tab.
+					external: ! /^mailto:/i.test( item.cta_url ),
 				},
 			  ]
 			: [] ),
