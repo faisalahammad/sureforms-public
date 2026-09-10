@@ -480,13 +480,19 @@ class Client_Logger {
 		// localisation payload and again in the classic renderer -- so a site with
 		// three open failures was reading a file capped at 1 MB six times to render
 		// one page.
+		$max_chars = (int) $max_chars;
+
 		// Keyed by blog as well as budget: get_log_path() hashes the blog id into
 		// the filename, so after a switch_to_blog() the same budget is a different
 		// file. Unreachable today; nothing switches blogs on this path.
-		$max_chars = get_current_blog_id() . ':' . (int) $max_chars;
+		//
+		// Its own variable, not $max_chars reused -- that key is a string, and the
+		// byte-budget comparison below coerces "1:1200" to 1, which silently
+		// reduces every excerpt to a single line.
+		$memo_key = get_current_blog_id() . ':' . $max_chars;
 
-		if ( isset( self::$tail_memo[ $max_chars ] ) ) {
-			return self::$tail_memo[ $max_chars ];
+		if ( isset( self::$tail_memo[ $memo_key ] ) ) {
+			return self::$tail_memo[ $memo_key ];
 		}
 
 		$empty = [
@@ -498,7 +504,7 @@ class Client_Logger {
 		$path = self::get_log_path( false );
 
 		if ( '' === $path || ! file_exists( $path ) ) {
-			self::$tail_memo[ $max_chars ] = $empty;
+			self::$tail_memo[ $memo_key ] = $empty;
 
 			return $empty;
 		}
@@ -507,7 +513,7 @@ class Client_Logger {
 		$lines = file( $path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES );
 
 		if ( ! is_array( $lines ) || empty( $lines ) ) {
-			self::$tail_memo[ $max_chars ] = $empty;
+			self::$tail_memo[ $memo_key ] = $empty;
 
 			return $empty;
 		}
@@ -529,13 +535,13 @@ class Client_Logger {
 			$used += $length;
 		}
 
-		self::$tail_memo[ $max_chars ] = [
+		self::$tail_memo[ $memo_key ] = [
 			'text'  => implode( "\n", $kept ),
 			'shown' => count( $kept ),
 			'total' => $total,
 		];
 
-		return self::$tail_memo[ $max_chars ];
+		return self::$tail_memo[ $memo_key ];
 	}
 
 	/**

@@ -257,6 +257,52 @@ class Test_Client_Logger extends TestCase {
 	}
 
 	/**
+	 * Two different budgets in one request return two different excerpts.
+	 *
+	 * The memo is keyed by blog id and budget. Keying it by reusing $max_chars
+	 * made the key a string, and the byte-budget comparison inside the line loop
+	 * coerces "1:1200" to 1 -- so every excerpt collapsed to a single line, on
+	 * every consumer, silently. Nothing caught it because no test had asked for
+	 * two budgets in the same process.
+	 */
+	public function test_get_tail_budget_is_not_the_memo_key() {
+		Client_Logger::clear();
+
+		for ( $i = 0; $i < 40; $i++ ) {
+			Client_Logger::append(
+				Client_Logger::sanitize_entry(
+					[
+						'type'        => 'network',
+						'status'      => 500,
+						'form_id'     => 42,
+						'form_title'  => 'Contact Form',
+						'message'     => 'Submission responded 500 (text/html): a long server failure message repeated to fill the log ' . $i,
+						'duration_ms' => 900,
+					]
+				)
+			);
+		}
+
+		$small = Client_Logger::get_tail( 1200 );
+		$large = Client_Logger::get_tail( 8000 );
+
+		// The budget is a byte count, so a small one keeps several whole lines --
+		// not one, which is what a string key produced.
+		$this->assertGreaterThan( 1, $small['shown'], 'A 1200-byte budget holds more than one entry.' );
+		$this->assertGreaterThan(
+			$small['shown'],
+			$large['shown'],
+			'A larger budget must return more entries, not the memoised smaller one.'
+		);
+		$this->assertGreaterThan( strlen( $small['text'] ), strlen( $large['text'] ) );
+
+		// And the memo still works: the same budget twice is one read.
+		$this->assertSame( $small, Client_Logger::get_tail( 1200 ) );
+
+		Client_Logger::clear();
+	}
+
+	/**
 	 * Webhook credentials are masked in every shape they actually arrive in.
 	 *
 	 * The round-1 finding this answers was about a Slack token surviving in a URL
