@@ -120,6 +120,11 @@ class Entries extends Base {
 		return [
 			'ID BIGINT(20) UNSIGNED AUTO_INCREMENT PRIMARY KEY',
 			'form_id BIGINT(20) UNSIGNED',
+			// NOT NULL DEFAULT 0 is load-bearing, not tidiness. An anonymous
+			// submission stores 0, and Forms_Data::calculate_form_metrics() excludes
+			// site editors with `user_id NOT IN (…)`. NOT IN never matches NULL, so
+			// making this column nullable would drop every anonymous entry from the
+			// numerator and report a conversion rate near 0% on every form.
 			'user_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0',
 			'form_data LONGTEXT', // Note: @since 0.0.13 -- We have renamed `user_data` column to `form_data`.
 			'logs LONGTEXT',
@@ -133,6 +138,12 @@ class Entries extends Base {
 			'INDEX idx_form_id (form_id)', // Indexing for the performance improvements.
 			'INDEX idx_user_id (user_id)',
 			'INDEX idx_form_id_created_at_status (form_id, created_at, status)', // Composite index for performance improvements.
+			// Leads on the two columns Forms_Data::get_editing_submitter_ids()
+			// filters. idx_user_id alone cannot serve it -- created_at is not in it,
+			// and no other index leads on created_at -- so that lookup was a range
+			// scan with a row read per row plus a temp table for DISTINCT, on every
+			// Forms-list render.
+			'INDEX idx_user_id_created_at (user_id, created_at)',
 		];
 	}
 
@@ -146,6 +157,8 @@ class Entries extends Base {
 			'extras LONGTEXT AFTER status',
 			'user_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0 AFTER form_id',
 			'INDEX idx_user_id (user_id)',
+			// Note: @since x.x.x -- Covers the conversion rate's submitter lookup.
+			'INDEX idx_user_id_created_at (user_id, created_at)',
 		];
 	}
 

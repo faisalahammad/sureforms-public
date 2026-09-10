@@ -469,8 +469,15 @@ class Forms_Data {
 	 * up to the ceiling in get_forms_sorted_by_metric(). On a membership site that
 	 * hands `contributor` to every member that is a five-figure placeholder list
 	 * rebuilt for every row of a ten-row page. Only people who actually submitted
-	 * inside the window can affect the rate, that set is small, and `idx_user_id`
-	 * covers it.
+	 * inside the window can affect the rate, and that set is small.
+	 *
+	 * Served by `idx_user_id_created_at (user_id, created_at)`, added for this
+	 * lookup. `idx_user_id` alone cannot: `created_at` is not in it and no other
+	 * index leads on `created_at`, so before that index this was a range scan with
+	 * a row read per row plus a temp table for the DISTINCT -- on a site with years
+	 * of logged-in submissions, every entry ever recorded, to return a short list.
+	 * The LIMIT bounds what comes back, not what is read; the index bounds the
+	 * read.
 	 *
 	 * Decided with `user_can()`, the same call Form_Views::should_track() makes, so
 	 * both halves of the rate answer one question rather than two similar ones. A
@@ -512,6 +519,16 @@ class Forms_Data {
 		 * list reports a rate that is wrong in a way nobody can see, where no
 		 * exclusion at least reproduces the pre-existing behaviour.
 		 *
+		 * Two things to know before raising or lowering it. The count is of
+		 * distinct submitters across all forms since tracking was first enabled,
+		 * and that window never resets -- so a membership site, a store or an LMS
+		 * reaches 500 in ordinary operation, and once passed it stays passed, with
+		 * the rate quietly counting editor submissions again. That is why the
+		 * settings copy says those are "normally" left out rather than promising it
+		 * outright. And the query does not filter on status, so a user whose only
+		 * in-window entries were trashed still lands on the list and consumes
+		 * budget -- harmless for the count, but it brings the ceiling closer.
+		 *
 		 * @param int $limit Maximum submitters to test. Default 500.
 		 * @since x.x.x
 		 */
@@ -538,7 +555,7 @@ class Forms_Data {
 				],
 			],
 			'DISTINCT user_id',
-			[ 'LIMIT ' . ( $limit + 1 ) ]
+			[ sprintf( 'LIMIT %d', $limit + 1 ) ]
 		);
 
 		$submitters = array_values( array_unique( array_map( 'absint', array_column( $rows, 'user_id' ) ) ) );

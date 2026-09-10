@@ -468,6 +468,94 @@ class Test_Database_Base extends TestCase {
 	}
 
 	/**
+	 * A scalar where an array belongs is a caller bug, and it must surface.
+	 *
+	 * `'NOT IN'` with `5` -- a plausible typo for `[ 5 ]` -- used to be folded in
+	 * with the empty-array case and drop the condition, excluding nobody with no
+	 * error and a green suite, while the same typo on `'IN'` failed closed. On a
+	 * primitive whose only job is scoping data that asymmetry is the hazard.
+	 */
+	public function test_prepare_where_clauses_non_array_in_value_is_doing_it_wrong() {
+		$notices = [];
+
+		$observe = static function ( $function_name, $message ) use ( &$notices ) {
+			$notices[] = $function_name . ': ' . $message;
+		};
+
+		add_action( 'doing_it_wrong_run', $observe, 10, 2 );
+		// _doing_it_wrong() escalates to trigger_error() under WP_DEBUG, which
+		// would abort the test rather than let it assert.
+		add_filter( 'doing_it_wrong_trigger_error', '__return_false' );
+
+		$result = $this->prepare(
+			[
+				[
+					[
+						'key'     => 'user_id',
+						'compare' => 'NOT IN',
+						// @phpstan-ignore-next-line -- Deliberately the wrong type.
+						'value'   => 5,
+					],
+				],
+			]
+		);
+
+		remove_filter( 'doing_it_wrong_trigger_error', '__return_false' );
+		remove_action( 'doing_it_wrong_run', $observe, 10 );
+
+		$this->assertNotEmpty( $notices, 'A scalar value must be reported, not swallowed.' );
+		$this->assertStringContainsString( 'prepare_where_clauses', $notices[0] );
+		$this->assertStringContainsString( 'NOT IN requires an array value', $notices[0] );
+		// The received type, so the caller does not have to guess what it sent.
+		$this->assertStringContainsString( 'integer', $notices[0] );
+
+		// And it must not have built a condition out of the bad input.
+		$this->assertStringNotContainsString( 'NOT IN', $result );
+		$this->assertStringNotContainsString( '1 = 1', $result );
+	}
+
+	/**
+	 * An operator is normalised before the allowlist test.
+	 *
+	 * Payments' builder upper-cases and trims; this one compared strictly. So a
+	 * caller writing `'not in'` was honoured by one and silently dropped by the
+	 * other -- and a dropped NOT IN is a silently disabled exclusion.
+	 */
+	public function test_prepare_where_clauses_normalises_operator_case() {
+		$result = $this->prepare(
+			[
+				[
+					[
+						'key'     => 'user_id',
+						'compare' => ' not in ',
+						'value'   => [ 4, 5 ],
+					],
+				],
+			]
+		);
+
+		$this->assertStringContainsString( 'NOT IN', $result, 'A lower-case operator must still be honoured.' );
+		$this->assertStringContainsString( '4', $result );
+		$this->assertStringContainsString( '5', $result );
+
+		// Still an allowlist: an unknown operator is dropped however it is cased.
+		$this->assertSame(
+			'',
+			$this->prepare(
+				[
+					[
+						[
+							'key'     => 'user_id',
+							'compare' => 'drop table',
+							'value'   => [ 1 ],
+						],
+					],
+				]
+			)
+		);
+	}
+
+	/**
 	 * An empty NOT IN beside an OR sibling must not widen the group.
 	 *
 	 * This is the shape that matters: a group whose siblings are the only thing

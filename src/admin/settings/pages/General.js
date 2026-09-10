@@ -234,7 +234,13 @@ const FormViewsTrackingContent = ( {
 					'sureforms'
 				),
 				description: (
-					<>
+					// One flex item, not two. force-ui's Label carries `flex
+					// items-center gap-0.5` in its base classes, and the className
+					// Switch passes it has no display utility to override that --
+					// so two sibling spans become flex items side by side, not
+					// stacked, however they are displayed themselves. The wrapper
+					// is the single item; its children stack as ordinary blocks.
+					<span className="block">
 						{ /* Kept verbatim from 2.12.6: all seven shipped locales
 						     already translate this msgid, and re-punctuating it
 						     to add the sentence below would orphan every one of
@@ -247,11 +253,11 @@ const FormViewsTrackingContent = ( {
 						</span>
 						<span className="block mt-1">
 							{ __(
-								'Views and submissions by anyone who can edit the site are left out, so testing your own forms does not change these figures.',
+								'Views and submissions by anyone who can edit the site are normally left out, so testing your own forms does not change these figures.',
 								'sureforms'
 							) }
 						</span>
-					</>
+					</span>
 				),
 			} }
 			value={ generalTabOptions.srfm_form_views_tracking }

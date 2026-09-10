@@ -23,6 +23,8 @@ class Test_Forms_Data extends TestCase {
 		// The list is memoised for the request, and a test process is one request.
 		// Left behind it holds ids of users a later test has already deleted.
 		$this->reset_editing_cache();
+
+		parent::tearDown();
 	}
 
 	/**
