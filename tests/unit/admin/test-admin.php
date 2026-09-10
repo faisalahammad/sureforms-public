@@ -1586,8 +1586,20 @@ class Test_Admin extends TestCase {
 			'A healthy site ships none of this.'
 		);
 
-		// A fault to report, so the notices render and need their rules.
+		// One fault still ships nothing: notice-response.js bails below two cards,
+		// so these rules would have no consumer.
 		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
+		Admin::reset_action_items_cache();
+
+		Admin::get_instance()->enqueue_action_item_styles();
+
+		$this->assertFalse(
+			wp_style_is( 'srfm-action-items', 'enqueued' ),
+			'A single notice builds no carousel, so the carousel CSS is inert.'
+		);
+
+		// Two faults: the carousel builds and needs its rules.
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
 		Admin::reset_action_items_cache();
 
 		Admin::get_instance()->enqueue_action_item_styles();

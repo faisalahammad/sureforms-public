@@ -3509,8 +3509,17 @@ JS;
 			$class = 'error' === $status ? 'notice-error' : 'notice-warning';
 			?>
 			<div class="notice srfm-action-item-notice <?php echo esc_attr( $class ); ?>">
-				<p><strong><?php echo esc_html( $item['title'] ); ?></strong></p>
-				<p><?php echo esc_html( $item['message'] ); ?></p>
+				<?php
+				/*
+				 * Guarded like every sibling key. A filter item carrying only
+				 * id/status/cta_* is a shape this surface designs for, and reading
+				 * these unguarded is two PHP 8 undefined-key warnings plus an
+				 * esc_html( null ) deprecation on 8.1+. React tolerates the absence,
+				 * so leaving it would keep the two renderers disagreeing.
+				 */
+				?>
+				<p><strong><?php echo esc_html( Helper::get_string_value( $item['title'] ?? '' ) ); ?></strong></p>
+				<p><?php echo esc_html( Helper::get_string_value( $item['message'] ?? '' ) ); ?></p>
 				<?php
 				// Self-serve first, so the emphasis follows the order rather than the
 				// identity: whichever action leads is the primary button, and an item
@@ -3821,20 +3830,22 @@ JS;
 			return;
 		}
 
-		// Nothing to style unless a notice is actually going to render. Cheap to
+		// Nothing to style unless the carousel is actually going to build. Cheap to
 		// ask: get_action_items() is memoised for the request.
-		$has_notice = false;
+		//
+		// Two, not one: notice-response.js bails below two cards, so these rules
+		// have no consumer on a site with a single open fault.
+		$notices = 0;
 
 		foreach ( $this->get_action_items() as $item ) {
 			$status = Helper::get_string_value( is_array( $item ) ? $item['status'] ?? '' : '' );
 
 			if ( 'success' !== $status && '' !== $status ) {
-				$has_notice = true;
-				break;
+				$notices++;
 			}
 		}
 
-		if ( ! $has_notice ) {
+		if ( $notices < 2 ) {
 			return;
 		}
 

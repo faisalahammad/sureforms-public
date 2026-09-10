@@ -247,7 +247,9 @@ export default () => {
 					dialog: !! item.details,
 					// A mailto must reach the mail client, not a browser tab.
 					// srfm_action_items is public, so one can still arrive that way.
-					external: ! item.cta_url?.startsWith( 'mailto:' ),
+					// Matched case-insensitively: a MAILTO: from the filter would
+					// otherwise get target="_blank" and open a blank tab.
+					external: ! /^mailto:/i.test( item.cta_url ),
 				},
 			  ]
 			: [] ),

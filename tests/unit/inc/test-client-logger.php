@@ -257,6 +257,91 @@ class Test_Client_Logger extends TestCase {
 	}
 
 	/**
+	 * Webhook credentials are masked in every shape they actually arrive in.
+	 *
+	 * The round-1 finding this answers was about a Slack token surviving in a URL
+	 * path. The first version of these rules missed it in the largest sink: a WP
+	 * REST error body is slash-escaped, and two of the four body sinks log the raw
+	 * response text, so every URL rule saw `https:\/\/` and matched nothing. It
+	 * also only fired when the credential keyword was the last token of the name,
+	 * so AWS_SECRET_ACCESS_KEY, stripe_secret_key and X-Hub-Signature all passed
+	 * through untouched.
+	 *
+	 * @dataProvider provide_secrets
+	 * @param string $input  Log text as it would arrive.
+	 * @param string $secret The substring that must not survive.
+	 */
+	public function test_scrub_text_masks_credentials( $input, $secret ) {
+		$this->assertStringNotContainsString(
+			$secret,
+			Client_Logger::scrub_text( $input ),
+			'This is written to a downloadable log and pasted into a support email.'
+		);
+	}
+
+	/**
+	 * Inputs whose secret must not survive scrub_text().
+	 *
+	 * @return array<string,array{0:string,1:string}>
+	 */
+	public function provide_secrets() {
+		return [
+			'slack in a path'         => [ 'POST https://hooks.slack.com/services/T0/B0/xoxb-secrettoken failed', 'xoxb-secrettoken' ],
+			'slack slash-escaped'     => [ '{"message":"post to https:\\/\\/hooks.slack.com\\/services\\/T1\\/B2\\/xoxb-escapedtoken failed"}', 'xoxb-escapedtoken' ],
+			'discord webhook'         => [ 'Discord https://discord.com/api/webhooks/123/AbCdEfGhIjKlMnOp rejected', 'AbCdEfGhIjKlMnOp' ],
+			'aws prefixed name'       => [ 'AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENG', 'wJalrXUtnFEMIK7MDENG' ],
+			'stripe suffixed name'    => [ 'stripe_secret_key: sk_live_51H8xyzABCDEF', 'sk_live_51H8xyzABCDEF' ],
+			'private key'             => [ 'private_key=MIIEvQIBADANBgkq', 'MIIEvQIBADANBgkq' ],
+			'basic auth'              => [ 'Authorization: Basic dXNlcjpwYXNzd29yZA==', 'dXNlcjpwYXNzd29yZA' ],
+			'bearer token'            => [ 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig', 'eyJhbGciOiJIUzI1NiJ9' ],
+			'signature header'        => [ 'X-Hub-Signature: sha256=9f86d081884c7d659a2f1234567890ab', '9f86d081884c7d659a2f' ],
+			'url userinfo'            => [ 'https://admin:hunter2pass@api.example.com/v1/x', 'hunter2pass' ],
+			'json token value'        => [ '{"token": "abc123def456", "ok": false}', 'abc123def456' ],
+			'query string'            => [ 'GET https://example.com/reset?key=supersecretvalue failed', 'supersecretvalue' ],
+		];
+	}
+
+	/**
+	 * The diagnosis survives, which is the half with no coverage before now.
+	 *
+	 * An earlier version of these rules truncated every URL path, including
+	 * same-origin ones -- but `source` is a stack frame, not a page address, so
+	 * that deleted the filename, the line and column, and which plugin threw. It
+	 * also redacted ordinary prose, because the credential rule accepted a bare
+	 * space as a separator: "Invalid token provided" and "password protected" are
+	 * among the most common things support reads out of this log.
+	 *
+	 * @dataProvider provide_diagnostics
+	 * @param string $input  Log text as it would arrive.
+	 * @param string $needle The substring support needs to still be there.
+	 */
+	public function test_scrub_text_keeps_the_diagnosis( $input, $needle ) {
+		$this->assertStringContainsString(
+			$needle,
+			Client_Logger::scrub_text( $input ),
+			'Redaction must not cost the reason the log is read.'
+		);
+	}
+
+	/**
+	 * Inputs whose diagnostic content must survive scrub_text().
+	 *
+	 * @return array<string,array{0:string,1:string}>
+	 */
+	public function provide_diagnostics() {
+		return [
+			'own stack frame'   => [ 'at handleSubmit (' . home_url( '/wp-content/plugins/sureforms/assets/js/form-submit.min.js' ) . ':12:3456)', 'form-submit.min.js' ],
+			'own line number'   => [ 'at handleSubmit (' . home_url( '/wp-content/plugins/sureforms/assets/js/form-submit.min.js' ) . ':12:3456)', ':12:3456' ],
+			'prose token'       => [ 'Invalid token provided', 'token provided' ],
+			'prose password'    => [ 'This form is password protected', 'password protected' ],
+			'captcha message'   => [ 'captcha token verification failed', 'token verification failed' ],
+			'prose secret'      => [ 'The secret provided was rejected', 'secret provided' ],
+			'http status'       => [ 'Submission responded 500 (text/html)', '500' ],
+			'foreign host kept' => [ 'POST https://hooks.slack.com/services/T0/B0/tok failed', 'hooks.slack.com' ],
+		];
+	}
+
+	/**
 	 * A phone number is written 555-123-4567, not 5551234567, so a
 	 * contiguous-digits rule never sees a real one. The earlier test only used an
 	 * unformatted run and passed regardless.
