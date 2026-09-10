@@ -1549,6 +1549,70 @@ class Test_Admin extends TestCase {
 	}
 
 	/**
+	 * The carousel and dialog CSS reaches the head, and only when it is needed.
+	 *
+	 * The rules have to be in the head, not the footer. admin_notices fires from
+	 * admin-header.php after admin_print_styles has flushed, so enqueuing from the
+	 * renderer arrived only through core's late-styles pass -- and until that
+	 * parsed, every stacked notice rendered expanded before collapsing to one and
+	 * the defensive display:none on the hidden diagnostics was inert, which is the
+	 * window that rule exists for. Asserted on the hook as well as the output,
+	 * because the output looks identical either way once the page has finished
+	 * loading, which is how this got shipped.
+	 */
+	public function test_enqueue_action_item_styles() {
+		$this->assertNotFalse(
+			has_action( 'admin_enqueue_scripts', [ Admin::get_instance(), 'enqueue_action_item_styles' ] ),
+			'Registered on admin_enqueue_scripts, or the rules cannot reach the head.'
+		);
+		$this->assertFalse(
+			has_action( 'admin_notices', [ Admin::get_instance(), 'enqueue_action_item_styles' ] ),
+			'Not on admin_notices: by then the head has already been printed.'
+		);
+
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		wp_dequeue_style( 'srfm-action-items' );
+		wp_deregister_style( 'srfm-action-items' );
+
+		// Nothing wrong: nothing to style.
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Helper::update_srfm_option( 'dismissed_action_items', [ 'caching_plugin' ] );
+		Admin::reset_action_items_cache();
+
+		Admin::get_instance()->enqueue_action_item_styles();
+
+		$this->assertFalse(
+			wp_style_is( 'srfm-action-items', 'enqueued' ),
+			'A healthy site ships none of this.'
+		);
+
+		// A fault to report, so the notices render and need their rules.
+		Client_Logger::record_failure( 'submission', 42, 'Contact Form' );
+		Admin::reset_action_items_cache();
+
+		Admin::get_instance()->enqueue_action_item_styles();
+
+		$this->assertTrue( wp_style_is( 'srfm-action-items', 'enqueued' ) );
+
+		$css = implode( "\n", (array) wp_styles()->get_data( 'srfm-action-items', 'after' ) );
+
+		// The rule whose absence during the head-to-footer window was the bug.
+		$this->assertStringContainsString( '.srfm-notice-details { display: none; }', $css );
+		$this->assertStringContainsString( 'srfm-action-item-notice[hidden]', $css );
+		// Logical properties, so an RTL sheet can override rather than fight it.
+		$this->assertStringContainsString( 'inset-inline-end', $css );
+		$this->assertStringContainsString( 'padding-inline-end', $css );
+		// Brand, not the admin colour scheme.
+		$this->assertStringContainsString( '#D54407', $css );
+
+		wp_dequeue_style( 'srfm-action-items' );
+		wp_deregister_style( 'srfm-action-items' );
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+		Admin::reset_action_items_cache();
+	}
+
+	/**
 	 * Every (notice, button) pair either surface can emit is on the allowlist.
 	 *
 	 * handle_notice_response() rejects an unknown pair with a 400, so a CTA added
