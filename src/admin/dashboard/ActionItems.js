@@ -179,6 +179,9 @@ export default () => {
 	// closed inside that window.
 	const revertRef = useRef( 0 );
 
+	// Bumped per open and per close; a response carrying a stale token is dropped.
+	const requestRef = useRef( 0 );
+
 	useEffect( () => () => window.clearTimeout( revertRef.current ), [] );
 
 	const items = ( srfm_admin?.action_items || [] ).filter(
@@ -242,9 +245,9 @@ export default () => {
 					url: safeUrl( item.cta_url ),
 					// An item carrying details opens them here rather than
 					// navigating: the point is to read the diagnostics before
-					// sending them anywhere. cta_url stays as the fallback the
-					// classic wp-admin notice uses, since it cannot open a dialog.
-					dialog: !! item.details,
+					// sending them anywhere. cta_url stays as the fallback for a
+					// browser with no JavaScript, which cannot open a dialog.
+					dialog: !! item.has_details,
 					// A mailto must reach the mail client, not a browser tab.
 					// srfm_action_items is public, so one can still arrive that way.
 					// Matched case-insensitively: a MAILTO: from the filter would
@@ -317,7 +320,100 @@ export default () => {
 		}
 	};
 
-	const closeDetails = () => setDetails( null );
+	const closeDetails = () => {
+		// Invalidates any fetch still in flight, so a slow response cannot refill a
+		// dialog the user has already closed.
+		requestRef.current += 1;
+		setDetails( null );
+	};
+
+	// Fetched on open rather than localised with the page. The diagnostics are
+	// written through a public REST route, so shipping them in srfm_admin put
+	// attacker-authored text into every admin screen's HTML whether or not anyone
+	// opened this dialog. See Admin::handle_action_item_details().
+	//
+	// The dialog opens immediately with a placeholder and fills in when the
+	// response lands. A surface whose whole job is reporting a failure must not be
+	// a button that does nothing until the network answers.
+	const openDetails = ( item ) => {
+		// Guards against interleaving: open A, close it, open B, and A's response
+		// would otherwise land in B's dialog.
+		const token = ++requestRef.current;
+
+		setDetails( {
+			...item,
+			details: dialogLabels.loading || '',
+			support_url: '',
+			pending: true,
+		} );
+
+		const fail = () => {
+			// No report to paste, so the copy-first gate has nothing to gate on.
+			// Contact Support is the only action that retires these notices, and
+			// they are not dismissible -- leaving it locked would be an
+			// undismissable notice with no working action on it.
+			setCopiedOnce( true );
+			setHint( '' );
+
+			setDetails( ( prev ) =>
+				prev
+					? {
+						...prev,
+						details: dialogLabels.unavailable || '',
+						// Untagged fallback: Contact Support is the only action
+						// that retires these notices, so a failed fetch must not
+						// take the way out with it.
+						support_url: srfm_admin?.support_url || '',
+						pending: false,
+						failed: true,
+					  }
+					: prev
+			);
+		};
+
+		const ajaxUrl = srfm_admin?.ajax_url;
+		const nonce = srfm_admin?.action_item_details_nonce;
+
+		if ( ! ajaxUrl || ! nonce ) {
+			fail();
+			return;
+		}
+
+		const body = new FormData();
+		body.append( 'action', 'srfm_action_item_details' );
+		body.append( 'nonce', nonce );
+		body.append( 'category', item.category || '' );
+
+		fetch( ajaxUrl, { method: 'POST', credentials: 'same-origin', body } )
+			.then( ( response ) => response.json() )
+			.then( ( json ) => {
+				if ( ! json?.success || ! json?.data ) {
+					throw new Error( 'unavailable' );
+				}
+
+				if ( token !== requestRef.current ) {
+					return;
+				}
+
+				setDetails( ( prev ) =>
+					prev
+						? {
+							...prev,
+							details: json.data.details || '',
+							support_url: json.data.support_url || '',
+							pending: false,
+						  }
+						: prev
+				);
+			} )
+			.catch( () => {
+				if ( token !== requestRef.current ) {
+					return;
+				}
+
+				fail();
+			} );
+	};
 
 	// Opens the dialog rather than navigating: the details are read here before
 	// anything is sent. Nothing to download, nothing to intercept.
@@ -460,7 +556,7 @@ export default () => {
 															: dialogLabels.copyFailed ||
 																	''
 													);
-													setDetails( item );
+													openDetails( item );
 												} }
 												className={ `bg-transparent border-0 p-0 cursor-pointer text-xs font-medium no-underline hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1${
 													index > 0
@@ -545,7 +641,8 @@ export default () => {
 							<Dialog.Header>
 								<div className="flex items-center justify-between">
 									<Dialog.Title id={ titleId }>
-										{ dialogLabels.title || __( 'Details', 'sureforms' ) }
+										{ dialogLabels.title ||
+											__( 'Details', 'sureforms' ) }
 									</Dialog.Title>
 									{ /* force-ui hardcodes an untranslated
 							     aria-label="Close dialog"; it sits before the prop
@@ -554,7 +651,7 @@ export default () => {
 										onClick={ closeDetails }
 										aria-label={
 											dialogLabels.close ||
-									__( 'Close', 'sureforms' )
+											__( 'Close', 'sureforms' )
 										}
 									/>
 								</div>
@@ -602,27 +699,39 @@ export default () => {
 									{ hint || ' ' }
 								</Label>
 								<div className="flex items-center gap-2">
-									<Button
-										ref={ copyRef }
-										variant="outline"
-										size="sm"
-										icon={
-											copied ? (
-												<Check className="size-4" />
-											) : (
-												<Copy className="size-4" />
-											)
-										}
-										onClick={
-											details ? handleCopy( details ) : undefined
-										}
-									>
-										{ copied
-											? dialogLabels.copied ||
-									  __( 'Copied', 'sureforms' )
-											: dialogLabels.copy ||
-									  __( 'Copy details', 'sureforms' ) }
-									</Button>
+									{ /* Nothing to copy before the payload lands, and
+									     nothing worth copying if it never did -- an
+									     error message on the clipboard is not a
+									     report. */ }
+									{ ! details?.failed && (
+										<Button
+											ref={ copyRef }
+											variant="outline"
+											size="sm"
+											disabled={ !! details?.pending }
+											icon={
+												copied ? (
+													<Check className="size-4" />
+												) : (
+													<Copy className="size-4" />
+												)
+											}
+											onClick={
+												details
+													? handleCopy( details )
+													: undefined
+											}
+										>
+											{ copied
+												? dialogLabels.copied ||
+												  __( 'Copied', 'sureforms' )
+												: dialogLabels.copy ||
+												  __(
+												  	'Copy details',
+												  	'sureforms'
+												  ) }
+										</Button>
+									) }
 									{ /* Not rendered at all without a destination. An empty
 							     href resolves to the current document, so the click
 							     would open a duplicate of this page and still
@@ -635,40 +744,50 @@ export default () => {
 							     on an <a> does nothing at all, so the href only
 							     exists once the copy has been made. */ }
 									{ !! safeUrl( details?.support_url ) &&
-								( copiedOnce ? (
-									<Button
-										variant="primary"
-										size="sm"
-										tag="a"
-										href={ safeUrl(
-											details.support_url
-										) }
-										target="_blank"
-										rel="noopener noreferrer"
-										onClick={ () => {
-											// Records the click, which is also
-											// what stands the notice down until
-											// something new fails.
-											handleFix(
-												details,
-												'contact_support'
-											)();
-											// The form opens in its own tab, so
-											// the dialog has nothing left to
-											// show.
-											closeDetails();
-										} }
-										className="no-underline hover:no-underline"
-									>
-										{ dialogLabels.contact ||
-											__( 'Contact Support', 'sureforms' ) }
-									</Button>
-								) : (
-									<Button variant="primary" size="sm" disabled>
-										{ dialogLabels.contact ||
-											__( 'Contact Support', 'sureforms' ) }
-									</Button>
-								) ) }
+										( copiedOnce ? (
+											<Button
+												variant="primary"
+												size="sm"
+												tag="a"
+												href={ safeUrl(
+													details.support_url
+												) }
+												target="_blank"
+												rel="noopener noreferrer"
+												onClick={ () => {
+													// Records the click, which is also
+													// what stands the notice down until
+													// something new fails.
+													handleFix(
+														details,
+														'contact_support'
+													)();
+													// The form opens in its own tab, so
+													// the dialog has nothing left to
+													// show.
+													closeDetails();
+												} }
+												className="no-underline hover:no-underline"
+											>
+												{ dialogLabels.contact ||
+													__(
+														'Contact Support',
+														'sureforms'
+													) }
+											</Button>
+										) : (
+											<Button
+												variant="primary"
+												size="sm"
+												disabled
+											>
+												{ dialogLabels.contact ||
+													__(
+														'Contact Support',
+														'sureforms'
+													) }
+											</Button>
+										) ) }
 								</div>
 							</Dialog.Footer>
 						</Dialog.Panel>

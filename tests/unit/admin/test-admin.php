@@ -1189,9 +1189,19 @@ class Test_Admin extends TestCase {
 
 		// The details action is still there; the guide is an addition, not a swap.
 		$this->assertSame( 'view_details', $items['notification_error']['cta_action'] ?? '' );
-		$this->assertNotEmpty(
-			$items['notification_error']['details'] ?? '',
-			'The dialog has nothing to show without the details payload.'
+		$this->assertTrue(
+			$items['notification_error']['has_details'] ?? false,
+			'Without this flag neither renderer offers the dialog at all.'
+		);
+		$this->assertSame(
+			'notification',
+			$items['notification_error']['category'] ?? '',
+			'The category is what the dialog sends to fetch the report.'
+		);
+		$this->assertArrayNotHasKey(
+			'details',
+			$items['notification_error'],
+			'The diagnostics are attacker-authored; they must not ride along with the page.'
 		);
 
 		// A category with no guide must not carry empty guide keys, which both
@@ -1320,48 +1330,182 @@ class Test_Admin extends TestCase {
 	}
 
 	/**
-	 * The rendered details payload keeps its line breaks.
+	 * The served details payload keeps its line breaks.
 	 *
 	 * The text is several lines of diagnostics and a fenced log; one long line is
-	 * unreadable and useless to paste. It reaches the page through esc_html(),
-	 * which preserves \n verbatim -- unlike esc_url(), which strips %0a from every
-	 * scheme but mailto: and is what flattened the body when this was carried in a
-	 * compose URL.
+	 * unreadable and useless to paste. Nothing in the JSON path should touch them,
+	 * but the earlier mailto: version was flattened by esc_url() stripping %0a from
+	 * every scheme but mailto:, so the breaks are worth asserting on wherever the
+	 * text is assembled.
 	 */
-	public function test_render_action_item_notices_keeps_the_details_line_breaks() {
+	public function test_handle_action_item_details_keeps_the_line_breaks() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
 		delete_option( Client_Logger::FAILURES_OPTION );
 		Client_Logger::clear();
 		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
 		Admin::reset_action_items_cache();
 
-		global $pagenow;
-		$previous_pagenow = $pagenow;
-		$pagenow          = 'plugins.php';
-
-		ob_start();
-		Admin::get_instance()->render_action_item_notices();
-		$html = (string) ob_get_clean();
-
-		$pagenow = $previous_pagenow;
-
-		// The div's own contents, not the rest of the output: the template emits
-		// newlines of its own around it, so measuring from here to end-of-output
-		// passed even when the payload itself was a single line.
-		$this->assertSame(
-			1,
-			preg_match( '#<div[^>]*class="srfm-notice-details"[^>]*>(.*?)</div>#s', $html, $matches ),
-			'The hidden payload must render.'
+		$payload = $this->request_action_item_details(
+			[
+				'category' => 'notification',
+				'nonce'    => wp_create_nonce( 'srfm_action_item_details' ),
+			]
 		);
 
-		$payload = $matches[1];
+		$this->assertTrue( $payload['success'] ?? false );
 
-		$this->assertStringNotContainsString( "\r", $payload, 'Bare LF only.' );
+		$details = (string) ( $payload['data']['details'] ?? '' );
+
+		$this->assertStringNotContainsString( "\r", $details, 'Bare LF only.' );
 		$this->assertGreaterThan(
 			5,
-			substr_count( $payload, "\n" ),
+			substr_count( $details, "\n" ),
 			'The diagnostics block is several lines; one long line means the breaks were lost.'
 		);
+	}
+
+	/**
+	 * The details endpoint is gated, in the order the sibling handlers use.
+	 *
+	 * It hands back the client error log, which is filled through a public REST
+	 * route gated on a submit token any visitor can obtain -- so this is the boundary
+	 * between attacker-authored text and an administrator's screen.
+	 */
+	public function test_handle_action_item_details_refuses_everything_but_a_real_request() {
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::clear();
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
+		Admin::reset_action_items_cache();
+
+		// No capability. The nonce is valid, so only the capability check stands
+		// between a subscriber and the log.
+		wp_set_current_user( $this->make_user( 'subscriber' ) );
+		$payload = $this->request_action_item_details(
+			[
+				'category' => 'notification',
+				'nonce'    => wp_create_nonce( 'srfm_action_item_details' ),
+			]
+		);
+		$this->assertFalse( $payload['success'] ?? true, 'A subscriber must not read the log.' );
+
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+
+		// Minted after the switch: a nonce is tied to the user who created it, so
+		// one made earlier in this test would fail for the wrong reason.
+		$valid_nonce = wp_create_nonce( 'srfm_action_item_details' );
+
+		// Absent nonce, which is the shape a guard that only checks a supplied
+		// value would wave through.
+		$payload = $this->request_action_item_details( [ 'category' => 'notification' ] );
+		$this->assertFalse( $payload['success'] ?? true, 'A missing nonce must not pass.' );
+
+		// Wrong action's nonce: this endpoint has its own, and the notice-response
+		// one is already in the page for every admin.
+		$payload = $this->request_action_item_details(
+			[
+				'category' => 'notification',
+				'nonce'    => wp_create_nonce( 'srfm_notice_response' ),
+			]
+		);
+		$this->assertFalse( $payload['success'] ?? true, 'Another action\'s nonce must not pass.' );
+
+		// Absent, empty, unrecognised, and recognised-but-nothing-wrong. All four
+		// are refused by the same check -- get_open_failures() only ever holds
+		// categories that are both known and currently failing.
+		foreach ( [ null, '', 'anything_else', 'submission' ] as $category ) {
+			$request = [ 'nonce' => $valid_nonce ];
+
+			if ( null !== $category ) {
+				$request['category'] = $category;
+			}
+
+			$payload = $this->request_action_item_details( $request );
+			$this->assertFalse(
+				$payload['success'] ?? true,
+				'Nothing open in "' . (string) $category . '" means there is no report to serve.'
+			);
+		}
+
+		// An array where a string belongs, which arrives simply by writing
+		// category[]= in the body. Pinned because the refusal depends on
+		// sanitize_key() flattening a non-scalar to '' rather than on any branch
+		// here, and a future rewrite reaching for $_POST directly would lose it.
+		$payload = $this->request_action_item_details(
+			[
+				'category' => [ 'notification' ],
+				'nonce'    => $valid_nonce,
+			]
+		);
+		$this->assertFalse( $payload['success'] ?? true, 'A non-string category must be refused, not fatal.' );
+
+		// The happy path, so the refusals above are not passing because the
+		// endpoint refuses everything.
+		$payload = $this->request_action_item_details(
+			[
+				'category' => 'notification',
+				'nonce'    => $valid_nonce,
+			]
+		);
+		$this->assertTrue( $payload['success'] ?? false );
+		$this->assertNotEmpty( $payload['data']['details'] ?? '' );
+		$this->assertStringStartsWith(
+			'https://sureforms.com/form/troubleshooting-form/',
+			$payload['data']['support_url'] ?? '',
+			'The dialog gets its Contact Support destination from here too.'
+		);
+	}
+
+	/**
+	 * Call the details endpoint and decode what it sent.
+	 *
+	 * wp_send_json_* ends in a bare die() unless wp_doing_ajax() is true, which no
+	 * filter can intercept -- so without this the runner dies mid-class and every
+	 * later test in the file silently never runs.
+	 *
+	 * @param array<string,mixed> $post Request body.
+	 * @return array<string,mixed> Decoded response.
+	 */
+	private function request_action_item_details( $post ) {
+		$previous_post    = $_POST;
+		$previous_request = $_REQUEST;
+
+		// Both: check_ajax_referer() reads the nonce out of $_REQUEST, not $_POST,
+		// so setting only one silently tests the missing-nonce path.
+		$_POST    = $post;
+		$_REQUEST = $post;
+
+		add_filter( 'wp_doing_ajax', '__return_true' );
+
+		$handler = static function () {
+			return static function () {
+				throw new \WPDieException( 'srfm-json-sent' );
+			};
+		};
+
+		add_filter( 'wp_die_ajax_handler', $handler );
+		add_filter( 'wp_die_handler', $handler );
+
+		ob_start();
+
+		try {
+			Admin::get_instance()->handle_action_item_details();
+		} catch ( \WPDieException $e ) {
+			// Expected: this is how wp_send_json_* returns.
+			unset( $e );
+		}
+
+		$json = (string) ob_get_clean();
+
+		remove_filter( 'wp_die_ajax_handler', $handler );
+		remove_filter( 'wp_die_handler', $handler );
+		remove_filter( 'wp_doing_ajax', '__return_true' );
+
+		$_POST    = $previous_post;
+		$_REQUEST = $previous_request;
+
+		$decoded = json_decode( $json, true );
+
+		return is_array( $decoded ) ? $decoded : [];
 	}
 
 	/**
@@ -1609,7 +1753,6 @@ class Test_Admin extends TestCase {
 		$css = implode( "\n", (array) wp_styles()->get_data( 'srfm-action-items', 'after' ) );
 
 		// The rule whose absence during the head-to-footer window was the bug.
-		$this->assertStringContainsString( '.srfm-notice-details { display: none; }', $css );
 		$this->assertStringContainsString( 'srfm-action-item-notice[hidden]', $css );
 		// Logical properties, so an RTL sheet can override rather than fight it.
 		$this->assertStringContainsString( 'inset-inline-end', $css );
@@ -2258,7 +2401,16 @@ class Test_Admin extends TestCase {
 			// Contact Support moved into the details modal; the notice itself offers
 			// the diagnostics first.
 			$this->assertStringContainsString( 'View details', $output );
-			$this->assertStringContainsString( 'srfm-notice-details', $output, 'The modal payload must ship with the notice.' );
+			$this->assertStringContainsString(
+				'data-srfm-category="submission"',
+				$output,
+				'The trigger carries the category the dialog fetches with.'
+			);
+			$this->assertStringNotContainsString(
+				'srfm-notice-details',
+				$output,
+				'The diagnostics are fetched on open, never printed beside the notice.'
+			);
 		}
 
 	}

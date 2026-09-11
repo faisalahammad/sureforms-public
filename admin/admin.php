@@ -233,6 +233,7 @@ class Admin {
 		add_action( 'wp_ajax_sureforms_dismiss_pointer', [ $this, 'pointer_dismissed' ] );
 		add_action( 'wp_ajax_sureforms_accept_cta', [ $this, 'pointer_accepted_cta' ] );
 		add_action( 'wp_ajax_srfm_notice_response', [ $this, 'handle_notice_response' ] );
+		add_action( 'wp_ajax_srfm_action_item_details', [ $this, 'handle_action_item_details' ] );
 		add_action( 'wp_ajax_srfm_dismiss_action_item', [ $this, 'handle_dismiss_action_item' ] );
 		add_action( 'admin_post_srfm_dismiss_action_item_link', [ $this, 'handle_dismiss_action_item_link' ] );
 		add_action( 'wp_ajax_srfm_ai_widget_usage', [ $this, 'track_ai_widget_usage' ] );
@@ -1819,6 +1820,13 @@ JS;
 			'client_logs_nonce'            => Helper::current_user_can() ? wp_create_nonce( 'srfm_client_logs' ) : '',
 			'action_items'                 => $this->get_action_items(),
 			'details_dialog'               => $this->get_details_dialog_labels(),
+			// Where Contact Support goes when the details fetch fails and there is
+			// no category-tagged URL to use. Untagged, because at that point we do
+			// not know which check sent them -- but still a way out: these notices
+			// are not dismissible and Contact Support is the only action that
+			// retires them.
+			'support_url'                  => $this->get_support_contact_url( '' ),
+			'action_item_details_nonce'    => Helper::current_user_can() ? wp_create_nonce( 'srfm_action_item_details' ) : '',
 			'notice_response_nonce'        => Helper::current_user_can() ? wp_create_nonce( 'srfm_notice_response' ) : '',
 			'dismiss_action_item_nonce'    => Helper::current_user_can() ? wp_create_nonce( 'srfm_dismiss_action_item' ) : '',
 			'sf_plugin_manager_nonce'      => wp_create_nonce( 'sf_plugin_manager_nonce' ),
@@ -2810,13 +2818,16 @@ JS;
 			'srfm-notice-response',
 			'srfmNoticeResponse',
 			[
-				'ajaxurl'  => admin_url( 'admin-ajax.php' ),
-				'nonce'    => wp_create_nonce( 'srfm_notice_response' ),
+				'ajaxurl'      => admin_url( 'admin-ajax.php' ),
+				'nonce'        => wp_create_nonce( 'srfm_notice_response' ),
+				// The diagnostics are fetched when the dialog opens rather than
+				// shipped with every page, so the dialog needs its own nonce.
+				'detailsNonce' => wp_create_nonce( 'srfm_action_item_details' ),
 				// Carousel chrome. Built in the browser rather than printed here so
 				// that with JavaScript off every notice simply stays visible, which
 				// is the behaviour this replaced -- controls that cannot work must
 				// not be what hides a warning.
-				'carousel' => [
+				'carousel'     => [
 					'previous' => __( 'Previous notice', 'sureforms' ),
 					'next'     => __( 'Next notice', 'sureforms' ),
 					/* translators: 1: current position, 2: total notices. */
@@ -2824,7 +2835,70 @@ JS;
 				],
 				// Details modal chrome, translated here so the script carries no
 				// user-facing English of its own.
-				'details'  => $this->get_details_dialog_labels(),
+				'details'      => $this->get_details_dialog_labels(),
+				// Where Contact Support goes when the fetch fails and there is no
+				// category-tagged URL to use. Untagged, because at that point we do
+				// not know which check sent them -- but still a way out: these
+				// notices are not dismissible and Contact Support is the only action
+				// that retires them.
+				'supportUrl'   => $this->get_support_contact_url( '' ),
+			]
+		);
+	}
+
+	/**
+	 * Serve one failure category's diagnostics, on demand.
+	 *
+	 * Hooked - wp_ajax_srfm_action_item_details.
+	 *
+	 * The report is built here rather than shipped with the page. Its content
+	 * comes from the client error log, and that log is filled through a public
+	 * REST route gated on a submit token any visitor can obtain from a form page
+	 * rather than on a capability -- so the text is attacker-authored, and putting
+	 * it in the localisation JSON and a hidden div on every admin screen exposed
+	 * it far beyond the one admin who opens the dialog.
+	 *
+	 * Capability first, then nonce, then the category, matching the ordering of
+	 * the sibling handlers in this class.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	public function handle_action_item_details() {
+		if ( ! Helper::current_user_can() ) {
+			wp_send_json_error( [ 'message' => __( 'Unauthorized user.', 'sureforms' ) ], 403 );
+			return;
+		}
+
+		if ( ! check_ajax_referer( 'srfm_action_item_details', 'nonce', false ) ) {
+			wp_send_json_error( [ 'message' => __( 'Invalid nonce.', 'sureforms' ) ], 403 );
+			return;
+		}
+
+		// sanitize_key() returns '' for anything non-scalar (formatting.php:2194), so
+		// a category[]= in the body arrives here as the empty string and falls into
+		// the refusal below rather than needing a type branch of its own.
+		$category = isset( $_POST['category'] ) ? sanitize_key( wp_unslash( $_POST['category'] ) ) : '';
+
+		// The only check the category needs, and the reason there is no separate
+		// allowlist above it: get_open_failures() returns nothing but keys in
+		// Client_Logger::CATEGORIES, so an absent category, an unrecognised one and
+		// a recognised one with nothing wrong all land here. Asking for a category
+		// with no fault must not mint a report describing one.
+		$open = Client_Logger::get_open_failures();
+
+		if ( ! isset( $open[ $category ] ) ) {
+			wp_send_json_error( [ 'message' => __( 'Nothing to report.', 'sureforms' ) ], 404 );
+			return;
+		}
+
+		$form_title = Helper::get_string_value( $open[ $category ]['form_title'] ?? '' );
+
+		wp_send_json_success(
+			[
+				'details'     => $this->get_support_message( $category, $form_title )
+					. "\n\n" . $this->get_support_log_block( 8000 ),
+				'support_url' => $this->get_support_contact_url( $category ),
 			]
 		);
 	}
@@ -3553,12 +3627,16 @@ JS;
 							data-srfm-notice-id="<?php echo esc_attr( Helper::get_string_value( $item['id'] ) ); ?>"
 							data-srfm-button="<?php echo esc_attr( Helper::get_string_value( $item['cta_action'] ?? '' ) ); ?>"
 							<?php
-							// With details to show, the click opens them here instead
+							// With details to fetch, the click opens them here instead
 							// of following the href. The href stays as the no-JS
 							// path: it goes to the dashboard, where the same details
 							// are readable.
-							if ( ! empty( $item['details'] ) ) {
-								echo 'data-srfm-details-for="' . esc_attr( Helper::get_string_value( $item['id'] ) ) . '"';
+							if ( ! empty( $item['has_details'] ) ) {
+								printf(
+									'data-srfm-details-for="%1$s" data-srfm-category="%2$s"',
+									esc_attr( Helper::get_string_value( $item['id'] ) ),
+									esc_attr( Helper::get_string_value( $item['category'] ?? '' ) )
+								);
 							} elseif ( 0 !== strpos( Helper::get_string_value( $item['cta_url'] ), 'mailto:' ) ) {
 								echo 'target="_blank" rel="noopener noreferrer"';
 							}
@@ -3573,20 +3651,6 @@ JS;
 						</a>
 					<?php } ?>
 				</p>
-				<?php if ( ! empty( $item['details'] ) ) { ?>
-					<?php
-					// Carried in the page rather than fetched: it is already computed
-					// for this render, and a modal that has to make a request can fail
-					// at the moment someone is trying to report a failure. Hidden, and
-					// read as textContent -- never parsed as HTML.
-					?>
-					<div
-						class="srfm-notice-details"
-						data-srfm-details-id="<?php echo esc_attr( Helper::get_string_value( $item['id'] ) ); ?>"
-						data-srfm-support-url="<?php echo esc_url( Helper::get_string_value( $item['support_url'] ?? '' ) ); ?>"
-						hidden
-					><?php echo esc_html( Helper::get_string_value( $item['details'] ) ); ?></div>
-				<?php } ?>
 			</div>
 			<?php
 		}
@@ -3703,6 +3767,11 @@ JS;
 		 * handle_dismiss_action_item()'s allowlist can actually be dismissed, so
 		 * adding a dismissible item here also needs a line there.
 		 *
+		 * The details dialog is not available here: it is served by
+		 * handle_action_item_details(), which reads SureForms' own client error log
+		 * and knows nothing about a third-party item. Such an item's cta_url is
+		 * followed as a link, which is what it does with JavaScript off anyway.
+		 *
 		 * @since 2.12.6
 		 *
 		 * @param array<int,array<string,mixed>> $items Action items.
@@ -3731,7 +3800,7 @@ JS;
 				continue;
 			}
 
-			foreach ( [ 'cta_url', 'guide_url', 'support_url' ] as $key ) {
+			foreach ( [ 'cta_url', 'guide_url' ] as $key ) {
 				if ( ! isset( $item[ $key ] ) ) {
 					continue;
 				}
@@ -3855,11 +3924,10 @@ JS;
 		$css = <<<'CSS'
 .srfm-action-item-carousel { position: relative; }
 .srfm-action-item-carousel .srfm-action-item-notice { padding-inline-end: var(--srfm-carousel-reserve, 130px); }
-/* [hidden] is only a UA rule. WordPress sets display on .notice, and a third-party
-   admin sheet doing something like `.notice div { display: block }` would put the
-   raw diagnostics on screen inside the notice. */
+/* [hidden] is only a UA rule, and WordPress sets display on .notice, so a
+   third-party admin sheet can otherwise put a notice the carousel has hidden back
+   on screen. */
 .srfm-action-item-carousel .srfm-action-item-notice[hidden] { display: none; }
-.srfm-notice-details { display: none; }
 .srfm-action-item-carousel-nav {
 	position: absolute;
 	top: 8px;
@@ -4006,6 +4074,11 @@ CSS;
 			// The scrollable diagnostics block is focusable, so it needs a name of
 			// its own.
 			'logRegion'   => __( 'Recorded diagnostics', 'sureforms' ),
+			// The dialog opens before its payload arrives -- see
+			// handle_action_item_details() for why the report is not shipped with
+			// the page.
+			'loading'     => __( 'Collecting the details…', 'sureforms' ),
+			'unavailable' => __( 'We could not collect the details. Contact Support and describe what happened, and we will take it from there.', 'sureforms' ),
 		];
 	}
 
@@ -4087,14 +4160,21 @@ CSS;
 				// the panel's dialog. The dashboard is where the details are readable.
 				'cta_url'     => admin_url( 'admin.php?page=sureforms_menu' ),
 				'cta_action'  => 'view_details',
-				// The dialog's own contents. Plain text: it is rendered inside a <pre>
-				// and copied verbatim, so any markup here would be read as characters.
-				// A wider excerpt than a URL could ever have carried: this is read on
-				// screen and copied to a clipboard, neither of which has a length
-				// limit worth designing around.
-				'details'     => $this->get_support_message( $category, $form_title )
-					. "\n\n" . $this->get_support_log_block( 8000 ),
-				'support_url' => $this->get_support_contact_url( $category ),
+				// Not the payload itself, only that one exists. The diagnostics are
+				// fetched when the dialog opens -- see handle_action_item_details().
+				//
+				// They used to ride along in the localisation JSON and in a hidden
+				// div on every admin page. The content is authored by whoever
+				// triggered the failure, and the client-error-log route is a public
+				// endpoint gated on a submit token rather than a capability, so an
+				// anonymous visitor can fill that excerpt. Broadcasting it to every
+				// admin screen -- read or not -- put attacker-authored text in page
+				// source site-wide and made any future escaping slip a
+				// manage_options-context problem. On demand, it reaches only the
+				// admin who asked for it.
+				'has_details' => true,
+				// Which record to fetch. Not the payload, just the key.
+				'category'    => $category,
 				'dismissible' => false,
 			];
 

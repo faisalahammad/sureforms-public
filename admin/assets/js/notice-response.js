@@ -420,18 +420,23 @@
 	 * contains whatever a server or a browser put in an error message, and that is
 	 * not markup to be trusted.
 	 *
-	 * @param {Object} config            Dialog contents.
-	 * @param {string} config.noticeId   Item id, used as the analytics key.
-	 * @param {string} config.text       Plain-text details to show and copy.
-	 * @param {string} config.supportUrl Where Contact Support goes. Empty means
-	 *                                   there is nowhere to send them, so the
-	 *                                   button is not rendered at all.
-	 * @return {boolean} Whether the dialog opened.
+	 * @param {Object}  config            Dialog contents.
+	 * @param {string}  config.noticeId   Item id, used as the analytics key.
+	 * @param {string}  config.text       Plain-text details to show and copy.
+	 * @param {string}  config.supportUrl Where Contact Support goes. Empty means
+	 *                                    there is nowhere to send them, so the
+	 *                                    button is not reachable at all.
+	 * @param {boolean} config.pending    Whether `text` is a placeholder that a
+	 *                                    later setText() will replace.
+	 * @return {Object|false} Handle with setText()/setSupportUrl(), or false if
+	 *                        there was nothing to open.
 	 */
 	function showDetails( config ) {
 		const noticeId = ( config && config.noticeId ) || '';
-		const text = ( config && config.text ) || '';
-		const supportUrl = ( config && config.supportUrl ) || '';
+		const pending = !! ( config && config.pending );
+
+		let text = ( config && config.text ) || '';
+		let supportUrl = ( config && config.supportUrl ) || '';
 
 		if ( ! text ) {
 			return false;
@@ -489,6 +494,13 @@
 		pre.setAttribute( 'role', 'region' );
 		pre.setAttribute( 'aria-label', labels.logRegion || 'Diagnostics' );
 
+		if ( pending ) {
+			// Announced as busy rather than silently showing a placeholder, so a
+			// screen reader says the region is still filling instead of reading
+			// "Loading" as if it were the report.
+			pre.setAttribute( 'aria-busy', 'true' );
+		}
+
 		const actions = document.createElement( 'p' );
 		actions.className = 'srfm-details-actions';
 
@@ -518,25 +530,20 @@
 		// an <a> does nothing at all -- it still navigates -- so removing the
 		// destination is what actually locks it.
 		//
-		// Not rendered at all without a destination. An empty href resolves to the
-		// current document, so the click used to open a duplicate of the admin page
-		// and still acknowledge the failure -- standing the notice down without
-		// anything having been reported. Reachable through srfm_action_items for an
-		// item carrying details but no support_url.
-		const contact = supportUrl ? document.createElement( 'a' ) : null;
-
-		if ( contact ) {
-			contact.className = 'button button-primary srfm-details-contact';
-			contact.target = '_blank';
-			contact.rel = 'noopener noreferrer';
-			contact.textContent = labels.contact || 'Contact Support';
-		}
+		// Hidden, not merely href-less, until there is a destination. An empty href
+		// resolves to the current document, so the click used to open a duplicate
+		// of the admin page and still acknowledge the failure -- standing the
+		// notice down without anything having been reported. The destination now
+		// arrives with the fetched payload, so the element is built up front and
+		// revealed by setSupportUrl().
+		const contact = document.createElement( 'a' );
+		contact.className = 'button button-primary srfm-details-contact';
+		contact.target = '_blank';
+		contact.rel = 'noopener noreferrer';
+		contact.textContent = labels.contact || 'Contact Support';
+		contact.hidden = ! supportUrl;
 
 		function lockContact() {
-			if ( ! contact ) {
-				return;
-			}
-
 			// The dimming and the pointer-events block hang off aria-disabled in the
 			// stylesheet, so the state is declared once rather than in two places.
 			contact.removeAttribute( 'href' );
@@ -544,7 +551,7 @@
 		}
 
 		function unlockContact() {
-			if ( ! contact ) {
+			if ( ! supportUrl ) {
 				return;
 			}
 
@@ -561,6 +568,10 @@
 		if ( canCopy ) {
 			lockContact();
 		}
+
+		// Nothing to copy yet. Left focusable-but-disabled rather than hidden, so
+		// the control does not appear from nowhere once the payload lands.
+		copy.disabled = pending;
 
 		const close = document.createElement( 'button' );
 		close.type = 'button';
@@ -586,7 +597,12 @@
 		// walks into the admin bar, the admin menu and the links behind the overlay.
 		function focusables() {
 			return [ pre, close, copy, contact ].filter( function ( el ) {
-				return el && ! el.hasAttribute( 'aria-disabled' );
+				return (
+					el &&
+					! el.hidden &&
+					! el.disabled &&
+					! el.hasAttribute( 'aria-disabled' )
+				);
 			} );
 		}
 
@@ -647,14 +663,12 @@
 			);
 		} );
 
-		if ( contact ) {
-			contact.addEventListener( 'click', function () {
-				sendResponse( noticeId, 'contact_support' );
-				// The form opens in its own tab, so the dialog has nothing left to
-				// show.
-				dismiss();
-			} );
-		}
+		contact.addEventListener( 'click', function () {
+			sendResponse( noticeId, 'contact_support' );
+			// The form opens in its own tab, so the dialog has nothing left to
+			// show.
+			dismiss();
+		} );
 
 		close.addEventListener( 'click', dismiss );
 		overlay.addEventListener( 'click', function ( e ) {
@@ -670,9 +684,7 @@
 		actions.appendChild( close );
 		actions.appendChild( copy );
 
-		if ( contact ) {
-			actions.appendChild( contact );
-		}
+		actions.appendChild( contact );
 
 		panel.appendChild( heading );
 		panel.appendChild( description );
@@ -684,50 +696,127 @@
 		// The page behind must not scroll under the backdrop.
 		document.body.style.overflow = 'hidden';
 
-		copy.focus();
+		// The diagnostics region while the payload is still coming: it carries the
+		// placeholder, so focusing it says what the dialog is doing. Once there is
+		// something to copy, the copy button is the first thing anyone wants.
+		( copy.disabled ? pre : copy ).focus();
 
-		return true;
+		return {
+			/**
+			 * Replace the placeholder once the payload arrives.
+			 *
+			 * @param {string}  next     The text to show and copy.
+			 * @param {boolean} copyable Whether it is worth copying. False for an
+			 *                           error message, which would otherwise unlock
+			 *                           Contact Support on the strength of having
+			 *                           copied the error.
+			 * @return {void}
+			 */
+			setText( next, copyable ) {
+				text = next || '';
+				pre.textContent = text;
+				pre.removeAttribute( 'aria-busy' );
+
+				if ( false === copyable ) {
+					// No report to paste, so the copy-first gate has nothing to gate
+					// on. Contact Support is the only route that retires the notice,
+					// and these items are not dismissible -- leaving it locked would
+					// be an undismissable notice with no working action on it.
+					copy.hidden = true;
+					hint.textContent = '';
+					unlockContact();
+					return;
+				}
+
+				copy.disabled = ! text;
+			},
+
+			/**
+			 * Point Contact Support somewhere, once the payload names it.
+			 *
+			 * @param {string} next Destination. Empty keeps the button out of the
+			 *                      dialog entirely.
+			 * @return {void}
+			 */
+			setSupportUrl( next ) {
+				supportUrl = next || '';
+				contact.hidden = ! supportUrl;
+
+				if ( supportUrl && ! contact.hasAttribute( 'aria-disabled' ) ) {
+					contact.href = supportUrl;
+				}
+			},
+
+			dismiss,
+		};
 	}
 
 	/**
-	 * Open the dialog for one classic notice, from the payload beside it.
+	 * Open the dialog for one classic notice and fetch its payload.
 	 *
-	 * The text is already in the page, hidden next to its notice, so opening this
-	 * makes no request -- a modal that has to fetch can fail at the exact moment
-	 * someone is trying to report a failure.
+	 * Fetched on open rather than printed beside every notice. The diagnostics are
+	 * written by a public REST route, so shipping them with the page put
+	 * attacker-authored text on every admin screen whether or not anyone opened
+	 * the dialog.
 	 *
-	 * @param {string} noticeId Item id, matched against the hidden payload's
-	 *                          data-srfm-details-id.
+	 * The dialog opens first, with a placeholder, and fills in when the response
+	 * lands -- a surface whose whole job is reporting a failure must not be a
+	 * button that does nothing until the network answers. A failed fetch says so
+	 * in place and still offers Contact Support, which is the only action that
+	 * retires the notice.
+	 *
+	 * @param {string} noticeId Item id, used as the analytics key.
+	 * @param {string} category Failure category, sent to the handler.
 	 * @return {boolean} Whether the payload was found and the dialog opened.
 	 */
-	function openDetails( noticeId ) {
-		// Escaped: the id comes from the items array, which srfm_action_items can
-		// contribute to, and an unescaped quote here throws a SyntaxError out of
-		// the click handler.
-		const selector =
-			'.srfm-notice-details[data-srfm-details-id="' +
-			( window.CSS && window.CSS.escape
-				? window.CSS.escape( noticeId )
-				: noticeId ) +
-			'"]';
-
-		let source = null;
-
-		try {
-			source = document.querySelector( selector );
-		} catch ( e ) {
-			source = null;
-		}
-
-		if ( ! source ) {
+	function openDetails( noticeId, category ) {
+		if ( typeof srfmNoticeResponse === 'undefined' || ! category ) {
 			return false;
 		}
 
-		return showDetails( {
+		const labels = srfmNoticeResponse.details || {};
+
+		const dialog = showDetails( {
 			noticeId,
-			text: source.textContent || '',
-			supportUrl: source.getAttribute( 'data-srfm-support-url' ) || '',
+			text: labels.loading || 'Loading…',
+			supportUrl: '',
+			pending: true,
 		} );
+
+		if ( ! dialog ) {
+			return false;
+		}
+
+		const body = new FormData();
+		body.append( 'action', 'srfm_action_item_details' );
+		body.append( 'nonce', srfmNoticeResponse.detailsNonce );
+		body.append( 'category', category );
+
+		fetch( srfmNoticeResponse.ajaxurl, { method: 'POST', body } )
+			.then( function ( response ) {
+				return response.json();
+			} )
+			.then( function ( json ) {
+				if ( ! json || ! json.success || ! json.data ) {
+					throw new Error( 'unavailable' );
+				}
+
+				dialog.setText( json.data.details || '' );
+				dialog.setSupportUrl( json.data.support_url || '' );
+			} )
+			.catch( function () {
+				// The report is built server-side, so there is nothing to show in
+				// its place. Say so, and fall back to the untagged support form:
+				// Contact Support is the only action that retires these notices, so
+				// a failed fetch must not also take the way out with it.
+				//
+				// Destination set before the message, because the message releases
+				// the copy-first lock and that release needs somewhere to point.
+				dialog.setSupportUrl( srfmNoticeResponse.supportUrl || '' );
+				dialog.setText( labels.unavailable || '', false );
+			} );
+
+		return true;
 	}
 
 	document.addEventListener( 'click', function ( e ) {
@@ -743,10 +832,15 @@
 			return;
 		}
 
-		// Only swallow the navigation if the dialog actually opened. If the payload
-		// is missing the href still goes to the dashboard, which is where the same
-		// details are readable.
-		if ( openDetails( trigger.getAttribute( 'data-srfm-details-for' ) ) ) {
+		// Only swallow the navigation if the dialog actually opened. If it cannot,
+		// the href still goes to the dashboard, which is where the same details are
+		// readable.
+		if (
+			openDetails(
+				trigger.getAttribute( 'data-srfm-details-for' ),
+				trigger.getAttribute( 'data-srfm-category' )
+			)
+		) {
 			e.preventDefault();
 		}
 	} );
