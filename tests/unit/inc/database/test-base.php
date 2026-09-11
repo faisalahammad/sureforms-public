@@ -394,6 +394,197 @@ class Test_Database_Base extends TestCase {
 		$this->assertStringContainsString( '3', $result );
 	}
 
+	public function test_prepare_where_clauses_not_in_operator() {
+		$result = $this->prepare(
+			[
+				[
+					[
+						'key'     => 'user_id',
+						'compare' => 'NOT IN',
+						'value'   => [ 4, 5 ],
+					],
+				],
+			]
+		);
+
+		// Without 'NOT IN' on the operator allowlist the whole condition is dropped
+		// and the query silently matches every row, which is how an exclusion built
+		// on this would fail open.
+		$this->assertStringContainsString( 'NOT IN', $result );
+		$this->assertStringContainsString( 'user_id', $result );
+		$this->assertStringContainsString( '4', $result );
+		$this->assertStringContainsString( '5', $result );
+	}
+
+	/**
+	 * An empty list must not be interpolated into "col IN ()".
+	 *
+	 * That is a syntax error, and it fails the whole query rather than the one
+	 * condition, taking out the listing and its COUNT together. An empty IN matches
+	 * nothing, so it collapses to a constant that says so.
+	 */
+	public function test_prepare_where_clauses_empty_in_matches_nothing() {
+		$in = $this->prepare(
+			[
+				[
+					[
+						'key'     => 'ID',
+						'compare' => 'IN',
+						'value'   => [],
+					],
+				],
+			]
+		);
+
+		$this->assertStringNotContainsString( 'IN ()', $in );
+		$this->assertStringContainsString( '1 = 0', $in, 'An empty IN matches nothing.' );
+	}
+
+	/**
+	 * An empty NOT IN is dropped, never written as a constant.
+	 *
+	 * It excludes nothing, and the constant that says so is a literal true. Under
+	 * AND that is a no-op, but the same clause list also builds OR groups, where a
+	 * literal true makes the whole group match every row and neutralises the
+	 * sibling conditions. Dropping the condition means the same thing under AND and
+	 * narrows rather than widens under OR.
+	 */
+	public function test_prepare_where_clauses_empty_not_in_is_dropped() {
+		$not_in = $this->prepare(
+			[
+				[
+					[
+						'key'     => 'ID',
+						'compare' => 'NOT IN',
+						'value'   => [],
+					],
+				],
+			]
+		);
+
+		$this->assertStringNotContainsString( 'IN ()', $not_in );
+		$this->assertStringNotContainsString( '1 = 1', $not_in, 'An empty NOT IN must not emit a literal true.' );
+		$this->assertStringNotContainsString( 'NOT IN', $not_in, 'The condition is dropped, not built.' );
+	}
+
+	/**
+	 * A scalar where an array belongs is a caller bug, and it must surface.
+	 *
+	 * `'NOT IN'` with `5` -- a plausible typo for `[ 5 ]` -- used to be folded in
+	 * with the empty-array case and drop the condition, excluding nobody with no
+	 * error and a green suite, while the same typo on `'IN'` failed closed. On a
+	 * primitive whose only job is scoping data that asymmetry is the hazard.
+	 */
+	public function test_prepare_where_clauses_non_array_in_value_is_doing_it_wrong() {
+		$notices = [];
+
+		$observe = static function ( $function_name, $message ) use ( &$notices ) {
+			$notices[] = $function_name . ': ' . $message;
+		};
+
+		add_action( 'doing_it_wrong_run', $observe, 10, 2 );
+		// _doing_it_wrong() escalates to trigger_error() under WP_DEBUG, which
+		// would abort the test rather than let it assert.
+		add_filter( 'doing_it_wrong_trigger_error', '__return_false' );
+
+		$result = $this->prepare(
+			[
+				[
+					[
+						'key'     => 'user_id',
+						'compare' => 'NOT IN',
+						// @phpstan-ignore-next-line -- Deliberately the wrong type.
+						'value'   => 5,
+					],
+				],
+			]
+		);
+
+		remove_filter( 'doing_it_wrong_trigger_error', '__return_false' );
+		remove_action( 'doing_it_wrong_run', $observe, 10 );
+
+		$this->assertNotEmpty( $notices, 'A scalar value must be reported, not swallowed.' );
+		$this->assertStringContainsString( 'prepare_where_clauses', $notices[0] );
+		$this->assertStringContainsString( 'NOT IN requires an array value', $notices[0] );
+		// The received type, so the caller does not have to guess what it sent.
+		$this->assertStringContainsString( 'integer', $notices[0] );
+
+		// And it must not have built a condition out of the bad input.
+		$this->assertStringNotContainsString( 'NOT IN', $result );
+		$this->assertStringNotContainsString( '1 = 1', $result );
+	}
+
+	/**
+	 * An operator is normalised before the allowlist test.
+	 *
+	 * Payments' builder upper-cases and trims; this one compared strictly. So a
+	 * caller writing `'not in'` was honoured by one and silently dropped by the
+	 * other -- and a dropped NOT IN is a silently disabled exclusion.
+	 */
+	public function test_prepare_where_clauses_normalises_operator_case() {
+		$result = $this->prepare(
+			[
+				[
+					[
+						'key'     => 'user_id',
+						'compare' => ' not in ',
+						'value'   => [ 4, 5 ],
+					],
+				],
+			]
+		);
+
+		$this->assertStringContainsString( 'NOT IN', $result, 'A lower-case operator must still be honoured.' );
+		$this->assertStringContainsString( '4', $result );
+		$this->assertStringContainsString( '5', $result );
+
+		// Still an allowlist: an unknown operator is dropped however it is cased.
+		$this->assertSame(
+			'',
+			$this->prepare(
+				[
+					[
+						[
+							'key'     => 'user_id',
+							'compare' => 'drop table',
+							'value'   => [ 1 ],
+						],
+					],
+				]
+			)
+		);
+	}
+
+	/**
+	 * An empty NOT IN beside an OR sibling must not widen the group.
+	 *
+	 * This is the shape that matters: a group whose siblings are the only thing
+	 * keeping a query narrow. The surviving clause must still be the sibling alone.
+	 */
+	public function test_prepare_where_clauses_empty_not_in_does_not_widen_an_or_group() {
+		$result = $this->prepare(
+			[
+				[
+					[
+						'key'     => 'form_id',
+						'compare' => '=',
+						'value'   => 7,
+					],
+					[
+						'key'     => 'user_id',
+						'compare' => 'NOT IN',
+						'value'   => [],
+					],
+					'RELATION' => 'OR',
+				],
+			]
+		);
+
+		$this->assertStringContainsString( 'form_id', $result, 'The sibling condition survives.' );
+		$this->assertStringNotContainsString( '1 = 1', $result );
+		$this->assertStringNotContainsString( ' OR ', $result, 'Nothing is left to OR the sibling against.' );
+	}
+
 	// ---------------------------------------------------------------
 	// prepare_where_clauses — date range
 	// ---------------------------------------------------------------
@@ -606,5 +797,79 @@ class Test_Database_Base extends TestCase {
 
 		$this->assertFalse( $missing );
 		$this->assertTrue( $this->entries_table->table_exists() );
+	}
+
+	// ---------------------------------------------------------------
+	// get_results
+	// ---------------------------------------------------------------
+
+	/**
+	 * An empty result set is a cached answer, not a cache miss.
+	 *
+	 * The cache was read for truthiness, so `[]` looked like "nothing stored" and
+	 * the query ran again for every caller. That was rare while every lookup
+	 * matched something; the editor exclusion makes an empty windowed lookup the
+	 * common case, so the dead-cache path starts firing on most rows.
+	 *
+	 * Asserted on the query count, because the return value is the same either way
+	 * -- which is exactly why this was invisible.
+	 */
+	public function test_get_results_caches_an_empty_result_set() {
+		global $wpdb;
+
+		$where = [
+			[
+				[
+					'key'     => 'form_id',
+					'compare' => '=',
+					// An id nothing can match, so the result is genuinely empty.
+					'value'   => 987654321,
+				],
+			],
+		];
+
+		$reset = new ReflectionMethod( $this->entries_table, 'cache_reset' );
+		$reset->setAccessible( true );
+		$reset->invoke( $this->entries_table );
+
+		$first = $this->entries_table->get_results( $where );
+		$this->assertSame( [], $first, 'Precondition: this lookup matches nothing.' );
+
+		$after = $wpdb->num_queries;
+		$again = $this->entries_table->get_results( $where );
+
+		$this->assertSame( [], $again );
+		$this->assertSame(
+			$after,
+			$wpdb->num_queries,
+			'The second identical lookup must come from the cache, not the database.'
+		);
+	}
+
+	// ---------------------------------------------------------------
+	// cache_reset
+	// ---------------------------------------------------------------
+
+	/**
+	 * cache_reset() empties the per-instance query cache.
+	 */
+	public function test_cache_reset() {
+		$set   = new ReflectionMethod( $this->entries_table, 'cache_set' );
+		$get   = new ReflectionMethod( $this->entries_table, 'cache_get' );
+		$reset = new ReflectionMethod( $this->entries_table, 'cache_reset' );
+
+		foreach ( [ $set, $get, $reset ] as $method ) {
+			$method->setAccessible( true );
+		}
+
+		$set->invoke( $this->entries_table, 'srfm_cache_reset_probe', 'stored' );
+		$this->assertSame( 'stored', $get->invoke( $this->entries_table, 'srfm_cache_reset_probe' ) );
+
+		$reset->invoke( $this->entries_table );
+
+		$this->assertNull(
+			$get->invoke( $this->entries_table, 'srfm_cache_reset_probe' ),
+			'The cached value must be gone after a reset.'
+		);
 	}
 }
