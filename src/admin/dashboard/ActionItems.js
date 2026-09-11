@@ -6,9 +6,10 @@ import { CircleCheck, TriangleAlert, ChevronUp, ChevronDown } from 'lucide-react
 /**
  * Dashboard panel listing what SureForms has checked on this site.
  *
- * Follows SureRank's Page Checks: one row per check, warnings first with a fix
- * link and an Ignore control, passing checks below as a green tick. Row markup
- * mirrors SureRank's CheckCard so the two plugins look like siblings.
+ * Follows SureRank's Page Checks: one row per problem, with a fix link and, for
+ * advisory rows, an Ignore control. Row markup mirrors SureRank's CheckCard so
+ * the two plugins look like siblings. Passing checks are not listed -- a panel
+ * confirming nothing is wrong is something people learn to skip.
  *
  * Rows are supplied fully formed by the server (see Admin::get_action_items()),
  * so adding a check needs no change here.
@@ -70,14 +71,44 @@ export default () => {
 		setDismissed( ( prev ) => [ ...prev, item.id ] );
 	};
 
-	// The mailto now carries the log in its body, so the link just works -- no
+	// Self-serve first. Someone who can fix it themselves should see that before
+	// they are pointed at a support queue, and the emphasis follows the order
+	// rather than the identity -- whichever action leads reads as the primary one,
+	// so an item with no guide still has Contact Support in front.
+	const actionsFor = ( item ) => [
+		...( item.guide_label && item.guide_url
+			? [
+				{
+					name: item.guide_action,
+					label: item.guide_label,
+					url: item.guide_url,
+					external: true,
+				},
+			  ]
+			: [] ),
+		...( item.cta_label && item.cta_url
+			? [
+				{
+					name: item.cta_action,
+					label: item.cta_label,
+					url: item.cta_url,
+					// A mailto: must open in the mail client, not a new tab. Matched
+					// case-insensitively, because a MAILTO: from the filter would
+					// otherwise get target="_blank" and open a blank tab.
+					external: ! /^mailto:/i.test( item.cta_url ),
+				},
+			  ]
+			: [] ),
+	];
+
+	// The mailto carries the log in its body, so the link just works -- no
 	// download to trigger, nothing to intercept.
-	const handleFix = ( item ) => () =>
+	const handleFix = ( item, action ) => () =>
 		post( 'srfm_notice_response', srfm_admin?.notice_response_nonce, {
 			notice_id: item.id,
 			// Named by the server, so the button key is not duplicated here and in
 			// the allowlist that has to accept it.
-			button: item.cta_action,
+			button: action,
 		} );
 
 	return (
@@ -104,12 +135,15 @@ export default () => {
 					) }
 				</button>
 			</div>
+			{ /* Same nesting as Quick Access below it: a grey well inside the white
+			     card, holding white rows. The two sit in one column and were
+			     reading as different components. */ }
 			{ open && (
-				<div className="space-y-2 p-1">
+				<div className="flex flex-col bg-background-secondary gap-1 p-1 rounded-lg">
 					{ items.map( ( item ) => (
 						<div
 							key={ item.id }
-							className="relative flex flex-col gap-1 p-3 bg-background-primary rounded-lg shadow-sm border-0.5 border-solid border-border-subtle"
+							className="relative flex flex-col gap-1 p-3 rounded-md bg-background-primary shadow-sm-blur-1"
 						>
 							<div className="w-full flex items-start gap-2">
 								{ ICONS[ item.status ] ?? ICONS.warning }
@@ -135,30 +169,54 @@ export default () => {
 										variant="link"
 										size="xs"
 										onClick={ handleIgnore( item ) }
-										className="font-medium focus:outline-none focus:[box-shadow:none] [&>span]:px-0 text-text-secondary shrink-0"
+										className="font-medium no-underline hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1 focus:[box-shadow:none] [&>span]:px-0 text-text-secondary shrink-0"
 									>
 										{ __( 'Ignore', 'sureforms' ) }
 									</Button>
 								) }
 							</div>
-							{ !! item.cta_label && (
-								<div className="pl-6">
-									<Button
-										variant="link"
-										size="xs"
-										tag="a"
-										href={ item.cta_url }
-										{ ...( ! item.cta_url?.startsWith(
-											'mailto:'
-										) && {
-											target: '_blank',
-											rel: 'noopener noreferrer',
-										} ) }
-										onClick={ handleFix( item ) }
-										className="font-medium focus:outline-none focus:[box-shadow:none] [&>span]:px-0"
-									>
-										{ item.cta_label }
-									</Button>
+							{ !! actionsFor( item ).length && (
+								<div className="pl-6 flex items-center gap-4">
+									{ actionsFor( item ).map(
+										( action, index ) => (
+											<Button
+												key={
+													action.name ||
+													`${ item.id }-${ index }`
+												}
+												variant="link"
+												size="xs"
+												tag="a"
+												href={ action.url }
+												{ ...( action.external && {
+													target: '_blank',
+													rel: 'noopener noreferrer',
+												} ) }
+												// Only when the server named one.
+												// An unnamed action posts
+												// "undefined" as the button and is
+												// rejected by the allowlist anyway.
+												{ ...( action.name && {
+													onClick: handleFix(
+														item,
+														action.name
+													),
+												} ) }
+												// Underlined on hover only, matching
+												// Quick Access below it. Three
+												// underlined links stacked in a narrow
+												// column read as a block of noise
+												// rather than as actions.
+												className={ `font-medium no-underline hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1 focus:[box-shadow:none] [&>span]:px-0${
+													index > 0
+														? ' text-text-secondary'
+														: ''
+												}` }
+											>
+												{ action.label }
+											</Button>
+										)
+									) }
 								</div>
 							) }
 						</div>

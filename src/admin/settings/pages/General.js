@@ -548,16 +548,6 @@ const GeneralPage = ( {
 			/>
 			<ContentSection
 				loading={ loading }
-				title={ __( 'Anonymous Analytics', 'sureforms' ) }
-				content={
-					<UsageTrackingContent
-						generalTabOptions={ generalTabOptions }
-						updateGlobalSettings={ updateGlobalSettings }
-					/>
-				}
-			/>
-			<ContentSection
-				loading={ loading }
 				title={ __( 'Logs', 'sureforms' ) }
 				content={
 					<LogsContent
@@ -565,6 +555,21 @@ const GeneralPage = ( {
 						updateGlobalSettings={ updateGlobalSettings }
 						logMeta={ logMeta }
 						setLogMeta={ setLogMeta }
+					/>
+				}
+			/>
+			{ /* Everything above is something SureForms does for this site.
+			     Analytics is the one setting that sends anything outward, so it
+			     sits last, behind a rule, rather than reading as one more form
+			     setting. */ }
+			<hr className="w-full m-0 border-0 border-t border-solid border-border-subtle" />
+			<ContentSection
+				loading={ loading }
+				title={ __( 'Anonymous Analytics', 'sureforms' ) }
+				content={
+					<UsageTrackingContent
+						generalTabOptions={ generalTabOptions }
+						updateGlobalSettings={ updateGlobalSettings }
 					/>
 				}
 			/>
