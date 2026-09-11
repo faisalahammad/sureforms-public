@@ -110,7 +110,7 @@ class Client_Logger {
 	 * tail must not be handed the tail from before the write.
 	 *
 	 * @var array<string,array{text:string,shown:int,total:int}>
-	 * @since x.x.x
+	 * @since 2.12.7
 	 */
 	private static $tail_memo = [];
 

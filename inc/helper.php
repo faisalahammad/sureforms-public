@@ -2238,7 +2238,7 @@ class Helper {
 	 * Falls back to the general guide rather than returning nothing, so the notice
 	 * always has somewhere to send them.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return string Absolute documentation URL.
 	 */
 	public static function get_caching_plugin_doc_url() {
@@ -2806,7 +2806,7 @@ class Helper {
 	 * one that has something to say. Reordering this array changes which guide a
 	 * two-plugin site sees.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return array<string,array{0:string,1:string}>
 	 */
 	private static function get_known_caching_plugins() {
@@ -2841,7 +2841,7 @@ class Helper {
 	 * the multisite network-active merge. First match in
 	 * get_known_caching_plugins() wins; that array's order is the precedence.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return array{0:string,1:string}|null Name and doc slug, or null when none is active.
 	 */
 	private static function get_active_caching_plugin_entry() {

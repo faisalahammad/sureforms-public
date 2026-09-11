@@ -95,7 +95,7 @@ class Admin {
 	 * would otherwise have to ask for, and the diagnostics are already on the
 	 * clipboard by the time someone gets here.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.7
 	 */
 	private const SUPPORT_CONTACT_URL = 'https://sureforms.com/form/troubleshooting-form/';
 
@@ -162,7 +162,7 @@ class Admin {
 	 * records a failure and then asks again is testing the memo.
 	 *
 	 * @var array<int,array<string,mixed>>|null
-	 * @since x.x.x
+	 * @since 2.12.7
 	 */
 	private static $action_items_cache = null;
 
@@ -486,7 +486,7 @@ class Admin {
 	 * Anything that records or clears a failure inside one process has to call
 	 * this, or it reads the answer from before the change.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return void
 	 */
 	public static function reset_action_items_cache() {
@@ -2861,7 +2861,7 @@ JS;
 	 * Capability first, then nonce, then the category, matching the ordering of
 	 * the sibling handlers in this class.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return void
 	 */
 	public function handle_action_item_details() {
@@ -3887,7 +3887,7 @@ JS;
 	 * blue, on a SureForms panel that is otherwise entirely brand orange. Same
 	 * approach and same values as print_srfm_notice_styles().
 	 *
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return void
 	 */
 	public function enqueue_action_item_styles() {
@@ -4049,7 +4049,7 @@ CSS;
 	 * again in JSX looks identical to translators until the first edit to either,
 	 * after which one surface silently reverts to English.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return array<string,string>
 	 */
 	private function get_details_dialog_labels() {
@@ -4090,7 +4090,7 @@ CSS;
 	 * filter has nothing to do with SureForms' logging toggle, and was being
 	 * silenced by it.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return array<int,array<string,mixed>>
 	 */
 	private function get_first_party_action_items() {
@@ -4866,7 +4866,7 @@ CSS;
 	 * track_action_item_impressions().
 	 *
 	 * @param string $event_name Analytics key from the allowlist.
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return void
 	 */
 	private function track_notice_event( $event_name ) {
@@ -4899,7 +4899,7 @@ CSS;
 	 *
 	 * @param string $category One of Client_Logger::CATEGORIES, naming the failure
 	 *                         the visitor is reporting.
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return string
 	 */
 	private function get_support_contact_url( $category ) {
@@ -4943,7 +4943,7 @@ CSS;
 		 * inbox and has no destination left to change now that the action opens a
 		 * form. A white-label install wants to point this at its own support page.
 		 *
-		 * @since x.x.x
+		 * @since 2.12.7
 		 *
 		 * @param string $url      Contact form URL, already UTM-tagged.
 		 * @param string $category The failure being reported.
@@ -4979,7 +4979,7 @@ CSS;
 	 * that is not in this flow.
 	 *
 	 * @param int $max_chars Characters of log to include.
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return string
 	 */
 	private function get_support_log_block( $max_chars = 1200 ) {
@@ -5022,7 +5022,7 @@ CSS;
 	 * category at all.
 	 *
 	 * @param string $category One of Client_Logger::CATEGORIES.
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return array{subject:string,anon:string}
 	 */
 	private function get_support_copy( $category ) {
@@ -5072,7 +5072,7 @@ CSS;
 	 * @param string $category One of Client_Logger::CATEGORIES. Unknown or absent
 	 *                         gets neutral wording rather than a specific claim.
 	 * @param int    $count    Failures recorded for that category.
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return string
 	 */
 	private function get_support_count_sentence( $category, $count ) {
