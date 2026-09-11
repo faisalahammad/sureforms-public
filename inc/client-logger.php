@@ -83,7 +83,7 @@ class Client_Logger {
 	 * Option holding per-category failure state, keyed by category.
 	 *
 	 * Shape: [ category => [ 'count' => int, 'form_id' => int, 'form_title' => string,
-	 * 'at' => int, 'acked' => int ] ].
+	 * 'at' => int, 'acked' => int, 'acked_at' => int ] ].
 	 *
 	 * Kept per category because the three read completely differently to a site
 	 * owner: submissions failing means visitors cannot reach you, a notification
@@ -208,6 +208,11 @@ class Client_Logger {
 			// Preserved: a report already made still stands until this new count
 			// overtakes it, which is what get_open_failures() compares.
 			'acked'      => Helper::get_integer_value( $existing['acked'] ?? 0 ),
+			// Carried forward too. This array is rebuilt from a fixed set of keys, so
+			// anything not named here is dropped -- and "when did I last report
+			// this" quietly disappearing on the next failure is exactly the kind of
+			// loss nobody notices until support asks.
+			'acked_at'   => Helper::get_integer_value( $existing['acked_at'] ?? 0 ),
 		];
 
 		update_option( self::FAILURES_OPTION, $failures, false );
@@ -265,6 +270,16 @@ class Client_Logger {
 		}
 
 		$failures[ $category ]['acked'] = Helper::get_integer_value( $failures[ $category ]['count'] ?? 0 );
+
+		// Recorded for the report -- "you told us at 14:12" is worth having when
+		// support reads the ticket -- but deliberately not what decides whether the
+		// notice comes back. The count does that.
+		//
+		// A timestamp cannot: it is written to the second, so a failure recorded in
+		// the same second as the acknowledgement compares equal and gets swallowed.
+		// That is the one moment it matters most, because a fault arriving as
+		// someone reports the last one is a fault still happening.
+		$failures[ $category ]['acked_at'] = time();
 
 		update_option( self::FAILURES_OPTION, $failures, false );
 	}
@@ -326,8 +341,14 @@ class Client_Logger {
 		}
 
 		return [
-			'at'     => Helper::get_integer_value( $failures['submission']['at'] ?? 0 ),
-			'streak' => $acked,
+			// The last fault time, not the acknowledgement time. Kept under this
+			// key because callers already read it as "when the thing happened".
+			'at'       => Helper::get_integer_value( $failures['submission']['at'] ?? 0 ),
+			// When the owner reported it. Separate, because the two answer
+			// different questions and are usually seconds apart on a fresh fault
+			// and days apart on an old one.
+			'acked_at' => Helper::get_integer_value( $failures['submission']['acked_at'] ?? 0 ),
+			'streak'   => $acked,
 		];
 	}
 
@@ -463,10 +484,12 @@ class Client_Logger {
 	/**
 	 * The most recent whole log lines, up to a character budget.
 	 *
-	 * For pasting into a support email, where the transport imposes the limit: a
-	 * mailto URL has to survive percent-encoding and every mail client's own
-	 * length cap, so only a tail fits. Newest entries are the ones that describe
-	 * the failure being reported, so the tail is the useful end.
+	 * An excerpt for reading and pasting. The budget is the caller's: the details
+	 * dialog shows it on screen and copies it to a clipboard, neither of which has
+	 * a length limit worth designing around, while an excerpt embedded anywhere
+	 * length-bound needs a smaller one. Newest entries are the ones that describe
+	 * the failure being reported, so the tail is the useful end and the oldest are
+	 * what a smaller budget drops.
 	 *
 	 * Whole lines only -- half a JSON object helps nobody.
 	 *
