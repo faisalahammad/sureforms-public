@@ -1056,7 +1056,7 @@ abstract class Base {
 	 *     }
 	 * }
 	 *
-	 * @since x.x.x -- Added support for "NOT IN" compare.
+	 * @since 2.12.7 -- Added support for "NOT IN" compare.
 	 * @since 1.1.1 -- Added support for "IN" compare.
 	 * @since 0.0.13
 	 * @return string The prepared SQL WHERE clause with placeholders, or an empty string if no clauses were provided.
@@ -1125,7 +1125,7 @@ abstract class Base {
 										_doing_it_wrong(
 											__METHOD__,
 											esc_html( "{$compare} requires an array value, received " . gettype( $_value['value'] ) . '.' ),
-											'x.x.x'
+											'2.12.7'
 										);
 										break;
 									}

@@ -157,7 +157,7 @@ class Entries extends Base {
 			'extras LONGTEXT AFTER status',
 			'user_id BIGINT(20) UNSIGNED NOT NULL DEFAULT 0 AFTER form_id',
 			'INDEX idx_user_id (user_id)',
-			// Note: @since x.x.x -- Covers the conversion rate's submitter lookup.
+			// Note: @since 2.12.7 -- Covers the conversion rate's submitter lookup.
 			'INDEX idx_user_id_created_at (user_id, created_at)',
 		];
 	}
