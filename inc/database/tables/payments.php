@@ -1285,10 +1285,40 @@ class Payments extends Base {
 
 			$column = $condition['key'];
 
-			if ( in_array( $operator, [ 'IN', 'NOT IN' ], true ) && is_array( $condition['value'] ) ) {
+			if ( in_array( $operator, [ 'IN', 'NOT IN' ], true ) ) {
+				if ( ! is_array( $condition['value'] ) ) {
+					// A scalar used to fall through to the else branch and emit
+					// `col IN %s`, which is a syntax error that fails the whole
+					// query. Base::prepare_where_clauses() reports this and drops
+					// the condition; do the same rather than leave the two builders
+					// disagreeing on malformed input.
+					_doing_it_wrong(
+						__METHOD__,
+						esc_html( "{$operator} requires an array value, received " . gettype( $condition['value'] ) . '.' ),
+						'x.x.x'
+					);
+					continue;
+				}
+
 				$ids = array_map( 'absint', $condition['value'] );
-				if ( empty( $ids ) ) {
-					$ids = [ 0 ];
+				if ( [] === $ids ) {
+					// Same empty-list handling as Base::prepare_where_clauses(), so
+					// the two builders cannot disagree. An empty IN matches nothing.
+					// An empty NOT IN excludes nothing, and is dropped rather than
+					// written as a literal, because a literal true would make an
+					// enclosing OR group match every row.
+					//
+					// This builder serves the manage_options-gated admin payments
+					// listing only, through get_all_main_payments() and
+					// get_total_main_payments_by_status(). The payment-history
+					// shortcode's customer filter is compiled by
+					// Base::prepare_where_clauses() via Payments::get_all() -- that
+					// group is where an OR fail-open would actually leak, and it is
+					// covered by the change in base.php.
+					if ( 'IN' === $operator ) {
+						$sub_clauses[] = '1 = 0';
+					}
+					continue;
 				}
 				$placeholders  = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
 				$sub_clauses[] = "{$column} {$operator} ({$placeholders})";
