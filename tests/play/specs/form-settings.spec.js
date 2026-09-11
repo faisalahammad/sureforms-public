@@ -86,6 +86,20 @@ test.describe( 'Form settings', () => {
 		await page.goto( formURL );
 		await page.waitForLoadState( 'load' );
 
+		// Guards #3122. The after-submission request is issued as the redirect
+		// begins; before the fix window.location.assign() cancelled it, so the
+		// after-submission process (webhooks, integrations, CPT creation) never
+		// ran. Asserting only on the URL cannot see that -- these specs passed
+		// throughout the regression.
+		const abortedAfterSubmission = [];
+		page.on( 'requestfailed', ( request ) => {
+			if ( request.url().includes( 'sureforms/v1/after-submission' ) ) {
+				abortedAfterSubmission.push(
+					request.failure()?.errorText ?? 'request failed'
+				);
+			}
+		} );
+
 		await page.locator( 'input.srfm-input-input' ).first().fill( 'Redirect test' );
 
 		await Promise.all( [
@@ -94,6 +108,8 @@ test.describe( 'Form settings', () => {
 		] );
 
 		expect( page.url() ).toContain( '/wp-admin/' );
+
+		expect( abortedAfterSubmission ).toEqual( [] );
 	} );
 
 	// ── 3.3 Store entries disabled ────────────────────────────────────────────
@@ -179,6 +195,20 @@ test.describe( 'Form settings', () => {
 		await page.goto( formURL );
 		await page.waitForLoadState( 'load' );
 
+		// Guards #3122. The after-submission request is issued as the redirect
+		// begins; before the fix window.location.assign() cancelled it, so the
+		// after-submission process (webhooks, integrations, CPT creation) never
+		// ran. Asserting only on the URL cannot see that -- these specs passed
+		// throughout the regression.
+		const abortedAfterSubmission = [];
+		page.on( 'requestfailed', ( request ) => {
+			if ( request.url().includes( 'sureforms/v1/after-submission' ) ) {
+				abortedAfterSubmission.push(
+					request.failure()?.errorText ?? 'request failed'
+				);
+			}
+		} );
+
 		await page.locator( 'input.srfm-input-input' ).first().fill( 'Page redirect test' );
 
 		await Promise.all( [
@@ -187,6 +217,8 @@ test.describe( 'Form settings', () => {
 		] );
 
 		expect( page.url() ).toContain( '/wp-admin/' );
+
+		expect( abortedAfterSubmission ).toEqual( [] );
 	} );
 
 	// ── 3.5 Store entries — entry appears in admin after submission ───────────

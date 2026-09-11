@@ -267,12 +267,63 @@ class Test_Entries_Table extends TestCase {
 	}
 
 	/**
-	 * Test get_form_ids_by_entries with empty array returns empty.
+	 * Test get_form_ids_by_entries with a non-existent entry id returns empty.
 	 */
 	public function test_get_form_ids_by_entries_nonexistent() {
 		$result = Entries::get_form_ids_by_entries( [ 999999 ] );
 		$this->assertIsArray( $result );
 		$this->assertEmpty( $result );
+	}
+
+	/**
+	 * Empty the entries table's per-instance query cache.
+	 */
+	private function reset_entries_cache(): void {
+		$reset = new ReflectionMethod( Entries::get_instance(), 'cache_reset' );
+		$reset->setAccessible( true );
+		$reset->invoke( Entries::get_instance() );
+	}
+
+	/**
+	 * An empty list never reaches the database.
+	 *
+	 * The guard has to reject an empty array as well as a non-array. Asserted on
+	 * the query count rather than the return value: an empty result comes back
+	 * either way, so only "no query was run" distinguishes the guard from a query
+	 * that happened to match nothing.
+	 */
+	public function test_get_form_ids_by_entries_empty_array() {
+		global $wpdb;
+
+		// Both guards, once removed, build the same constant-only query, so one
+		// test's result would answer the other's from the per-instance cache.
+		$this->reset_entries_cache();
+
+		$before = $wpdb->num_queries;
+		$result = Entries::get_form_ids_by_entries( [] );
+
+		$this->assertIsArray( $result );
+		$this->assertEmpty( $result );
+		$this->assertSame( $before, $wpdb->num_queries, 'An empty list must not reach the database.' );
+	}
+
+	/**
+	 * A non-array argument is rejected too, and also without a query.
+	 */
+	public function test_get_form_ids_by_entries_non_array() {
+		global $wpdb;
+
+		// Both guards, once removed, build the same constant-only query, so one
+		// test's result would answer the other's from the per-instance cache.
+		$this->reset_entries_cache();
+
+		$before = $wpdb->num_queries;
+		// @phpstan-ignore-next-line -- Deliberately passing the wrong type to exercise the guard.
+		$result = Entries::get_form_ids_by_entries( 'not-an-array' );
+
+		$this->assertIsArray( $result );
+		$this->assertEmpty( $result );
+		$this->assertSame( $before, $wpdb->num_queries, 'A non-array argument must not reach the database.' );
 	}
 
 	/**

@@ -89,7 +89,7 @@ abstract class Base {
 	 * @var array<string>
 	 * @since 1.8.0
 	 */
-	private $allowed_where_operators = [ 'LIKE', 'IN', '=', '!=', '>', '<', '>=', '<=' ];
+	private $allowed_where_operators = [ 'LIKE', 'IN', 'NOT IN', '=', '!=', '>', '<', '>=', '<=' ];
 
 	/**
 	 * Init class.
@@ -829,8 +829,10 @@ abstract class Base {
 		$query = rtrim( trim( $query ), ';' ) . ';';
 
 		$cached_results = $this->cache_get( $query );
-		if ( $cached_results ) {
-			// Return the cached data if exists.
+		if ( null !== $cached_results ) {
+			// Return the cached data if exists. Tested against null rather than
+			// truthiness: an empty result set is a real answer, and re-running the
+			// query for it means every no-match lookup runs once per caller.
 			return Helper::get_array_value( $cached_results );
 		}
 
@@ -918,8 +920,10 @@ abstract class Base {
 		$query = rtrim( trim( $query ), ';' ) . ';';
 
 		$cached_results = $this->cache_get( $query );
-		if ( $cached_results ) {
-			// Return the cached data if exists.
+		if ( null !== $cached_results ) {
+			// Return the cached data if exists. Tested against null rather than
+			// truthiness: a count of zero is a real answer, and the editor exclusion
+			// makes zero the common case rather than the exception.
 			return Helper::get_integer_value( $cached_results );
 		}
 
@@ -1052,6 +1056,7 @@ abstract class Base {
 	 *     }
 	 * }
 	 *
+	 * @since x.x.x -- Added support for "NOT IN" compare.
 	 * @since 1.1.1 -- Added support for "IN" compare.
 	 * @since 0.0.13
 	 * @return string The prepared SQL WHERE clause with placeholders, or an empty string if no clauses were provided.
@@ -1078,8 +1083,17 @@ abstract class Base {
 					$clause_parts = [];
 					foreach ( $value as $_key => $_value ) {
 						if ( is_int( $_key ) ) {
+							// Normalised before the allowlist test. Payments'
+							// builder upper-cases and trims, this one compared
+							// strictly -- so a caller writing 'not in' was honoured
+							// by one and silently dropped by the other. A dropped
+							// condition used to be harmless; now that NOT IN is the
+							// exclusion primitive, dropping it disables the
+							// exclusion without a word.
+							$compare = strtoupper( trim( Helper::get_string_value( $_value['compare'] ) ) );
+
 							// Check if the operator is allowed.
-							if ( ! in_array( $_value['compare'], $this->allowed_where_operators, true ) ) {
+							if ( ! in_array( $compare, $this->allowed_where_operators, true ) ) {
 								continue;
 							}
 
@@ -1088,26 +1102,56 @@ abstract class Base {
 								continue;
 							}
 
-							switch ( $_value['compare'] ) {
+							switch ( $compare ) {
 								case 'LIKE':
 									// Single quotes to match WP core. Under a MySQL session with
 									// ANSI_QUOTES set (not in WP's incompatible_modes list, which
 									// only names the compound ANSI mode) a double-quoted pattern
 									// parses as an identifier and the query hard-fails, taking out
 									// both the listing and its COUNT(*).
-									$clause_parts[] = $_value['key'] . ' ' . $_value['compare'] . " '%%" . $this->get_format_by_datatype( Helper::get_string_value( $schema[ $_value['key'] ]['type'] ) ) . "%%'";
+									$clause_parts[] = $_value['key'] . ' ' . $compare . " '%%" . $this->get_format_by_datatype( Helper::get_string_value( $schema[ $_value['key'] ]['type'] ) ) . "%%'";
 									$values[]       = $_value['value'];
 									break;
 
 								case 'IN':
+								case 'NOT IN':
+									// A scalar is a caller bug, not an empty set, and it must
+									// surface. 'NOT IN' with value 5 -- a plausible typo for
+									// [ 5 ] -- would otherwise drop the condition and exclude
+									// nobody, with no error and a green test suite, while the
+									// same typo on 'IN' fails closed. On a primitive whose only
+									// job is scoping data, that asymmetry is a hazard.
+									if ( ! is_array( $_value['value'] ) ) {
+										_doing_it_wrong(
+											__METHOD__,
+											esc_html( "{$compare} requires an array value, received " . gettype( $_value['value'] ) . '.' ),
+											'x.x.x'
+										);
+										break;
+									}
+
+									// An empty list cannot be interpolated: "col IN ()" is a syntax
+									// error that fails the whole query, listing and COUNT alike.
+									// An empty IN matches nothing, so '1 = 0' says that in any
+									// relation. An empty NOT IN excludes nothing, but a literal
+									// would be '1 = 1', and that makes an enclosing OR group
+									// unconditionally true. Dropping the condition means the same
+									// thing under AND and stays fail-closed under OR.
+									if ( [] === $_value['value'] ) {
+										if ( 'IN' === $compare ) {
+											$clause_parts[] = '1 = 0';
+										}
+										break;
+									}
+
 									// Based on the number of values and datatype, it will create WHERE clause for $wpdb::prepare method. Eg: for ID with three values column: ID IN (%d, %d, %d).
 									$datatype       = $this->get_format_by_datatype( Helper::get_string_value( $schema[ $_value['key'] ]['type'] ) );
-									$clause_parts[] = $_value['key'] . ' ' . $_value['compare'] . ' (' . implode( ', ', array_fill( 0, count( $_value['value'] ), $datatype ) ) . ')';
+									$clause_parts[] = $_value['key'] . ' ' . $compare . ' (' . implode( ', ', array_fill( 0, count( $_value['value'] ), $datatype ) ) . ')';
 									$values         = array_merge( $values, $_value['value'] );
 									break;
 
 								default:
-									$clause_parts[] = $_value['key'] . ' ' . $_value['compare'] . ' ' . $this->get_format_by_datatype( Helper::get_string_value( $schema[ $_value['key'] ]['type'] ) );
+									$clause_parts[] = $_value['key'] . ' ' . $compare . ' ' . $this->get_format_by_datatype( Helper::get_string_value( $schema[ $_value['key'] ]['type'] ) );
 									$values[]       = $_value['value'];
 									break;
 							}
@@ -1134,6 +1178,14 @@ abstract class Base {
 			}
 
 			$where = ' WHERE ' . implode( ' AND ', $groups );
+
+			if ( [] === $values ) {
+				// Every branch that builds a placeholder also pushes a value, so an
+				// empty list here means the only conditions were constant ones. There
+				// is nothing for prepare() to fill, and calling it with no placeholder
+				// trips _doing_it_wrong.
+				return $where;
+			}
 
 			// Prepare the query with placeholders.
 			// @phpstan-ignore-next-line -- We are already assigning non-literal string above using "get_format_by_datatype" methods.

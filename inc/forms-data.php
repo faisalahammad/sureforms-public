@@ -26,6 +26,26 @@ class Forms_Data {
 	use Get_Instance;
 
 	/**
+	 * Ids of the in-window submitters who can edit the site, keyed by blog id.
+	 *
+	 * Keyed on the blog rather than held as a single list because capabilities are
+	 * per-site: after a switch_to_blog() the previous site's answer is wrong, and a
+	 * flat cache would hand it back.
+	 *
+	 * A class property rather than a `static` inside the method so it can be reset,
+	 * which the tests need: they create a user and then ask for the metrics inside
+	 * one process.
+	 *
+	 * Deliberately per-request and never written to the object cache. A persistent
+	 * cache would keep counting a newly promoted editor as a visitor until
+	 * something invalidated it, and there is no natural invalidation point.
+	 *
+	 * @var array<int,array<int,int>>|null
+	 * @since x.x.x
+	 */
+	private static $editing_user_ids = null;
+
+	/**
 	 * Constructor
 	 *
 	 * @since 0.0.1
@@ -307,7 +327,12 @@ class Forms_Data {
 		 */
 		$limit = Helper::get_integer_value( apply_filters( 'srfm_forms_metric_sort_limit', 500 ) );
 
-		if ( $limit > 0 && count( $id_query->posts ) > $limit ) {
+		// A filter is allowed to tighten or loosen the ceiling, not to remove it. Zero
+		// or negative read as "no ceiling" to a `> $limit` test, which is the one
+		// outcome the ceiling exists to prevent, so fall back to the default.
+		$limit = $limit > 0 ? $limit : 500;
+
+		if ( count( $id_query->posts ) > $limit ) {
 			/**
 			 * Fires when the metric sort is skipped because the site has too many forms.
 			 *
@@ -348,20 +373,12 @@ class Forms_Data {
 		foreach ( $id_query->posts as $post_id ) {
 			$form_id = Helper::get_integer_value( $post_id );
 
-			// Same three arguments the render path passes. Calling this with only the
-			// form ID left $post_date_gmt empty, so strtotime() returned false, the
-			// "form is younger than the window" shortcut could never be taken, and the
-			// windowed COUNT ran for every row — both a second query per form and, for
-			// any entry whose created_at predates the form's post_date (an import, a
-			// migration, a restored backup), a different number than the column shows.
-			// The comment below promises order and display can never disagree; passing
-			// different arguments here is what made them disagree.
-			$post    = get_post( $form_id );
-			$metrics = $this->calculate_form_metrics(
-				$form_id,
-				$post->post_date_gmt ?? '',
-				Helper::get_integer_value( Entries::get_total_entries_by_status( 'all', $form_id ) )
-			);
+			// The form id is the whole input, here and on the render path, so the two
+			// cannot be handed different arguments and compute different numbers.
+			// They once could: this took a creation date and an all-time count as
+			// well, the two callers passed them differently, and the column and its
+			// sort order disagreed.
+			$metrics = $this->calculate_form_metrics( $form_id );
 
 			// Same helper the column renders from, so the order always matches the
 			// numbers on screen. An unmeasurable rate sorts as -1 rather than 0, so
@@ -444,6 +461,144 @@ class Forms_Data {
 	}
 
 	/**
+	 * Ids of the in-window submitters who can edit the site, cached for the request.
+	 *
+	 * Bounded by submitters, not by users. Asking the user table for everyone with
+	 * `edit_posts` runs an unindexable leading-wildcard scan of capability meta with
+	 * no LIMIT, and the answer is then interpolated into one windowed COUNT per form,
+	 * up to the ceiling in get_forms_sorted_by_metric(). On a membership site that
+	 * hands `contributor` to every member that is a five-figure placeholder list
+	 * rebuilt for every row of a ten-row page. Only people who actually submitted
+	 * inside the window can affect the rate, and that set is small.
+	 *
+	 * Served by `idx_user_id_created_at (user_id, created_at)`, added for this
+	 * lookup. `idx_user_id` alone cannot: `created_at` is not in it and no other
+	 * index leads on `created_at`, so before that index this was a range scan with
+	 * a row read per row plus a temp table for the DISTINCT -- on a site with years
+	 * of logged-in submissions, every entry ever recorded, to return a short list.
+	 * The LIMIT bounds what comes back, not what is read; the index bounds the
+	 * read.
+	 *
+	 * Decided with `user_can()`, the same call Form_Views::should_track() makes, so
+	 * both halves of the rate answer one question rather than two similar ones. A
+	 * capability granted at runtime through `user_has_cap`, a multisite super admin
+	 * who is not a member of the subsite, and a role carrying `edit_posts` as an
+	 * explicit denial all resolve the same way on both sides.
+	 *
+	 * Reflects capability as it stands now, not as it stood at submission time. On a
+	 * site that promotes or demotes people the two halves still drift: a promoted
+	 * subscriber's earlier views stay in the denominator while their earlier entries
+	 * leave the numerator, and a demoted editor's earlier entries return without
+	 * their views. Closing that means stamping the decision on the entry at submit
+	 * time, which is a schema change this percentage does not justify.
+	 *
+	 * Cached because the forms listing asks once per row, and the answer cannot
+	 * change within a request.
+	 *
+	 * @param int $window_start Unix timestamp the view window opened at.
+	 * @since x.x.x
+	 * @return array<int,int>
+	 */
+	private static function get_editing_submitter_ids( $window_start ) {
+		$blog_id = get_current_blog_id();
+
+		if ( null === self::$editing_user_ids ) {
+			self::$editing_user_ids = [];
+		}
+
+		if ( isset( self::$editing_user_ids[ $blog_id ] ) ) {
+			return self::$editing_user_ids[ $blog_id ];
+		}
+
+		/**
+		 * Largest number of distinct in-window submitters to test for edit access.
+		 *
+		 * The test is bounded work per submitter, so this is a guard against a site
+		 * where a very large share of submissions are made while logged in. Past the
+		 * ceiling the exclusion is skipped rather than truncated: a partial exclusion
+		 * list reports a rate that is wrong in a way nobody can see, where no
+		 * exclusion at least reproduces the pre-existing behaviour.
+		 *
+		 * Two things to know before raising or lowering it. The count is of
+		 * distinct submitters across all forms since tracking was first enabled,
+		 * and that window never resets -- so a membership site, a store or an LMS
+		 * reaches 500 in ordinary operation, and once passed it stays passed, with
+		 * the rate quietly counting editor submissions again. That is why the
+		 * settings copy says those are "normally" left out rather than promising it
+		 * outright. And the query does not filter on status, so a user whose only
+		 * in-window entries were trashed still lands on the list and consumes
+		 * budget -- harmless for the count, but it brings the ceiling closer.
+		 *
+		 * @param int $limit Maximum submitters to test. Default 500.
+		 * @since x.x.x
+		 */
+		$limit = Helper::get_integer_value( apply_filters( 'srfm_forms_metric_submitter_limit', 500 ) );
+
+		// Same reasoning as the sort ceiling: a filter may move it, not remove it.
+		$limit = $limit > 0 ? $limit : 500;
+
+		// One row past the ceiling, so a full page is proof the ceiling was passed
+		// without counting the rest of the table to find out.
+		$rows = Entries::get_instance()->get_results(
+			[
+				[
+					[
+						'key'     => 'created_at',
+						'compare' => '>=',
+						'value'   => self::window_boundary_sql( $window_start ),
+					],
+					[
+						'key'     => 'user_id',
+						'compare' => '>',
+						'value'   => 0,
+					],
+				],
+			],
+			'DISTINCT user_id',
+			[ sprintf( 'LIMIT %d', $limit + 1 ) ]
+		);
+
+		$submitters = array_values( array_unique( array_map( 'absint', array_column( $rows, 'user_id' ) ) ) );
+
+		if ( count( $submitters ) > $limit ) {
+			/**
+			 * Fires when the editor exclusion is skipped because too many submitters
+			 * would have to be tested.
+			 *
+			 * Announced rather than skipped silently, for the same reason as
+			 * `srfm_forms_metric_sort_skipped`: a rate that quietly stops excluding
+			 * editors reads as a wrong number, not as a deliberate ceiling.
+			 *
+			 * @param int $count Number of distinct submitters found, capped at $limit + 1.
+			 * @param int $limit The ceiling in force.
+			 * @since x.x.x
+			 */
+			do_action( 'srfm_forms_metric_submitter_limit_exceeded', count( $submitters ), $limit );
+
+			self::$editing_user_ids[ $blog_id ] = [];
+
+			return self::$editing_user_ids[ $blog_id ];
+		}
+
+		if ( [] !== $submitters ) {
+			// Two queries for the whole set. Without it user_can() resolves each user
+			// on its own and the loop becomes one query per submitter.
+			cache_users( $submitters );
+		}
+
+		self::$editing_user_ids[ $blog_id ] = array_values(
+			array_filter(
+				$submitters,
+				static function ( $user_id ) {
+					return user_can( $user_id, 'edit_posts' );
+				}
+			)
+		);
+
+		return self::$editing_user_ids[ $blog_id ];
+	}
+
+	/**
 	 * Views and conversion rate for one form.
 	 *
 	 * The single source of truth for both the rendered value and the sorted metric.
@@ -452,20 +607,28 @@ class Forms_Data {
 	 * rendering a dash sorted as though its rate were several hundred percent.
 	 * Anything needing these numbers must come through here.
 	 *
-	 * Returns `null` for the rate rather than a number whenever it cannot be
-	 * measured — tracking off, window never opened, no views yet, or more entries
-	 * than views. That last case is not possible in reality (every entry needs a
-	 * view first), so it means the view count is incomplete and any percentage
-	 * would be invented; the table renders the dash instead. `0.0` is reserved for
-	 * a real measurement of zero.
+	 * Both halves apply the same test. Views are not counted for anyone who can
+	 * edit the site (Form_Views::should_track()), so their submissions must not be
+	 * counted either: testing your own form five times would otherwise add five to
+	 * the numerator and nothing to the denominator, and report a rate several times
+	 * the real one. The test is applied to capability as it stands now on both
+	 * sides, so a site that promotes or demotes people still sees some drift --
+	 * get_editing_submitter_ids() has the detail. The Entries column is unaffected
+	 * and stays a true all-time count of every entry received.
 	 *
-	 * @param int    $form_id       Form post ID.
-	 * @param string $post_date_gmt Form creation date, GMT. Used to skip a redundant count.
-	 * @param int    $entries_all_time All-time entry count, when the caller already has it.
+	 * Returns `null` for the rate rather than a number whenever it cannot be
+	 * measured: tracking off, window never opened, no views yet, or more entries
+	 * than views. That last case means the view count is incomplete, or that a
+	 * submitter was promoted after submitting, and any percentage would be invented;
+	 * the table renders the dash instead. `0.0` is reserved for a real measurement
+	 * of zero.
+	 *
+	 * @param int $form_id Form post ID.
 	 * @return array{views:int,conversion_rate:float|null}
+	 * @since x.x.x -- Signature reduced to $form_id.
 	 * @since 2.12.6
 	 */
-	private function calculate_form_metrics( $form_id, $post_date_gmt = '', $entries_all_time = null ) {
+	private function calculate_form_metrics( $form_id ) {
 		$none = [
 			'views'           => 0,
 			'conversion_rate' => null,
@@ -491,32 +654,38 @@ class Forms_Data {
 
 		// Compare like with like. The Entries column is all-time, but views only start
 		// accruing when tracking opens, so the rate counts entries from that same
-		// moment — otherwise a form that existed beforehand divides years of entries by
-		// days of views and reports a rate that is pure noise.
-		$form_created = strtotime( (string) $post_date_gmt );
+		// moment. Otherwise a form that existed beforehand divides years of entries
+		// by days of views and reports a rate that is pure noise.
+		$where = [
+			[
+				[
+					'key'     => 'created_at',
+					'compare' => '>=',
+					'value'   => self::window_boundary_sql( $window_start ),
+				],
+			],
+		];
 
-		if ( null !== $entries_all_time && $form_created && $form_created >= $window_start ) {
-			// The form is younger than the window, so every entry it has is already
-			// inside the window and the caller's all-time count is the same number.
-			// Skips a second COUNT per row on the listing.
-			$entries_since = Helper::get_integer_value( $entries_all_time );
-		} else {
-			$entries_since = Helper::get_integer_value(
-				Entries::get_total_entries_by_status(
-					'all',
-					$form_id,
-					[
-						[
-							[
-								'key'     => 'created_at',
-								'compare' => '>=',
-								'value'   => self::window_boundary_sql( $window_start ),
-							],
-						],
-					]
-				)
-			);
+		$editing_users = self::get_editing_submitter_ids( $window_start );
+
+		if ( [] !== $editing_users ) {
+			$where[] = [
+				[
+					'key'     => 'user_id',
+					'compare' => 'NOT IN',
+					'value'   => $editing_users,
+				],
+			];
 		}
+
+		// Always counted, never taken from the caller's all-time total. That total
+		// includes the entries this exclusion exists to drop, so reusing it for a
+		// form created inside the window -- the newly built form an admin has just
+		// been testing, which is exactly the case that skews -- would hand back the
+		// unfiltered number and quietly undo the exclusion.
+		$entries_since = Helper::get_integer_value(
+			Entries::get_total_entries_by_status( 'all', $form_id, $where )
+		);
 
 		if ( $entries_since > $views ) {
 			return [
@@ -546,7 +715,7 @@ class Forms_Data {
 
 		// Views and conversion rate come from the same helper the sort path uses, so the
 		// column can never order by a different number than it displays.
-		$metrics         = $this->calculate_form_metrics( $form_id, $post->post_date_gmt, $entries_count );
+		$metrics         = $this->calculate_form_metrics( $form_id );
 		$views           = $metrics['views'];
 		$conversion_rate = $metrics['conversion_rate'];
 

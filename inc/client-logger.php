@@ -511,7 +511,7 @@ class Client_Logger {
 		//
 		// Its own variable, not $max_chars reused -- that key is a string, and the
 		// byte-budget comparison below coerces "1:1200" to 1, which silently
-		// reduces the excerpt to a single line.
+		// reduces every excerpt to a single line.
 		$memo_key = get_current_blog_id() . ':' . $max_chars;
 
 		if ( isset( self::$tail_memo[ $memo_key ] ) ) {

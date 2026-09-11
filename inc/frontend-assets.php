@@ -548,6 +548,8 @@ class Frontend_Assets {
 			return $template;
 		}
 
+		self::reset_printed_assets();
+
 		$file_name = 'single-form.php';
 		$template  = locate_template( $file_name );
 
@@ -557,6 +559,44 @@ class Frontend_Assets {
 		 * @since 0.0.1
 		 */
 		return apply_filters( 'srfm_form_template', $template ? $template : SRFM_DIR . '/templates/' . $file_name );
+	}
+
+	/**
+	 * Let the Instant Form template print assets a discarded render already claimed.
+	 *
+	 * `page_template()` runs on `template_include` at PHP_INT_MAX and returns the
+	 * Instant Form template regardless of what earlier filters returned. A page
+	 * builder that renders the whole page inside its own `template_include`
+	 * filter has therefore already run `wp_head()` and `wp_footer()` into an
+	 * output buffer that is about to be thrown away.
+	 *
+	 * The buffer goes, but `WP_Styles::$done` and `WP_Scripts::$done` still hold
+	 * every handle it claimed, so `do_items()` skips them when `single-form.php`
+	 * calls `wp_head()` and `wp_footer()` for real. The form arrives with no
+	 * stylesheets, and -- because `srfm-form-submit` is registered for the footer
+	 * -- no submit handler either.
+	 *
+	 * Clearing both `done` lists wholesale is the right scope rather than an
+	 * over-broad one: only the render that begins after this filter returns
+	 * reaches the browser, so nothing recorded before it was ever delivered. The
+	 * handles are re-enqueued by the second `wp_enqueue_scripts` pass, so they
+	 * print normally once `done` stops shadowing them.
+	 *
+	 * Guarded on `wp_head` having already fired, so this is inert on the ordinary
+	 * path where no builder rendered first and nothing has been printed yet.
+	 *
+	 * @since x.x.x
+	 * @return void
+	 */
+	private static function reset_printed_assets() {
+		// No earlier wp_head() means no discarded render, so there is nothing to
+		// forget. Deny is the fallthrough: act only on the state this repairs.
+		if ( ! did_action( 'wp_head' ) ) {
+			return;
+		}
+
+		wp_styles()->done  = [];
+		wp_scripts()->done = [];
 	}
 
 }
