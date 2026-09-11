@@ -513,9 +513,16 @@ class Analytics {
 	/**
 	 * Total page views counted across all published forms.
 	 *
-	 * Paired with `forms_with_views` and the existing `total_entries`, this is what
-	 * makes the conversion figure interpretable in the warehouse: a site with views
-	 * but no entries reads very differently from one with neither.
+	 * Read alongside `forms_with_views`, which is what makes this figure legible: a
+	 * site with views but no forms recording any reads very differently from one
+	 * with neither.
+	 *
+	 * Not a denominator for `total_entries`, and the two must not be divided. This
+	 * total starts at the moment tracking opened and leaves out anyone who can edit
+	 * the site, while `total_entries` is an unfiltered all-time count of every
+	 * entry ever received. A rate built from the pair answers neither question and
+	 * will not match the Conversion Rate column, which measures both halves over
+	 * the same window with the same exclusion.
 	 *
 	 * Counts only published forms, so views left behind by a trashed or draft form
 	 * do not inflate the total against a denominator that no longer includes them.

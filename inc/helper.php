@@ -2218,51 +2218,44 @@ class Helper {
 	 * the scripts a form depends on. This is what surfaces that to the site owner
 	 * before it turns into "my form stopped working".
 	 *
-	 * Detection is by plugin path, mirroring is_any_smtp_plugin_active(), including
-	 * the multisite network-active merge.
-	 *
 	 * @since 2.12.6
 	 * @return string Human-readable plugin name, or '' when none is active.
 	 */
 	public static function get_active_caching_plugin() {
-		$caching_plugins = [
-			'litespeed-cache/litespeed-cache.php'        => 'LiteSpeed Cache',
-			'wp-rocket/wp-rocket.php'                    => 'WP Rocket',
-			'w3-total-cache/w3-total-cache.php'          => 'W3 Total Cache',
-			'wp-super-cache/wp-cache.php'                => 'WP Super Cache',
-			'wp-fastest-cache/wpFastestCache.php'        => 'WP Fastest Cache',
-			'autoptimize/autoptimize.php'                => 'Autoptimize',
-			'sg-cachepress/sg-cachepress.php'            => 'SiteGround Optimizer',
-			'wp-optimize/wp-optimize.php'                => 'WP-Optimize',
-			'cache-enabler/cache-enabler.php'            => 'Cache Enabler',
-			'comet-cache/comet-cache.php'                => 'Comet Cache',
-			'hummingbird-performance/wp-hummingbird.php' => 'Hummingbird',
-			'breeze/breeze.php'                          => 'Breeze',
-			'nitropack/main.php'                         => 'NitroPack',
-			'swift-performance-lite/performance.php'     => 'Swift Performance Lite',
-			'wp-cloudflare-page-cache/wp-cloudflare-page-cache.php' => 'Super Page Cache',
-			'flying-press/flying-press.php'              => 'FlyingPress',
-			'redis-cache/redis-cache.php'                => 'Redis Object Cache',
-			'powered-cache/powered-cache.php'            => 'Powered Cache',
-			'docket-cache/docket-cache.php'              => 'Docket Cache',
-			'seraphinite-accelerator/plugin_root.php'    => 'Seraphinite Accelerator',
-		];
+		$entry = self::get_active_caching_plugin_entry();
 
-		$active_plugins = (array) get_option( 'active_plugins', [] );
+		return null === $entry ? '' : $entry[0];
+	}
 
-		// For multisite, merge sitewide active plugins.
-		if ( is_multisite() ) {
-			$network_plugins = (array) get_site_option( 'active_sitewide_plugins', [] );
-			$active_plugins  = array_merge( $active_plugins, array_keys( $network_plugins ) );
-		}
+	/**
+	 * Setup guide for the active caching plugin.
+	 *
+	 * Six of the recognised plugins have a guide of their own; the rest, and any
+	 * site with none detected, get the general one. Sending someone to a page that
+	 * names the plugin they actually run is the difference between advice they can
+	 * follow and advice they have to translate.
+	 *
+	 * Falls back to the general guide rather than returning nothing, so the notice
+	 * always has somewhere to send them.
+	 *
+	 * @since x.x.x
+	 * @return string Absolute documentation URL.
+	 */
+	public static function get_caching_plugin_doc_url() {
+		$entry = self::get_active_caching_plugin_entry();
+		$slug  = null === $entry || '' === $entry[1] ? 'how-to-set-up-sureforms-with-caching-plugins' : $entry[1];
 
-		foreach ( $caching_plugins as $path => $name ) {
-			if ( in_array( $path, $active_plugins, true ) ) {
-				return $name;
-			}
-		}
-
-		return '';
+		// Through the central builder rather than hardcoding the domain, so the
+		// link carries the same UTM attribution as every other doc link and a
+		// domain change is one edit. utm_content is the slug, so the notice can be
+		// told which guide people actually open.
+		return self::get_sureforms_website_url(
+			'docs/' . $slug . '/',
+			[
+				'utm_medium'  => 'form_checks_notice',
+				'utm_content' => $slug,
+			]
+		);
 	}
 
 	/**
@@ -2794,6 +2787,79 @@ class Helper {
 	 */
 	private static function get_geo_failure_ttl() {
 		return self::get_integer_value( apply_filters( 'srfm_geo_failure_ttl', 5 * MINUTE_IN_SECONDS ) );
+	}
+
+	/**
+	 * Caching plugins SureForms recognises, and the guide for each.
+	 *
+	 * `path => [ display name, doc slug ]`. An empty slug means there is no
+	 * plugin-specific guide and the general one applies. Name and slug live in one
+	 * array on purpose: keyed separately they drift, and a doc link that silently
+	 * degrades to the generic page is the kind of regression nobody reports.
+	 *
+	 * Order is precedence: the first active plugin in this list wins. The six with
+	 * their own guide are listed first on purpose, so a site running two caching
+	 * plugins is pointed at the specific guide rather than whichever plugin the
+	 * old alphabetical order happened to reach first. That flips the winner on a
+	 * few pairs -- WP Fastest Cache over WP Super Cache, SiteGround Optimizer and
+	 * Autoptimize over their partners -- and in each case the new winner is the
+	 * one that has something to say. Reordering this array changes which guide a
+	 * two-plugin site sees.
+	 *
+	 * @since x.x.x
+	 * @return array<string,array{0:string,1:string}>
+	 */
+	private static function get_known_caching_plugins() {
+		return [
+			'litespeed-cache/litespeed-cache.php'        => [ 'LiteSpeed Cache', 'how-to-set-up-sureforms-with-litespeed-cache' ],
+			'wp-rocket/wp-rocket.php'                    => [ 'WP Rocket', 'how-to-set-up-sureforms-with-wp-rocket' ],
+			'w3-total-cache/w3-total-cache.php'          => [ 'W3 Total Cache', 'how-to-set-up-sureforms-with-w3-total-cache' ],
+			'wp-fastest-cache/wpFastestCache.php'        => [ 'WP Fastest Cache', 'how-to-set-up-sureforms-with-wp-fastest-cache' ],
+			'sg-cachepress/sg-cachepress.php'            => [ 'SiteGround Optimizer', 'how-to-set-up-sureforms-with-siteground-optimizer' ],
+			'autoptimize/autoptimize.php'                => [ 'Autoptimize', 'how-to-set-up-sureforms-with-autoptimize' ],
+			'wp-super-cache/wp-cache.php'                => [ 'WP Super Cache', '' ],
+			'wp-optimize/wp-optimize.php'                => [ 'WP-Optimize', '' ],
+			'cache-enabler/cache-enabler.php'            => [ 'Cache Enabler', '' ],
+			'comet-cache/comet-cache.php'                => [ 'Comet Cache', '' ],
+			'hummingbird-performance/wp-hummingbird.php' => [ 'Hummingbird', '' ],
+			'breeze/breeze.php'                          => [ 'Breeze', '' ],
+			'nitropack/main.php'                         => [ 'NitroPack', '' ],
+			'swift-performance-lite/performance.php'     => [ 'Swift Performance Lite', '' ],
+			'wp-cloudflare-page-cache/wp-cloudflare-page-cache.php' => [ 'Super Page Cache', '' ],
+			'flying-press/flying-press.php'              => [ 'FlyingPress', '' ],
+			'redis-cache/redis-cache.php'                => [ 'Redis Object Cache', '' ],
+			'powered-cache/powered-cache.php'            => [ 'Powered Cache', '' ],
+			'docket-cache/docket-cache.php'              => [ 'Docket Cache', '' ],
+			'seraphinite-accelerator/plugin_root.php'    => [ 'Seraphinite Accelerator', '' ],
+		];
+	}
+
+	/**
+	 * The active caching plugin's entry, if there is one.
+	 *
+	 * Detection is by plugin path, mirroring is_any_smtp_plugin_active(), including
+	 * the multisite network-active merge. First match in
+	 * get_known_caching_plugins() wins; that array's order is the precedence.
+	 *
+	 * @since x.x.x
+	 * @return array{0:string,1:string}|null Name and doc slug, or null when none is active.
+	 */
+	private static function get_active_caching_plugin_entry() {
+		$active_plugins = (array) get_option( 'active_plugins', [] );
+
+		// For multisite, merge sitewide active plugins.
+		if ( is_multisite() ) {
+			$network_plugins = (array) get_site_option( 'active_sitewide_plugins', [] );
+			$active_plugins  = array_merge( $active_plugins, array_keys( $network_plugins ) );
+		}
+
+		foreach ( self::get_known_caching_plugins() as $path => $entry ) {
+			if ( in_array( $path, $active_plugins, true ) ) {
+				return $entry;
+			}
+		}
+
+		return null;
 	}
 
 }
