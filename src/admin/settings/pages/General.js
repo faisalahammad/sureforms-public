@@ -35,6 +35,10 @@ const EmailSummariesContent = ( { emailTabOptions, updateGlobalSettings } ) => {
 			<Switch
 				label={ {
 					heading: __( 'Enable email summaries', 'sureforms' ),
+					description: __(
+						'Receive a scheduled digest of form submissions straight to your inbox.',
+						'sureforms'
+					),
 				} }
 				value={ emailTabOptions.srfm_email_summary }
 				onChange={ ( value ) =>
@@ -234,7 +238,7 @@ const FormViewsTrackingContent = ( {
 					'sureforms'
 				),
 				description: __(
-					'Adds the Views and Conversion Rate columns to the Forms list. A view is counted once per page visit when the form appears on screen, and the conversion rate is the share of those views that ended in a submission. Counting starts the first time you turn this on, so submissions received before then are not counted towards the rate. Turning it off afterwards only hides the columns — counting continues, so the figures are up to date if you switch it back on.',
+					'Adds Views and Conversion Rate columns to the Forms list. Disabling hides the columns but does not stop tracking.',
 					'sureforms'
 				),
 			} }
