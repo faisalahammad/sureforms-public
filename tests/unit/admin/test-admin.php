@@ -1958,16 +1958,39 @@ class Test_Admin extends TestCase {
 
 		$this->assertSame( 'https://reseller.example.com/help/', $filtered );
 
-		// Escaped after the filter, so neither renderer has to trust what came back.
-		$bad = static function () {
-			return 'javascript:alert(1)';
+		// An inbox is a legitimate destination for a white-label support contact,
+		// and the sibling item URLs already allow it.
+		$inbox = static function () {
+			return 'mailto:help@reseller.example.com';
 		};
 
-		add_filter( 'srfm_support_contact_url', $bad );
-		$blocked = $method->invoke( Admin::get_instance(), 'notification' );
-		remove_filter( 'srfm_support_contact_url', $bad );
+		add_filter( 'srfm_support_contact_url', $inbox );
+		$mailto = $method->invoke( Admin::get_instance(), 'notification' );
+		remove_filter( 'srfm_support_contact_url', $inbox );
 
-		$this->assertSame( '', $blocked, 'A scheme outside the allowlist must not survive the filter.' );
+		$this->assertSame( 'mailto:help@reseller.example.com', $mailto );
+
+		// Escaped after the filter, so neither renderer has to trust what came
+		// back -- but never down to ''. Contact Support is the only action that
+		// retires these notices and they are dismissible => false, so an empty
+		// destination is an undismissable notice with nothing on it that works.
+		// The unfiltered URL is built here rather than supplied, so it always
+		// escapes.
+		foreach ( [ 'javascript:alert(1)', 'data:text/html,x', '', '   ' ] as $rejected ) {
+			$bad = static function () use ( $rejected ) {
+				return $rejected;
+			};
+
+			add_filter( 'srfm_support_contact_url', $bad );
+			$blocked = $method->invoke( Admin::get_instance(), 'notification' );
+			remove_filter( 'srfm_support_contact_url', $bad );
+
+			$this->assertStringStartsWith(
+				'https://sureforms.com/form/troubleshooting-form/',
+				$blocked,
+				'A filter value that cannot survive escaping must fall back, not blank the only working action.'
+			);
+		}
 	}
 
 	/**

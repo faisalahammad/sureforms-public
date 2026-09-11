@@ -400,7 +400,15 @@ export default () => {
 						? {
 							...prev,
 							details: json.data.details || '',
-							support_url: json.data.support_url || '',
+							// Same fallback as the failure path. A successful
+							// fetch must not end up with less to act on than a
+							// failed one: these notices are not dismissible and
+							// Contact Support is the only thing that retires
+							// them, so an empty destination here is a dead end.
+							support_url:
+									json.data.support_url ||
+									srfm_admin?.support_url ||
+									'',
 							pending: false,
 						  }
 						: prev
@@ -668,6 +676,13 @@ export default () => {
 						     the dialog exists to show. */ }
 								<pre
 									tabIndex={ 0 }
+									// Announced as busy while the payload is in
+									// flight, so a screen reader says the region
+									// is still filling rather than reading the
+									// placeholder as if it were the report.
+									aria-busy={
+										details?.pending ? 'true' : undefined
+									}
 									{ ...( dialogLabels.logRegion && {
 										role: 'region',
 										'aria-label': dialogLabels.logRegion,
@@ -752,8 +767,19 @@ export default () => {
 												href={ safeUrl(
 													details.support_url
 												) }
-												target="_blank"
-												rel="noopener noreferrer"
+												// Not on a mailto: -- it has no
+												// document to open, so _blank
+												// leaves a blank tab behind.
+												// srfm_support_contact_url can
+												// return one, and the sibling
+												// item links already match on
+												// this.
+												{ ...( ! /^mailto:/i.test(
+													details.support_url || ''
+												) && {
+													target: '_blank',
+													rel: 'noopener noreferrer',
+												} ) }
 												onClick={ () => {
 													// Records the click, which is also
 													// what stands the notice down until

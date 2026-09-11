@@ -52,6 +52,48 @@ describe( 'safeUrl', () => {
 		}
 	);
 
+	// A browser trims C0 controls and spaces off both ends and strips tab, LF and
+	// CR from anywhere in the string before it parses the scheme. A check anchored
+	// on the raw string therefore reads a spelling the DOM never sees: every one
+	// of these was returned untouched and ran on click.
+	it.each( [
+		[ 'leading space', ' javascript:alert(1)' ],
+		[ 'leading newline', '\njavascript:alert(1)' ],
+		[ 'leading NUL', '\u0000javascript:alert(1)' ],
+		[ 'tab inside the scheme', 'java\tscript:alert(1)' ],
+		[ 'newline inside the scheme', 'java\nscript:alert(1)' ],
+		[ 'CR inside the scheme', 'java\rscript:alert(1)' ],
+		[ 'both at once', ' java\tscript:alert(1)' ],
+	] )( 'rejects javascript: hidden by a %s', ( _label, url ) => {
+		expect( safeUrl( url ) ).toBeUndefined();
+	} );
+
+	// No scheme to check and a different origin on the other end, so the
+	// schemeless-is-relative branch above must not claim these.
+	it.each( [
+		[ '//evil.test/x' ],
+		[ '\\\\evil.test/x' ],
+		[ ' //evil.test/x' ],
+		[ '/\\evil.test/x' ],
+	] )( 'rejects the protocol-relative %s', ( url ) => {
+		expect( safeUrl( url ) ).toBeUndefined();
+	} );
+
+	it( 'hands back what it checked, not what it was given', () => {
+		// Validating one spelling and returning another is how a scheme check gets
+		// walked past: the caller would bind the untrimmed string.
+		expect( safeUrl( '  https://example.test/x  ' ) ).toBe(
+			'https://example.test/x'
+		);
+	} );
+
+	it( 'still allows a single leading slash', () => {
+		// One slash is a same-origin path. Only two leave the site.
+		expect( safeUrl( '/wp-admin/admin.php?page=sureforms_menu' ) ).toBe(
+			'/wp-admin/admin.php?page=sureforms_menu'
+		);
+	} );
+
 	it( 'returns undefined rather than an empty string, so the caller drops the anchor', () => {
 		// An anchor with href="" is not keyboard focusable and resolves to the
 		// current document, so the guards have to see a falsy value they can act

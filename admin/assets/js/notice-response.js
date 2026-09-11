@@ -538,8 +538,6 @@
 		// revealed by setSupportUrl().
 		const contact = document.createElement( 'a' );
 		contact.className = 'button button-primary srfm-details-contact';
-		contact.target = '_blank';
-		contact.rel = 'noopener noreferrer';
 		contact.textContent = labels.contact || 'Contact Support';
 		contact.hidden = ! supportUrl;
 
@@ -713,6 +711,13 @@
 			 * @return {void}
 			 */
 			setText( next, copyable ) {
+				// Dropped once this dialog is gone. Open, close, open again inside
+				// one round trip and the first response would otherwise write into
+				// the second dialog -- or into a detached node, silently.
+				if ( ! overlay.isConnected ) {
+					return;
+				}
+
 				text = next || '';
 				pre.textContent = text;
 				pre.removeAttribute( 'aria-busy' );
@@ -739,8 +744,23 @@
 			 * @return {void}
 			 */
 			setSupportUrl( next ) {
+				if ( ! overlay.isConnected ) {
+					return;
+				}
+
 				supportUrl = next || '';
 				contact.hidden = ! supportUrl;
+
+				// A mailto: has no document to open, so _blank would leave a blank
+				// tab behind. srfm_support_contact_url can return one, and the
+				// notice's own links already match on this.
+				if ( /^mailto:/i.test( supportUrl ) ) {
+					contact.removeAttribute( 'target' );
+					contact.removeAttribute( 'rel' );
+				} else {
+					contact.target = '_blank';
+					contact.rel = 'noopener noreferrer';
+				}
 
 				if ( supportUrl && ! contact.hasAttribute( 'aria-disabled' ) ) {
 					contact.href = supportUrl;
@@ -801,8 +821,16 @@
 					throw new Error( 'unavailable' );
 				}
 
+				// Same fallback as the failure path below. A successful fetch must
+				// not end up with less to act on than a failed one: these notices
+				// are not dismissible and Contact Support is the only thing that
+				// retires them, so an empty destination here is a dead end.
+				dialog.setSupportUrl(
+					json.data.support_url ||
+						srfmNoticeResponse.supportUrl ||
+						''
+				);
 				dialog.setText( json.data.details || '' );
-				dialog.setSupportUrl( json.data.support_url || '' );
 			} )
 			.catch( function () {
 				// The report is built server-side, so there is nothing to show in

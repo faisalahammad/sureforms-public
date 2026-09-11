@@ -4948,11 +4948,21 @@ CSS;
 		 * @param string $url      Contact form URL, already UTM-tagged.
 		 * @param string $category The failure being reported.
 		 */
-		$url = Helper::get_string_value( apply_filters( 'srfm_support_contact_url', $url, $category ) );
+		$filtered = Helper::get_string_value( apply_filters( 'srfm_support_contact_url', $url, $category ) );
 
 		// Escaped after the filter, not before: the point of escaping here is that
-		// neither renderer has to trust what comes back.
-		return esc_url_raw( $url, [ 'http', 'https' ] );
+		// neither renderer has to trust what comes back. mailto: is allowed because
+		// an inbox is a legitimate destination for a white-label support contact,
+		// and get_action_items() already allows it on the sibling item URLs.
+		$safe = esc_url_raw( $filtered, [ 'http', 'https', 'mailto' ] );
+
+		// Never empty. Contact Support is the only action that retires these
+		// notices and they are dismissible => false, so returning '' for a filter
+		// value that cannot survive escaping leaves an undismissable notice with
+		// nothing on it that works. Falling back to SureForms' own form is worse
+		// for a white-label than their own URL and better than a dead end, and the
+		// unfiltered URL is built here rather than supplied, so it always escapes.
+		return '' !== $safe ? $safe : esc_url_raw( $url, [ 'http', 'https' ] );
 	}
 
 	/**
@@ -5197,7 +5207,11 @@ CSS;
 		$acked_at = Helper::get_integer_value( $failures[ $category ]['acked_at'] ?? 0 );
 
 		if ( $acked_at > 0 ) {
-			$lines[] = 'Previously reported: ' . Helper::get_string_value( wp_date( 'Y-m-d H:i T', $acked_at ) );
+			$lines[] = sprintf(
+				/* translators: %s: date and time of the previous report, in the site's timezone. */
+				__( 'Previously reported: %s', 'sureforms' ),
+				Helper::get_string_value( wp_date( 'Y-m-d H:i T', $acked_at ) )
+			);
 		}
 
 		return implode( "\n", $lines );
