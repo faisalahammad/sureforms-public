@@ -9,7 +9,7 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2026-09-10T10:58:46+00:00\n"
+"POT-Creation-Date: 2026-09-10T10:11:21+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.11.0\n"
 "X-Domain: sureforms\n"
@@ -17,9 +17,9 @@ msgstr ""
 #. Plugin Name of the plugin
 #. Author of the plugin
 #: sureforms.php
-#: admin/admin.php:1197
-#: admin/admin.php:1198
-#: admin/admin.php:3111
+#: admin/admin.php:1152
+#: admin/admin.php:1153
+#: admin/admin.php:3057
 #: inc/abilities/abilities-registrar.php:139
 #: inc/gutenberg-hooks.php:109
 #: inc/page-builders/bricks/elements/form-widget.php:67
@@ -46,62 +46,63 @@ msgstr ""
 msgid "https://sureforms.com/"
 msgstr ""
 
-#: admin/admin.php:597
+#: admin/admin.php:552
 msgid "You are not allowed to update this prompt."
 msgstr ""
 
-#: admin/admin.php:640
+#: admin/admin.php:595
 msgid "Finish setting up your form"
 msgstr ""
 
-#: admin/admin.php:672
+#: admin/admin.php:627
 msgid "Review or edit your form"
 msgstr ""
 
-#: admin/admin.php:673
+#: admin/admin.php:628
+#: admin/admin.php:4144
 msgid "Edit form"
 msgstr ""
 
-#: admin/admin.php:678
+#: admin/admin.php:633
 msgid "Personalize the Thank You message"
 msgstr ""
 
-#: admin/admin.php:679
+#: admin/admin.php:634
 msgid "Edit message"
 msgstr ""
 
-#: admin/admin.php:684
+#: admin/admin.php:639
 msgid "Choose who gets notified of new replies"
 msgstr ""
 
-#: admin/admin.php:685
+#: admin/admin.php:640
 msgid "Set up email"
 msgstr ""
 
-#: admin/admin.php:693
+#: admin/admin.php:648
 msgid "your form"
 msgstr ""
 
 #. translators: %s: form title.
-#: admin/admin.php:696
+#: admin/admin.php:651
 msgid "Finish setting up %s"
 msgstr ""
 
 #. translators: %s: form title.
-#: admin/admin.php:704
+#: admin/admin.php:659
 msgid "View %s (opens in a new tab)"
 msgstr ""
 
-#: admin/admin.php:709
+#: admin/admin.php:664
 msgid "Customize your form to get it ready for real submissions:"
 msgstr ""
 
-#: admin/admin.php:1120
+#: admin/admin.php:1075
 msgid "Get SureForms Pro"
 msgstr ""
 
-#: admin/admin.php:1210
-#: admin/admin.php:1211
+#: admin/admin.php:1165
+#: admin/admin.php:1166
 #: assets/build/dashboard.js:172
 #: assets/build/entries.js:172
 #: assets/build/forms.js:172
@@ -116,9 +117,9 @@ msgstr ""
 msgid "Dashboard"
 msgstr ""
 
-#: admin/admin.php:1228
-#: admin/admin.php:1229
-#: admin/admin.php:1661
+#: admin/admin.php:1183
+#: admin/admin.php:1184
+#: admin/admin.php:1616
 #: inc/compatibility/multilingual/string-collector.php:236
 #: inc/compatibility/multilingual/string-collector.php:245
 #: inc/compatibility/multilingual/string-collector.php:313
@@ -136,8 +137,9 @@ msgstr ""
 msgid "Settings"
 msgstr ""
 
-#: admin/admin.php:1281
-#: admin/admin.php:1282
+#: admin/admin.php:1236
+#: admin/admin.php:1237
+#: admin/admin.php:4366
 #: assets/build/blocks.js:172
 #: assets/build/dashboard.js:172
 #: assets/build/entries.js:172
@@ -145,42 +147,42 @@ msgstr ""
 msgid "Upgrade"
 msgstr ""
 
-#: admin/admin.php:1297
+#: admin/admin.php:1252
 msgid "Quiz Entries"
 msgstr ""
 
-#: admin/admin.php:1298
-#: admin/admin.php:1897
+#: admin/admin.php:1253
+#: admin/admin.php:1851
 #: assets/build/formEditor.js:172
 msgid "Quizzes"
 msgstr ""
 
-#: admin/admin.php:1300
-#: admin/admin.php:1333
-#: admin/admin.php:1366
+#: admin/admin.php:1255
+#: admin/admin.php:1288
+#: admin/admin.php:1321
 #: assets/build/settings.js:172
 msgid "New"
 msgstr ""
 
-#: admin/admin.php:1330
-#: admin/admin.php:1331
-#: admin/admin.php:1902
+#: admin/admin.php:1285
+#: admin/admin.php:1286
+#: admin/admin.php:1856
 msgid "Survey Reports"
 msgstr ""
 
-#: admin/admin.php:1363
-#: admin/admin.php:1364
-#: admin/admin.php:1907
+#: admin/admin.php:1318
+#: admin/admin.php:1319
+#: admin/admin.php:1861
 msgid "Partial Entries"
 msgstr ""
 
-#: admin/admin.php:1396
-#: admin/admin.php:1397
+#: admin/admin.php:1351
+#: admin/admin.php:1352
 msgid "SMTP"
 msgstr ""
 
-#: admin/admin.php:1459
-#: admin/admin.php:1460
+#: admin/admin.php:1414
+#: admin/admin.php:1415
 #: assets/build/dashboard.js:172
 #: assets/build/entries.js:172
 #: assets/build/forms.js:172
@@ -194,8 +196,8 @@ msgstr ""
 msgid "Learn"
 msgstr ""
 
-#: admin/admin.php:1488
-#: admin/admin.php:1489
+#: admin/admin.php:1443
+#: admin/admin.php:1444
 #: inc/post-types.php:274
 #: assets/build/dashboard.js:172
 #: assets/build/entries.js:172
@@ -210,15 +212,15 @@ msgstr ""
 msgid "Forms"
 msgstr ""
 
-#: admin/admin.php:1497
-#: admin/admin.php:1498
+#: admin/admin.php:1452
+#: admin/admin.php:1453
 #: inc/post-types.php:270
 msgid "New Form"
 msgstr ""
 
-#: admin/admin.php:1506
-#: admin/admin.php:1507
-#: admin/admin.php:3430
+#: admin/admin.php:1461
+#: admin/admin.php:1462
+#: admin/admin.php:3376
 #: inc/generate-form-markup.php:211
 #: inc/generate-form-markup.php:224
 #: inc/global-settings/email-summary.php:225
@@ -235,8 +237,8 @@ msgstr ""
 msgid "Entries"
 msgstr ""
 
-#: admin/admin.php:1516
-#: admin/admin.php:1517
+#: admin/admin.php:1471
+#: admin/admin.php:1472
 #: assets/build/dashboard.js:172
 #: assets/build/entries.js:172
 #: assets/build/forms.js:172
@@ -251,15 +253,15 @@ msgid "Payments"
 msgstr ""
 
 #. Translators: Post Title.
-#: admin/admin.php:1749
+#: admin/admin.php:1704
 msgid "Edit %1$s"
 msgstr ""
 
-#: admin/admin.php:1826
+#: admin/admin.php:1780
 msgid "Activating..."
 msgstr ""
 
-#: admin/admin.php:1827
+#: admin/admin.php:1781
 #: assets/build/dashboard.js:172
 #: assets/build/entries.js:172
 #: assets/build/formEditor.js:172
@@ -274,129 +276,130 @@ msgstr ""
 msgid "Activated"
 msgstr ""
 
-#: admin/admin.php:1828
+#: admin/admin.php:1782
 #: assets/build/formEditor.js:172
 #: assets/build/settings.js:172
 msgid "Activate"
 msgstr ""
 
-#: admin/admin.php:1829
+#: admin/admin.php:1783
 msgid "Installing..."
 msgstr ""
 
-#: admin/admin.php:1830
+#: admin/admin.php:1784
 msgid "Installed"
 msgstr ""
 
 #. translators: %1$s: SureForms version, %2$s: SureForms Pro Plugin Name, %3$s: SureForms Pro Version.
-#: admin/admin.php:2327
+#: admin/admin.php:2281
 msgid "SureForms %1$s requires minimum %2$s %3$s to work properly. Please update to the latest version."
 msgstr ""
 
-#: admin/admin.php:2340
+#: admin/admin.php:2294
 msgid "Update Now"
 msgstr ""
 
-#: admin/admin.php:2387
-#: admin/admin.php:2476
+#: admin/admin.php:2341
+#: admin/admin.php:2430
 msgid "Your SureForms database is up to date. New form entries will be saved as usual."
 msgstr ""
 
-#: admin/admin.php:2401
-#: admin/admin.php:2485
+#: admin/admin.php:2355
+#: admin/admin.php:2439
 #: inc/rest-api.php:1447
 msgid "SureForms could not finish updating the database. Your hosting may not allow SureForms to create database tables — please contact your hosting provider or SureForms support."
 msgstr ""
 
-#: admin/admin.php:2404
+#: admin/admin.php:2358
 msgid "Contact support"
 msgstr ""
 
-#: admin/admin.php:2424
+#: admin/admin.php:2378
 msgid "Database update needed"
 msgstr ""
 
-#: admin/admin.php:2430
+#: admin/admin.php:2384
 msgid "Fix now"
 msgstr ""
 
-#: admin/admin.php:2499
+#: admin/admin.php:2453
 msgid "SureForms — database update needed"
 msgstr ""
 
-#: admin/admin.php:2504
+#: admin/admin.php:2458
 msgid "Update database"
 msgstr ""
 
-#: admin/admin.php:2524
+#: admin/admin.php:2478
 msgid "You do not have permission to update the database."
 msgstr ""
 
 #. translators: %1$s: Opening anchor tag with URL, %2$s: Closing anchor tag, %3$s: SureForms Pro Plugin Name.
-#: admin/admin.php:2618
+#: admin/admin.php:2572
 msgid "Please %1$sactivate%2$s your copy of %3$s to get new features, access support, receive update notifications, and more."
 msgstr ""
 
 #. translators: %1$s: SureForms version, %2$s: SureForms Pro Plugin Name, %3$s: SureForms Pro Version, %4$s: Anchor tag open, %5$s: Closing anchor tag.
-#: admin/admin.php:2636
+#: admin/admin.php:2590
 msgid "SureForms %1$s requires minimum %2$s %3$s to work properly. Please update to the latest version from %4$shere%5$s."
 msgstr ""
 
-#: admin/admin.php:2681
+#: admin/admin.php:2635
 msgid "Amazing! SureForms is powering your forms and submissions - let's keep growing together!"
 msgstr ""
 
-#: admin/admin.php:2682
+#: admin/admin.php:2636
 msgid "If SureForms has been helpful, would you mind taking a moment to leave a 5-star review on WordPress.org?"
 msgstr ""
 
-#: admin/admin.php:2685
+#: admin/admin.php:2639
 msgid "Rate SureForms"
 msgstr ""
 
-#: admin/admin.php:2693
-#: admin/admin.php:2757
+#: admin/admin.php:2647
+#: admin/admin.php:2711
 msgid "Maybe later"
 msgstr ""
 
-#: admin/admin.php:2699
+#: admin/admin.php:2653
 msgid "I already did"
 msgstr ""
 
-#: admin/admin.php:2748
+#: admin/admin.php:2702
 msgid "SureForms is ready to power your forms — explore what's possible!"
 msgstr ""
 
-#: admin/admin.php:2749
+#: admin/admin.php:2703
 msgid "Manage your forms, track submissions, and discover features like AI Form Builder, payment integrations, and more from the SureForms dashboard."
 msgstr ""
 
-#: admin/admin.php:2752
+#: admin/admin.php:2706
 msgid "Go to Dashboard"
 msgstr ""
 
-#: admin/admin.php:2763
+#: admin/admin.php:2717
 msgid "I already know"
 msgstr ""
 
-#: admin/admin.php:2820
+#: admin/admin.php:2774
 msgid "Previous notice"
 msgstr ""
 
-#: admin/admin.php:2821
+#: admin/admin.php:2775
 msgid "Next notice"
 msgstr ""
 
 #. translators: 1: current position, 2: total notices.
-#: admin/admin.php:2823
+#: admin/admin.php:2777
 msgid "%1$d of %2$d"
 msgstr ""
 
-#: admin/admin.php:2843
-#: admin/admin.php:3002
-#: admin/admin.php:3040
-#: admin/admin.php:3061
-#: admin/admin.php:3384
+#: admin/admin.php:2794
+#: admin/admin.php:2948
+#: admin/admin.php:2986
+#: admin/admin.php:3007
+#: admin/admin.php:3330
+#: admin/admin.php:3685
 #: inc/admin-ajax.php:164
 #: inc/payments/admin/admin-handler.php:638
 #: inc/payments/stripe/admin-stripe-handler.php:80
@@ -404,78 +407,314 @@ msgstr ""
 msgid "Invalid nonce."
 msgstr ""
 
-#: admin/admin.php:2848
-#: admin/admin.php:2998
-#: admin/admin.php:3036
-#: admin/admin.php:3057
-#: admin/admin.php:3388
+#: admin/admin.php:2799
+#: admin/admin.php:2944
+#: admin/admin.php:2982
+#: admin/admin.php:3003
+#: admin/admin.php:3334
+#: admin/admin.php:3680
 msgid "Unauthorized user."
 msgstr ""
 
-#: admin/admin.php:2907
+#: admin/admin.php:2852
+#: admin/admin.php:3692
 msgid "Invalid parameters."
 msgstr ""
 
 #. translators: 1: opening span, 2: opening strong (inline), 3: closing strong, 4: closing span, 5: opening strong (block), 6: closing strong
-#: admin/admin.php:3007
+#: admin/admin.php:2953
 msgid "%1$sGet started by %2$sbuilding your first form%3$s.%4$s%5$sExperience the power of our intuitive AI Form Builder%6$s"
 msgstr ""
 
-#: admin/admin.php:3018
+#: admin/admin.php:2964
 msgid "SureForms is waiting for you!"
 msgstr ""
 
-#: admin/admin.php:3020
+#: admin/admin.php:2966
 msgid "Build My First Form"
 msgstr ""
 
-#: admin/admin.php:3021
+#: admin/admin.php:2967
+#: admin/admin.php:3514
 msgid "Dismiss"
 msgstr ""
 
-#: admin/admin.php:3129
+#: admin/admin.php:3075
 msgid "SureForms AI Quick Draft"
 msgstr ""
 
-#: admin/admin.php:3148
+#: admin/admin.php:3094
 msgid "Describe the form and let SureForms AI generate it for you."
 msgstr ""
 
-#: admin/admin.php:3151
+#: admin/admin.php:3097
 msgid "Describe your form"
 msgstr ""
 
-#: admin/admin.php:3158
+#: admin/admin.php:3104
 msgid "Example: Create a contact form with name, email, phone, and message fields."
 msgstr ""
 
-#: admin/admin.php:3162
+#: admin/admin.php:3108
 #: inc/page-builders/elementor/form-widget.php:346
 #: assets/build/dashboard.js:2
 msgid "Create New Form"
 msgstr ""
 
-#: admin/admin.php:3199
+#: admin/admin.php:3145
 msgid "Redirecting..."
 msgstr ""
 
-#: admin/admin.php:3417
+#: admin/admin.php:3363
 msgid "Recent Entries"
 msgstr ""
 
-#: admin/admin.php:3418
+#: admin/admin.php:3364
 msgid "( Last 7 days )"
 msgstr ""
 
-#: admin/admin.php:3421
+#: admin/admin.php:3367
 msgid "View"
 msgstr ""
 
-#: admin/admin.php:3429
+#: admin/admin.php:3375
 #: inc/global-settings/email-summary.php:224
 #: assets/build/entries.js:172
 #: assets/build/payments.js:172
 msgid "Form Name"
+msgstr ""
+
+#: admin/admin.php:3533
+msgid "You do not have permission to do this."
+msgstr ""
+
+#. translators: %s: form title.
+#: admin/admin.php:3758
+msgid "We noticed a form submission failure on %s."
+msgstr ""
+
+#: admin/admin.php:3759
+msgid "We noticed a form submission failure."
+msgstr ""
+
+#: admin/admin.php:3760
+msgid "Visitors may not be able to reach you, and their entries were not saved."
+msgstr ""
+
+#. translators: %s: form title.
+#: admin/admin.php:3765
+msgid "We noticed a notification failure on %s."
+msgstr ""
+
+#: admin/admin.php:3766
+msgid "We noticed a notification failure."
+msgstr ""
+
+#: admin/admin.php:3767
+msgid "The entry was saved, but we could not send the email about it. New entries may be coming in without you knowing."
+msgstr ""
+
+#. translators: %s: form title.
+#: admin/admin.php:3782
+msgid "We noticed an integration failure on %s."
+msgstr ""
+
+#: admin/admin.php:3783
+msgid "We noticed an integration failure."
+msgstr ""
+
+#: admin/admin.php:3784
+msgid "The entry was saved, but we could not send it to a connected service."
+msgstr ""
+
+#: admin/admin.php:3804
+#: assets/build/templatePicker.js:172
+msgid "Contact Support"
+msgstr ""
+
+#: admin/admin.php:3814
+#: admin/admin.php:3842
+msgid "Help Me Fix"
+msgstr ""
+
+#. translators: %s: caching plugin name.
+#: admin/admin.php:3838
+msgid "%s may interfere with your forms."
+msgstr ""
+
+#: admin/admin.php:3841
+msgid "Caching can show visitors an old copy of your form, or load its scripts in the wrong order."
+msgstr ""
+
+#: admin/admin.php:3887
+msgid "SureForms found your form entries stored under a different database table prefix. Reconnecting them takes a moment, and your existing entries will be kept."
+msgstr ""
+
+#: admin/admin.php:3890
+msgid "SureForms needs to update your database before it can save new form entries. This only takes a moment and will not change your forms or existing content. Entries submitted before now cannot be recovered from here."
+msgstr ""
+
+#: admin/admin.php:4133
+msgid "We’ve already created this form for you. Finish customising it so it’s ready to collect real submissions."
+msgstr ""
+
+#. translators: %s: form name.
+#: admin/admin.php:4138
+msgid "Finish setting up “%s”"
+msgstr ""
+
+#: admin/admin.php:4151
+msgid "Edit the Thank You message"
+msgstr ""
+
+#: admin/admin.php:4157
+msgid "Set where replies go"
+msgstr ""
+
+#: admin/admin.php:4307
+msgid "Use Conditional Logic to show only what matters"
+msgstr ""
+
+#: admin/admin.php:4308
+msgid "Split your form into steps to keep it easy"
+msgstr ""
+
+#: admin/admin.php:4309
+msgid "Let people upload files directly to your form"
+msgstr ""
+
+#: admin/admin.php:4310
+msgid "Turn responses into downloadable PDFs automatically"
+msgstr ""
+
+#: admin/admin.php:4311
+msgid "Let users sign with a simple signature field"
+msgstr ""
+
+#: admin/admin.php:4312
+msgid "Connect your form to other tools using webhooks"
+msgstr ""
+
+#: admin/admin.php:4313
+msgid "Use Conversational Forms for a chat-like experience"
+msgstr ""
+
+#: admin/admin.php:4314
+msgid "Let users register or log in through your form"
+msgstr ""
+
+#: admin/admin.php:4315
+msgid "Build forms that create WordPress user accounts"
+msgstr ""
+
+#: admin/admin.php:4316
+msgid "Add calculations to auto-total scores or prices"
+msgstr ""
+
+#: admin/admin.php:4538
+msgid "Debug log: no entries recorded."
+msgstr ""
+
+#. translators: 1: entries shown, 2: entries recorded.
+#: admin/admin.php:4542
+msgid "Debug log (most recent %1$d of %2$d entries)"
+msgstr ""
+
+#: admin/admin.php:4553
+msgid "Older entries were left out to keep this email within the length a mail client accepts. The full log can be downloaded from SureForms → Settings → General."
+msgstr ""
+
+#. translators: %s: site host.
+#: admin/admin.php:4589
+msgid "SureForms: form submissions are failing on %s"
+msgstr ""
+
+#. translators: %s: site host.
+#: admin/admin.php:4591
+msgid "SureForms has recorded form submissions on %s that could not be completed."
+msgstr ""
+
+#. translators: %s: site host.
+#: admin/admin.php:4595
+msgid "SureForms: notification emails are not being sent on %s"
+msgstr ""
+
+#. translators: %s: site host.
+#: admin/admin.php:4597
+msgid "SureForms saved entries on %s but could not send the notification emails for them."
+msgstr ""
+
+#. translators: %s: site host.
+#: admin/admin.php:4601
+msgid "SureForms: an integration is not receiving entries on %s"
+msgstr ""
+
+#. translators: %s: site host.
+#: admin/admin.php:4603
+msgid "SureForms saved entries on %s but could not pass them to a connected service."
+msgstr ""
+
+#. translators: %s: site host.
+#: admin/admin.php:4613
+msgid "SureForms: a problem with the forms on %s"
+msgstr ""
+
+#. translators: %s: site host.
+#: admin/admin.php:4615
+msgid "SureForms has recorded a problem with the forms on %s."
+msgstr ""
+
+#. translators: %d: number of failed submissions.
+#: admin/admin.php:4640
+msgid "SureForms has recorded %d form submission that could not be completed."
+msgid_plural "SureForms has recorded %d form submissions that could not be completed."
+msgstr[0] ""
+msgstr[1] ""
+
+#. translators: %d: number of failed notifications.
+#: admin/admin.php:4652
+msgid "SureForms saved %d entry but could not send the notification email for it."
+msgid_plural "SureForms saved %d entries but could not send the notification emails for them."
+msgstr[0] ""
+msgstr[1] ""
+
+#. translators: %d: number of failed integration hand-offs.
+#: admin/admin.php:4664
+msgid "SureForms saved %d entry but could not pass it to a connected service."
+msgid_plural "SureForms saved %d entries but could not pass them to a connected service."
+msgstr[0] ""
+msgstr[1] ""
+
+#. translators: %d: number of recorded problems.
+#: admin/admin.php:4676
+msgid "SureForms has recorded %d problem with the forms on this site."
+msgid_plural "SureForms has recorded %d problems with the forms on this site."
+msgstr[0] ""
+msgstr[1] ""
+
+#: admin/admin.php:4715
+msgid "Hello SureForms support,"
+msgstr ""
+
+#. translators: %s: form title.
+#: admin/admin.php:4726
+msgid "Form: %s"
+msgstr ""
+
+#: admin/admin.php:4739
+msgid "Site details"
+msgstr ""
+
+#: admin/admin.php:4742
+msgid "not active"
+msgstr ""
+
+#: admin/admin.php:4745
+msgid "none detected"
+msgstr ""
+
+#: admin/admin.php:4746
+msgid "none recorded"
 msgstr ""
 
 #: inc/abilities/abilities-registrar.php:107
@@ -12957,7 +13196,6 @@ msgid "Upgrade to Unlock"
 msgstr ""
 
 #: assets/build/blocks.js:172
-#: assets/build/dashboard.js:172
 #: modules/gutenberg/build/blocks.js:4
 msgid "Close"
 msgstr ""
@@ -13850,23 +14088,6 @@ msgid "Ignore"
 msgstr ""
 
 #: assets/build/dashboard.js:172
-msgid "Details"
-msgstr ""
-
-#: assets/build/dashboard.js:172
-msgid "Copied"
-msgstr ""
-
-#: assets/build/dashboard.js:172
-msgid "Copy details"
-msgstr ""
-
-#: assets/build/dashboard.js:172
-#: assets/build/templatePicker.js:172
-msgid "Contact Support"
-msgstr ""
-
-#: assets/build/dashboard.js:172
 #: assets/build/entries.js:172
 #: assets/build/forms.js:172
 #: assets/build/learn.js:172
@@ -14333,6 +14554,10 @@ msgstr ""
 
 #: assets/build/dashboard.js:172
 msgid "SureForms %s"
+msgstr ""
+
+#: assets/build/dashboard.js:172
+msgid "Copied"
 msgstr ""
 
 #: assets/build/dashboard.js:172
