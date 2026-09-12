@@ -388,6 +388,94 @@ class Test_Client_Logger extends TestCase {
 	}
 
 	/**
+	 * An after-submission failure the browser only guessed at raises no notice.
+	 *
+	 * The step runs after the entry is saved. When the client reports it without a
+	 * status it is reporting an abandoned fetch -- the page unloading behind a
+	 * redirect confirmation, which is what keepalive exists to survive -- and that
+	 * says nothing about whether the server ran srfm_after_submission_process. It is
+	 * guarded by is_after_submission_process_triggered and usually has.
+	 *
+	 * This shipped as type 'error', which is_fault() counts unconditionally, so every
+	 * Safari "TypeError: Load failed" raised a non-dismissible notice reading
+	 * "Visitors may not be able to reach you, and their entries were not saved" about
+	 * entries that were saved and visitors who saw the success message.
+	 */
+	public function test_a_browser_side_after_submission_failure_is_not_a_fault() {
+		$entry = Client_Logger::sanitize_entry(
+			[
+				'type'    => 'after_submission',
+				'form_id' => 4355,
+				'message' => 'After-submission step failed: TypeError: Load failed',
+			]
+		);
+
+		$this->assertNotEmpty( $entry, 'The type must survive sanitisation, or it is never logged at all.' );
+		$this->assertFalse(
+			Client_Logger::is_fault( $entry ),
+			'A fetch the browser abandoned is not evidence the server did not do the work.'
+		);
+	}
+
+	/**
+	 * A server-confirmed after-submission failure is a fault, and an integration one.
+	 *
+	 * srfm_after_submission_process is where integrations and webhooks hook in, so a
+	 * 5xx there means a third party did not receive the entry -- which is what the
+	 * integration notice says. The submission notice says entries were not saved, and
+	 * by this point they have been.
+	 */
+	public function test_a_server_confirmed_after_submission_failure_is_an_integration_fault() {
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::clear();
+
+		$entry = Client_Logger::sanitize_entry(
+			[
+				'type'    => 'after_submission',
+				'status'  => 500,
+				'form_id' => 4355,
+				'message' => 'After-submission step responded 500',
+			]
+		);
+
+		$this->assertTrue( Client_Logger::is_fault( $entry ), 'The server said it failed.' );
+
+		Client_Logger::append( $entry );
+
+		$open = Client_Logger::get_open_failures();
+
+		$this->assertArrayHasKey( 'integration', $open, 'A failed after-submission step is an integration failure.' );
+		$this->assertArrayNotHasKey(
+			'submission',
+			$open,
+			'It must not claim the entry was never saved -- it was saved before this step ran.'
+		);
+
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::clear();
+	}
+
+	/**
+	 * A captcha stop is the visitor's to clear, and raises nothing.
+	 *
+	 * Pinned because it is the precedent the after-submission rule above follows, and
+	 * because "Please verify that you are not a robot" is among the most common lines
+	 * in a real log -- counting it would tell healthy sites to contact support.
+	 */
+	public function test_a_blocked_entry_is_not_a_fault() {
+		$entry = Client_Logger::sanitize_entry(
+			[
+				'type'    => 'blocked',
+				'form_id' => 4355,
+				'message' => 'Blocked before submit: Please verify that you are not a robot.',
+			]
+		);
+
+		$this->assertNotEmpty( $entry );
+		$this->assertFalse( Client_Logger::is_fault( $entry ) );
+	}
+
+	/**
 	 * A site on a non-default port keeps its own stack frames.
 	 *
 	 * The URL pattern captures the whole authority, so a frame from a site served on

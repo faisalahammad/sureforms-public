@@ -169,7 +169,14 @@ class Client_Logger {
 			return true;
 		}
 
-		if ( 'network' !== $type ) {
+		// 'after_submission' runs after the entry is already saved, so it is only a
+		// fault when the server said so. A browser-side failure there -- an aborted
+		// fetch as the page unloads, which is what a redirect confirmation does and
+		// what `keepalive` exists to survive -- tells us nothing about whether the
+		// work ran: the endpoint is guarded by is_after_submission_process_triggered
+		// and usually has. Safari spells that abort "TypeError: Load failed", and
+		// alarming on it reported healthy sites as broken.
+		if ( ! in_array( $type, [ 'network', 'after_submission' ], true ) ) {
 			return false;
 		}
 
@@ -449,9 +456,18 @@ class Client_Logger {
 		// on a badly broken site those are exactly the conditions that occur.
 		// A notification or integration failure records its own category at the call
 		// site; everything else reaching here is the submission itself.
-		if ( self::is_fault( $entry ) && 'message' !== ( $entry['type'] ?? '' ) ) {
+		$type = Helper::get_string_value( $entry['type'] ?? '' );
+
+		if ( self::is_fault( $entry ) && 'message' !== $type ) {
+			// The after-submission step runs on an entry that is already saved and
+			// fires srfm_after_submission_process, which is where integrations and
+			// webhooks hook in. Calling that a submission failure told the site owner
+			// "their entries were not saved" about entries that were -- the wrong
+			// message on the one notice that cannot be dismissed. The category is
+			// derived here rather than taken from the entry: the client names what
+			// happened, the server decides what it means.
 			self::record_failure(
-				'submission',
+				'after_submission' === $type ? 'integration' : 'submission',
 				Helper::get_integer_value( $entry['form_id'] ?? 0 ),
 				Helper::get_string_value( $entry['form_title'] ?? '' )
 			);
@@ -626,7 +642,7 @@ class Client_Logger {
 	 * @return array<string,mixed> Empty when nothing usable survived.
 	 */
 	public static function sanitize_entry( array $raw ) {
-		$allowed_types = [ 'network', 'response', 'error', 'message', 'blocked' ];
+		$allowed_types = [ 'network', 'response', 'error', 'message', 'blocked', 'after_submission' ];
 		$type          = isset( $raw['type'] ) ? sanitize_key( Helper::get_string_value( $raw['type'] ) ) : '';
 
 		if ( ! in_array( $type, $allowed_types, true ) ) {
