@@ -200,6 +200,25 @@ class Client_Logger {
 	 * @return void
 	 */
 	public static function record_failure( $category, $form_id = 0, $form_title = '' ) {
+		// Logging off means nothing is recorded, not merely nothing displayed.
+		//
+		// The display side was already gated -- get_action_items() skips the
+		// first-party items and has_action_item_warnings() returns false -- but the
+		// counter kept being written, from the two call sites in form-submit.php
+		// that sit beside an append() the enabled check does stop. So a site with
+		// logging switched off still accumulated failure state, and switching
+		// logging on surfaced every fault recorded while it was off, behind a View
+		// details report whose debug log is empty because nothing was written.
+		//
+		// Gated here rather than at the call sites, for the reason append() states:
+		// the guard belongs on the function that writes, not on today's callers.
+		// clear_category() and the acknowledge helpers are deliberately left
+		// ungated -- they only remove state, and must keep working so nothing is
+		// stranded by the toggle.
+		if ( ! self::is_enabled() ) {
+			return;
+		}
+
 		if ( ! in_array( $category, self::CATEGORIES, true ) ) {
 			return;
 		}

@@ -388,6 +388,66 @@ class Test_Client_Logger extends TestCase {
 	}
 
 	/**
+	 * Logging off records nothing, not merely displays nothing.
+	 *
+	 * The display side was already gated. The counter was not: the two record_failure()
+	 * calls in form-submit.php sit beside an append() that the enabled check does stop,
+	 * so a site with logging switched off kept accumulating failure state invisibly --
+	 * and switching logging back on surfaced every fault from the quiet period, behind a
+	 * View details report whose debug log is empty because nothing was ever written.
+	 *
+	 * Asserted across the toggle rather than in one state, because "no notice right now"
+	 * was already true and is what hid this.
+	 */
+	public function test_nothing_is_recorded_while_logging_is_disabled() {
+		$general = get_option( 'srfm_general_settings_options', [] );
+		$general = is_array( $general ) ? $general : [];
+
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::clear();
+
+		update_option( 'srfm_general_settings_options', array_merge( $general, [ 'srfm_enable_logs' => false ] ) );
+		$this->assertFalse( Client_Logger::is_enabled(), 'Fixture must actually switch logging off.' );
+
+		// Every path that reports a fault: the server-side categories called directly
+		// from form-submit.php, and the client entries that route through append().
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
+		Client_Logger::record_failure( 'integration', 42, 'Contact Form' );
+		Client_Logger::append(
+			Client_Logger::sanitize_entry(
+				[
+					'type'    => 'network',
+					'status'  => 500,
+					'form_id' => 42,
+					'message' => 'Submission responded 500',
+				]
+			)
+		);
+
+		$this->assertSame( 0, Client_Logger::get_file_size(), 'Nothing may be written to the log.' );
+		$this->assertSame( [], Client_Logger::get_failures(), 'Nothing may be counted either.' );
+		$this->assertSame( [], Client_Logger::get_open_failures(), 'So there is nothing to raise a notice about.' );
+
+		// Switching logging on must not surface a backlog from the quiet period.
+		update_option( 'srfm_general_settings_options', array_merge( $general, [ 'srfm_enable_logs' => true ] ) );
+
+		$this->assertTrue( Client_Logger::is_enabled() );
+		$this->assertSame(
+			[],
+			Client_Logger::get_open_failures(),
+			'Turning logging on must not reveal faults from while it was off -- there is no log behind them.'
+		);
+
+		// And recording works again, so the guard is not simply always denying.
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
+		$this->assertArrayHasKey( 'notification', Client_Logger::get_open_failures() );
+
+		update_option( 'srfm_general_settings_options', $general );
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::clear();
+	}
+
+	/**
 	 * An after-submission failure the browser only guessed at raises no notice.
 	 *
 	 * The step runs after the entry is saved. When the client reports it without a
