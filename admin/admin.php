@@ -3682,18 +3682,33 @@ JS;
 	}
 
 	/**
-	 * Whether anything is currently wrong enough to warrant a notice.
+	 * Whether a first-party warning is currently on screen.
 	 *
-	 * Deliberately re-derives rather than calling get_action_items(), which
-	 * records an impression as a side effect and must not run from a show_if
-	 * callback. It re-derives the two first-party conditions only -- a persistent
-	 * failure and an active caching plugin -- so an item contributed through
-	 * `srfm_action_items` does not suppress the notices this gates.
+	 * Asked from the show_if of the rating, Getting Started and Thank You notices,
+	 * all of which are gated on nothing being wrong. "Wrong" has to mean the same
+	 * thing here as it does to the person looking at the screen.
 	 *
-	 * Returns false with logging disabled, which is what makes the rating,
-	 * getting-started and Thank-You notices eligible again on a site that has
-	 * turned this surface off. Intended: those notices are gated on nothing being
-	 * wrong, and with the surface off there is nothing being reported.
+	 * It used to re-state the conditions instead of reading them, and the
+	 * restatement was narrower than the display: has_persistent_failures() reads
+	 * the `submission` counter alone, while the notices and the Form Checks panel
+	 * warn on any open failure in any of the three categories. So an open
+	 * notification or integration failure left this false, and the review ask
+	 * appeared directly beneath "We noticed a notification failure on Contact
+	 * Form". Submission was covered only incidentally, by FAULT_THRESHOLD being 1 --
+	 * raise that and it would have joined them.
+	 *
+	 * Derived from get_first_party_action_items() now, which is the thing that
+	 * builds those warnings, so the gate cannot drift from the display again.
+	 *
+	 * Two constraints kept from the previous version. It must not call
+	 * get_action_items(): that records an impression as a side effect and must
+	 * never run from a show_if. And it reads the first-party set specifically, so
+	 * an item contributed through `srfm_action_items` cannot suppress notices that
+	 * have nothing to do with it.
+	 *
+	 * Returns false with logging disabled, which is what makes those notices
+	 * eligible again on a site that has turned this surface off. Intended: with the
+	 * surface off there is nothing being reported.
 	 *
 	 * @since 2.12.6
 	 * @return bool
@@ -3703,17 +3718,21 @@ JS;
 			return false;
 		}
 
-		if ( Client_Logger::has_persistent_failures() ) {
-			return true;
+		foreach ( $this->get_first_party_action_items() as $item ) {
+			if ( ! is_array( $item ) ) {
+				continue;
+			}
+
+			$status = Helper::get_string_value( $item['status'] ?? '' );
+
+			// Matches the renderers: 'success' is a passing check and an empty
+			// status is not a warning either, so neither suppresses anything.
+			if ( 'success' !== $status && '' !== $status ) {
+				return true;
+			}
 		}
 
-		if ( '' === Helper::get_active_caching_plugin() ) {
-			return false;
-		}
-
-		$dismissed = Helper::get_array_value( Helper::get_srfm_option( 'dismissed_action_items', [] ) );
-
-		return ! in_array( 'caching_plugin', $dismissed, true );
+		return false;
 	}
 
 	/**
