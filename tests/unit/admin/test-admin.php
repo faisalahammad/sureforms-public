@@ -2372,6 +2372,77 @@ class Test_Admin extends TestCase {
 	}
 
 	/**
+	 * Every category that puts a warning on screen also silences the review ask.
+	 *
+	 * The gate used to re-state its conditions rather than read them, and the
+	 * restatement was narrower than the display: has_persistent_failures() reads the
+	 * `submission` counter alone, while the notices warn on any open failure in any
+	 * of the three categories. So "Rate SureForms 5 stars" rendered directly beneath
+	 * "We noticed a notification failure on Contact Form".
+	 *
+	 * Submission passed before this fix, but only because FAULT_THRESHOLD is 1. It is
+	 * covered here anyway so raising that threshold cannot quietly reopen the hole.
+	 *
+	 * Asserted against get_action_items() in the same breath, because the defect was
+	 * the gate and the display disagreeing -- checking the gate alone is what let it
+	 * through.
+	 */
+	public function test_every_warning_category_suppresses_the_engagement_notices() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+
+		// Caching advice out of the way, so the fault is the only thing in play.
+		Helper::update_srfm_option( 'dismissed_action_items', [ 'caching_plugin' ] );
+
+		$quiet = static function () {
+			return [ 'akismet/akismet.php' ];
+		};
+
+		add_filter( 'pre_option_active_plugins', $quiet );
+
+		foreach ( [ 'notification', 'integration', 'submission' ] as $category ) {
+			delete_option( Client_Logger::FAILURES_OPTION );
+			Client_Logger::record_failure( $category, 42, 'Contact Form' );
+			Admin::reset_action_items_cache();
+
+			$on_screen = 0;
+
+			foreach ( Admin::get_instance()->get_action_items() as $item ) {
+				$status = Helper::get_string_value( is_array( $item ) ? $item['status'] ?? '' : '' );
+
+				if ( 'success' !== $status && '' !== $status ) {
+					$on_screen++;
+				}
+			}
+
+			$this->assertGreaterThan(
+				0,
+				$on_screen,
+				sprintf( 'Fixture check: a %s failure must actually render a warning.', $category )
+			);
+
+			$this->assertTrue(
+				Admin::get_instance()->has_action_item_warnings(),
+				sprintf( 'A %s failure is on screen, so the review ask must stand down.', $category )
+			);
+		}
+
+		// A healthy site still gets asked, so the gate is not simply stuck on.
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Admin::reset_action_items_cache();
+
+		$this->assertFalse(
+			Admin::get_instance()->has_action_item_warnings(),
+			'With nothing wrong the engagement notices must still be eligible.'
+		);
+
+		remove_filter( 'pre_option_active_plugins', $quiet );
+
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Admin::reset_action_items_cache();
+	}
+
+	/**
 	 * Dismissing an advisory must clear the warning state, or the engagement
 	 * notices stay suppressed forever on a site with a caching plugin.
 	 */
