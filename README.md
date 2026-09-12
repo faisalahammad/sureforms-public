@@ -426,7 +426,7 @@ Visit the [SureForms features page](https://sureforms.com/features/?utm_source=w
 You can report security issues through our [Bug Bounty Program](https://brainstormforce.com/bug-bounty-program/). We collaborate with Patchstack to validate, triage, and handle security reports.
 
 ## Changelog ##
-### 2.12.7 - 11th September 2026 ###
+### 2.12.7 - 12th September 2026 ###
 * Improvement: Submission failure notices now offer View details, so you can read and copy the full diagnostics before contacting support.
 * Improvement: The Form Checks panel now appears only when something genuinely needs attention, with clearer wording, keeping the sidebar focused.
 * Fix: After-submission actions now complete reliably when a form redirects on success.
@@ -434,6 +434,7 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 * Fix: Form submissions no longer drop fields when a caching plugin serves an older copy of the page, so every submitted field is saved to the entry.
 * Fix: The conversion rate no longer counts submissions made by site editors while previewing a form.
 * Fix: The Edit Form icon is no longer oversized in Divi.
+* Fix: This update addressed a security bug. Props to nh4tvd from Patchstack for reporting it responsibly to our team.
 ### 2.12.6 - 2nd September 2026 ###
 * New: Added an Enable Logs option that records form submission failures to a downloadable file, making it easier to diagnose issues on a live site.
 * New: Added Views and Conversion Rate columns to the Forms list, so you can see how each form is performing at a glance.
