@@ -261,6 +261,16 @@ const FormViewsTrackingContent = ( {
 								'sureforms'
 							) }
 						</span>
+						<span className="block mt-1">
+							<a
+								href="https://sureforms.com/docs/show-views-and-conversion-rate/"
+								target="_blank"
+								rel="noopener noreferrer"
+								className="text-field-helper"
+							>
+								{ __( 'Learn More', 'sureforms' ) }
+							</a>
+						</span>
 					</span>
 				),
 			} }
