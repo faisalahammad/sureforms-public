@@ -536,6 +536,32 @@ class Test_Field_Validation extends TestCase {
 	}
 
 	/**
+	 * get_known_field_slugs() collects the slug of every SureForms field in the form,
+	 * recursing into innerBlocks, so a submitted field can be matched by its stable
+	 * slug when its block_id has drifted.
+	 */
+	public function test_get_known_field_slugs_collects_field_slugs() {
+		$form_id = wp_insert_post(
+			[
+				'post_type'    => 'sureforms_form',
+				'post_status'  => 'publish',
+				'post_title'   => 'Slug Set Form',
+				'post_content' => '<!-- wp:srfm/input {"block_id":"aaa111","slug":"finish-time"} /-->'
+					. '<!-- wp:srfm/url {"block_id":"bbb222","slug":"result-url"} /-->',
+			]
+		);
+
+		$slugs = Field_Validation::get_known_field_slugs( $form_id );
+
+		$this->assertArrayHasKey( 'finish-time', $slugs );
+		$this->assertArrayHasKey( 'result-url', $slugs );
+		$this->assertArrayNotHasKey( 'not-a-field', $slugs );
+		$this->assertSame( [], Field_Validation::get_known_field_slugs( 0 ), 'invalid form id yields an empty set' );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
 	 * Invalid form ids return an empty set (callers fail open).
 	 */
 	public function test_get_known_field_block_ids_empty_for_invalid_form() {
@@ -575,6 +601,57 @@ class Test_Field_Validation extends TestCase {
 		$this->assertArrayNotHasKey( 'srfm-input-deadbeef-lbl-R2hvc3Q-ghost', $stripped, 'invented field is dropped' );
 		$this->assertArrayHasKey( 'srfm-input-realfield-lbl-UmVhbA-real', $stripped, 'known field survives' );
 		$this->assertArrayHasKey( 'form-id', $stripped, 'non-field keys are left alone' );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * REGRESSION (#1517643): a field whose block_id drifted between the rendered HTML
+	 * the visitor submitted and the current post_content — the systematic case on a
+	 * full-page-cached site, or after an editor rebuild — must survive on its slug.
+	 *
+	 * Matching on block_id alone silently deleted real submission data (keys absent,
+	 * success message shown). The slug is the stable field identifier, so a slug match
+	 * keeps the field.
+	 */
+	public function test_strip_unknown_field_keys_keeps_a_drifted_block_id_via_slug() {
+		$form_id = wp_insert_post(
+			[
+				'post_type'    => 'sureforms_form',
+				'post_status'  => 'publish',
+				'post_title'   => 'Drift Form',
+				'post_content' => '<!-- wp:srfm/input {"block_id":"currentid","slug":"finish-time"} /-->',
+			]
+		);
+
+		// Different block_id (drift), same stable slug 'finish-time'.
+		$drifted = 'srfm-input-cachedid-lbl-RmluaXNo-finish-time';
+
+		$kept = Field_Validation::strip_unknown_field_keys( [ $drifted => 'value', 'form-id' => $form_id ], $form_id );
+
+		$this->assertArrayHasKey( $drifted, $kept, 'a field whose block_id drifted must survive on its slug' );
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
+	 * The slug fallback must not weaken the anti-injection guard: a key with neither a
+	 * known block_id nor a known slug is still foreign and dropped.
+	 */
+	public function test_strip_unknown_field_keys_still_drops_foreign_block_id_and_slug() {
+		$form_id = wp_insert_post(
+			[
+				'post_type'    => 'sureforms_form',
+				'post_status'  => 'publish',
+				'post_title'   => 'Drift Form 2',
+				'post_content' => '<!-- wp:srfm/input {"block_id":"currentid","slug":"finish-time"} /-->',
+			]
+		);
+
+		$foreign  = 'srfm-input-deadbeef-lbl-R2hvc3Q-ghost';
+		$stripped = Field_Validation::strip_unknown_field_keys( [ $foreign => 'x', 'form-id' => $form_id ], $form_id );
+
+		$this->assertArrayNotHasKey( $foreign, $stripped, 'a key with neither a known block_id nor a known slug is dropped' );
 
 		wp_delete_post( $form_id, true );
 	}

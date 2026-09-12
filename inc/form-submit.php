@@ -1030,6 +1030,12 @@ class Form_Submit {
 	public static function send_email( $id, $submission_data, $form_data = [] ) {
 		$email_notification = get_post_meta( intval( $id ), '_srfm_email_notification' );
 		$is_mail_sent       = false;
+		// Any recipient failing counts as a failure for the whole submission, so
+		// these are set inside the loop and only read after it.
+		$notification_failed = false;
+		// Whether any recipient's "success" came from the mail() fallback, which
+		// reports true for a message the local MTA accepted and will bounce.
+		$used_mail_fallback = false;
 		$emails             = [];
 
 		// Filter to determine whether the email notification should be sent.
@@ -1100,8 +1106,19 @@ class Form_Submit {
 						if ( ! $sent ) {
 							// Fallback to default PHP mail if for some reasons wp_mail fails.
 							$sent = mail( $parsed['to'], $parsed['subject'], $parsed['message'], $parsed['headers'] );
+
+							if ( $sent ) {
+								// Accepted by the local MTA, not delivered. Good
+								// enough to avoid recording a fault, not good
+								// enough to retire one.
+								$used_mail_fallback = true;
+							}
 						}
 						$email_report = ob_get_clean(); // Catch any printed notice/errors/message for reports.
+
+						if ( true !== $sent ) {
+							$notification_failed = true;
+						}
 
 						if ( is_int( $log_key ) ) {
 							if ( true === $sent ) {
@@ -1182,6 +1199,37 @@ class Form_Submit {
 			if ( empty( $emails ) ) {
 				$entries_db_instance->reset_logs();
 				$entries_db_instance->add_log( __( 'No emails were sent.', 'sureforms' ) );
+			}
+
+			// The notification fault clears when notifications work again. Nothing
+			// else retired it: Client_Logger::clear_category() had a single caller
+			// hardcoded to 'submission', and the notice is deliberately not
+			// dismissible, so a site that had fixed its SMTP kept an undismissable
+			// banner on every admin page until somebody opened a support ticket.
+			// Held until the loop is done because one recipient succeeding while
+			// another fails is still a failure.
+			//
+			// Scoped to the form the fault was recorded against. send_email() runs
+			// on the public submit path and the counter is per category, not per
+			// form, so without this an anonymous submission of a working form
+			// wipes a different form's standing fault -- once per admin page load,
+			// by anyone. The notice names a form, so the granularity is visible
+			// now that this clears as well as records.
+			//
+			// wp_mail() only. The mail() fallback above returns true when the local
+			// MTA merely accepts a message it will later bounce, which is the
+			// broken configuration rather than the fixed one.
+			//
+			// is_int( $log_key ) mirrors the recording guard: record_failure() sits
+			// inside it, so without it an install where add_log() returns a
+			// non-int would never record a notification fault but would still
+			// clear one.
+			$open_failures = Client_Logger::get_failures();
+
+			if ( ! empty( $emails ) && ! $notification_failed && is_int( $log_key )
+				&& ! $used_mail_fallback
+				&& intval( $id ) === Helper::get_integer_value( $open_failures['notification']['form_id'] ?? 0 ) ) {
+				Client_Logger::clear_category( 'notification' );
 			}
 		}
 
