@@ -388,6 +388,47 @@ class Test_Client_Logger extends TestCase {
 	}
 
 	/**
+	 * A site on a non-default port keeps its own stack frames.
+	 *
+	 * The URL pattern captures the whole authority, so a frame from a site served on
+	 * :8443 arrives as `example.test:8443`, while $site_host is PHP_URL_HOST and never
+	 * carries a port. Every own frame therefore failed the same-origin check and was
+	 * truncated to /[path] -- deleting the filename, the line and the column, which is
+	 * the exact loss this exemption exists to prevent. Local installs, staging behind a
+	 * proxy and anything not on 80/443 were all affected.
+	 *
+	 * The existing provider cannot catch this: it builds its frames from home_url(),
+	 * which has no port on the test site, so both sides of the comparison match by
+	 * accident.
+	 */
+	public function test_scrub_text_keeps_own_frames_on_a_non_default_port() {
+		$home = static function () {
+			return 'https://example.test:8443';
+		};
+
+		add_filter( 'home_url', $home, 99 );
+
+		$own = Client_Logger::scrub_text(
+			'at handleSubmit (https://example.test:8443/wp-content/plugins/sureforms/assets/js/form-submit.min.js:12:3456)'
+		);
+
+		// A foreign host, same port, so the port strip cannot have turned the
+		// exemption into "anything carrying a port is ours".
+		$foreign = Client_Logger::scrub_text(
+			'POST https://hooks.slack.com:8443/services/T0/B0/tok failed'
+		);
+
+		remove_filter( 'home_url', $home, 99 );
+
+		$this->assertStringContainsString( 'form-submit.min.js', $own, 'The filename is the diagnosis.' );
+		$this->assertStringContainsString( ':12:3456', $own, 'So are the line and column.' );
+		$this->assertStringNotContainsString( '[path]', $own, 'Our own frame must not be truncated.' );
+
+		$this->assertStringContainsString( 'hooks.slack.com', $foreign, 'The origin still identifies the third party.' );
+		$this->assertStringNotContainsString( 'tok', $foreign, 'A foreign path may still hold a credential.' );
+	}
+
+	/**
 	 * A phone number is written 555-123-4567, not 5551234567, so a
 	 * contiguous-digits rule never sees a real one. The earlier test only used an
 	 * unformatted run and passed regardless.

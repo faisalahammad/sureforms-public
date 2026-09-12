@@ -219,20 +219,12 @@ class Field_Validation {
 	 *                            blocks could not be derived (callers should fail open).
 	 */
 	public static function get_known_field_block_ids( $form_id ) {
-		static $cache = [];
-
 		$form_id = Helper::get_integer_value( $form_id );
 		if ( $form_id <= 0 ) {
 			return [];
 		}
 
-		// Only the block walk is memoised. The filtered result deliberately is not: a
-		// third party returning a malformed value would otherwise poison the set for the
-		// rest of the request, and because the lookup short-circuits on isset() the walk
-		// would never be retried.
-		if ( ! isset( $cache[ $form_id ] ) ) {
-			$cache[ $form_id ] = self::walk_field_identifiers( $form_id );
-		}
+		$walked = self::get_field_identifiers( $form_id );
 
 		/**
 		 * Filter the set of block ids considered valid for a form during submission.
@@ -248,14 +240,14 @@ class Field_Validation {
 		 * @param array<string,true> $ids     Map of known block id => true.
 		 * @param int                $form_id The form post id.
 		 */
-		$ids = apply_filters( 'srfm_known_field_block_ids', $cache[ $form_id ]['ids'], $form_id );
+		$ids = apply_filters( 'srfm_known_field_block_ids', $walked['ids'], $form_id );
 
 		// Coerce defensively. A callback returning a list (`[ 'aaa', 'bbb' ]`) rather
 		// than a map would otherwise make every real field look unknown, and a non-array
 		// return would drop the whole allowlist — so fall back to the walked set instead
 		// of silently turning the check off.
 		if ( ! is_array( $ids ) ) {
-			return $cache[ $form_id ]['ids'];
+			return $walked['ids'];
 		}
 
 		return wp_is_numeric_array( $ids ) ? array_fill_keys( array_map( 'strval', $ids ), true ) : $ids;
@@ -274,16 +266,12 @@ class Field_Validation {
 	 * @return array<string,true> Map of known slug => true.
 	 */
 	public static function get_known_field_slugs( $form_id ) {
-		static $cache = [];
-
 		$form_id = Helper::get_integer_value( $form_id );
 		if ( $form_id <= 0 ) {
 			return [];
 		}
 
-		if ( ! isset( $cache[ $form_id ] ) ) {
-			$cache[ $form_id ] = self::walk_field_identifiers( $form_id );
-		}
+		$walked = self::get_field_identifiers( $form_id );
 
 		/**
 		 * Filter the set of field slugs considered valid for a form during submission.
@@ -292,10 +280,10 @@ class Field_Validation {
 		 * @param array<string,true> $slugs   Map of known slug => true.
 		 * @param int                $form_id The form post id.
 		 */
-		$slugs = apply_filters( 'srfm_known_field_slugs', $cache[ $form_id ]['slugs'], $form_id );
+		$slugs = apply_filters( 'srfm_known_field_slugs', $walked['slugs'], $form_id );
 
 		if ( ! is_array( $slugs ) ) {
-			return $cache[ $form_id ]['slugs'];
+			return $walked['slugs'];
 		}
 
 		return wp_is_numeric_array( $slugs ) ? array_fill_keys( array_map( 'strval', $slugs ), true ) : $slugs;
@@ -534,6 +522,33 @@ class Field_Validation {
 			'local'  => isset( $email_limits['local'] ) ? absint( $email_limits['local'] ) : 64,
 			'domain' => isset( $email_limits['domain'] ) ? absint( $email_limits['domain'] ) : 255,
 		];
+	}
+
+	/**
+	 * The walked allowlists for one form, memoised for the request.
+	 *
+	 * One cache, not one per getter. Both public getters need the same walk, and each
+	 * holding its own `static $cache` meant parse_blocks() plus the recursive collect
+	 * ran twice for every submission -- once for the ids and again for the slugs --
+	 * on a form whose markup can be large.
+	 *
+	 * Only the walk is memoised. The filtered results deliberately are not: a third
+	 * party returning a malformed value would otherwise poison the set for the rest of
+	 * the request, and because the lookup short-circuits on isset() the walk would
+	 * never be retried.
+	 *
+	 * @param int $form_id The form post id, already normalised by the callers.
+	 * @since 2.12.8
+	 * @return array{ids:array<string,true>,slugs:array<string,true>}
+	 */
+	private static function get_field_identifiers( $form_id ) {
+		static $cache = [];
+
+		if ( ! isset( $cache[ $form_id ] ) ) {
+			$cache[ $form_id ] = self::walk_field_identifiers( $form_id );
+		}
+
+		return $cache[ $form_id ];
 	}
 
 	/**

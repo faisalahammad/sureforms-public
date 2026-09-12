@@ -536,6 +536,48 @@ class Test_Field_Validation extends TestCase {
 	}
 
 	/**
+	 * Both allowlists come from one walk, not one each.
+	 *
+	 * walk_field_identifiers() returns ids and slugs together precisely so the form is
+	 * parsed once, but each public getter used to hold its own `static $cache`, so
+	 * parse_blocks() plus the recursive collect ran twice on every submission.
+	 *
+	 * Observed rather than counted: the content is removed between the two calls, so a
+	 * second walk has nothing to find. With one shared memo the slugs are already
+	 * cached and survive; with a cache per getter the second call re-walks an empty
+	 * form and returns nothing.
+	 */
+	public function test_both_allowlists_come_from_a_single_walk() {
+		$form_id = wp_insert_post(
+			[
+				'post_type'    => 'sureforms_form',
+				'post_status'  => 'publish',
+				'post_title'   => 'One Walk',
+				'post_content' => '<!-- wp:srfm/input {"block_id":"aaa111","slug":"finish-time"} /-->',
+			]
+		);
+
+		$ids = Field_Validation::get_known_field_block_ids( $form_id );
+		$this->assertArrayHasKey( 'aaa111', $ids, 'Fixture must produce a block id to begin with.' );
+
+		// Anything a second walk would read is now gone.
+		wp_update_post(
+			[
+				'ID'           => $form_id,
+				'post_content' => '',
+			]
+		);
+
+		$this->assertArrayHasKey(
+			'finish-time',
+			Field_Validation::get_known_field_slugs( $form_id ),
+			'The slugs must come from the walk the block-id call already did, not from a second one.'
+		);
+
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
 	 * get_known_field_slugs() collects the slug of every SureForms field in the form,
 	 * recursing into innerBlocks, so a submitted field can be matched by its stable
 	 * slug when its block_id has drifted.

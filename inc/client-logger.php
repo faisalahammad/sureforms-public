@@ -752,10 +752,23 @@ class Client_Logger {
 		// error.stack.split( "\n" )[1] -- so truncating our own paths deletes the
 		// filename, the line and column, and which plugin threw, which is the
 		// whole diagnosis. A third-party credential is never same-origin.
+		//
+		// The port is stripped before comparing. The pattern captures the whole
+		// authority, so a site served on a non-default port produced frames reading
+		// `example.test:8443`, while $site_host is PHP_URL_HOST and never carries a
+		// port -- every own frame failed the check and was truncated to /[path],
+		// which is the case this exemption exists for. Same host, different port is
+		// treated as ours: on a WordPress install that is the same site behind a dev
+		// server or a proxy, and the alternative is deleting the diagnosis.
 		$text = (string) preg_replace_callback(
 			'#(https?://)([^\s/]+)((?:/[^\s/]*)?)/[^\s"\'<>,;)\]}]+#i',
 			static function ( $matches ) use ( $site_host ) {
-				if ( '' !== $site_host && 0 === strcasecmp( $matches[2], $site_host ) ) {
+				// Trailing :digits only, so an IPv6 literal keeps its brackets and
+				// its own colons -- [::1]:8080 becomes [::1], which is the form
+				// wp_parse_url() returns for one.
+				$host = (string) preg_replace( '/:\d+$/', '', $matches[2] );
+
+				if ( '' !== $site_host && 0 === strcasecmp( $host, $site_host ) ) {
 					return $matches[0];
 				}
 
