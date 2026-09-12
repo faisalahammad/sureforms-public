@@ -800,7 +800,13 @@ async function afterSubmit( formStatus, form ) {
 	const startedAt = performance.now();
 
 	try {
-		const response = await fetch( afterSubmitUrl, { method: 'GET' } );
+		// keepalive lets the request complete after the document starts
+		// unloading, which is exactly what a redirect confirmation does. The
+		// request is a GET with no body, so the 64KB keepalive cap does not apply.
+		const response = await fetch( afterSubmitUrl, {
+			method: 'GET',
+			keepalive: true,
+		} );
 
 		const status = response.status;
 		const durationMs = Math.round( performance.now() - startedAt );
@@ -808,8 +814,12 @@ async function afterSubmit( formStatus, form ) {
 		await parseRestResponse( response );
 
 		if ( ! response.ok ) {
+			// Its own type, not 'network'. The entry is already saved by the time
+			// this runs, so a failure here is the after-submission process --
+			// integrations and webhooks -- not the submission. Recorded server-side
+			// against the integration category for that reason.
 			srfmLog.add( {
-				type: 'network',
+				type: 'after_submission',
 				status,
 				duration_ms: durationMs,
 				message: `After-submission step responded ${ status }`,
@@ -826,8 +836,17 @@ async function afterSubmit( formStatus, form ) {
 
 		// The submission itself succeeded, so nothing is shown to the visitor and
 		// this would otherwise be invisible outside the console.
+		//
+		// Logged without a status, which is what keeps it out of is_fault(). We
+		// caught the browser abandoning the request -- the page unloading behind a
+		// redirect confirmation is the usual cause, and it is what keepalive above
+		// exists to survive -- and that says nothing about whether the server ran
+		// the work. It is guarded by is_after_submission_process_triggered and
+		// usually has. Safari spells this abort "TypeError: Load failed", and
+		// raising a non-dismissible "their entries were not saved" notice off it
+		// reported healthy sites as broken.
 		srfmLog.add( {
-			type: 'error',
+			type: 'after_submission',
 			duration_ms: Math.round( performance.now() - startedAt ),
 			message: `After-submission step failed: ${
 				error?.name ?? 'Error'
@@ -1170,6 +1189,18 @@ async function handleFormSubmission(
 
 		const formStatus = await submitFormData( form );
 		if ( formStatus?.success ) {
+			// Dispatched first, before anything below can navigate away. The
+			// 'different page' and 'custom url' branches call redirectToUrl(), and a
+			// third-party listener on srfm_form_submission_success may navigate too;
+			// either unload cancels an in-flight fetch, and issuing this afterwards
+			// meant the request aborted so the after-submission process never ran.
+			// afterSubmit() reads only after_submit_url, so it depends on neither the
+			// event nor the submission-mode resolution below, and gating it here on
+			// after_submit alone keeps every submission mode covered.
+			if ( formStatus?.data?.after_submit ) {
+				afterSubmit( formStatus, form );
+			}
+
 			/**
 			 * Emit a function to signal the successful submission of a form.
 			 */
@@ -1227,10 +1258,6 @@ async function handleFormSubmission(
 
 				// Re-enable submit button after redirect.
 				enableSubmitButton( form );
-			}
-			// Moving afterSubmit action out of specific method so it should work for all submission mode
-			if ( formStatus?.data?.after_submit ) {
-				afterSubmit( formStatus, form );
 			}
 		} else {
 			const errorData = formStatus?.data || {};
