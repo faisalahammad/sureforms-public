@@ -542,6 +542,13 @@ class Generate_Form_Markup {
 			$page_break_settings      = defined( 'SRFM_PRO_VER' ) && apply_filters( 'srfm_use_page_break_layout', true ) ? get_post_meta( $id, '_srfm_page_break_settings', true ) : [];
 			$page_break_settings      = ! empty( $page_break_settings ) && is_array( $page_break_settings ) ? $page_break_settings : [];
 			$is_page_break            = ! empty( $page_break_settings ) ? $page_break_settings['is_page_break'] : false;
+			// Auto-advance is read here rather than in Pro's button renderer because
+			// save & resume replaces that whole container through the
+			// srfm_page_break_buttons_html filter, which would drop the attributes.
+			// The form tag is rendered exactly once and is already how this runtime
+			// receives its per-form settings (form-id, ajaxurl, data-submit-token).
+			$auto_advance             = $is_page_break && ! empty( $page_break_settings['auto_advance'] );
+			$auto_advance_hide_next   = $auto_advance && ! empty( $page_break_settings['auto_advance_hide_next'] );
 			$page_break_progress_type = ! empty( $page_break_settings ) ? $page_break_settings['progress_indicator_type'] : 'none';
 			$form_confirmation        = get_post_meta( $id, '_srfm_form_confirmation' );
 			$confirmation_type        = '';
@@ -879,7 +886,7 @@ class Generate_Form_Markup {
 
 			?>
 				<form method="post" enctype="multipart/form-data" id="srfm-form-<?php echo esc_attr( Helper::get_string_value( $id ) ); ?>" class="srfm-form <?php echo esc_attr( 'sureforms_form' === $post_type ? 'srfm-single-form ' : '' ); ?>"
-				form-id="<?php echo esc_attr( Helper::get_string_value( $id ) ); ?>" after-submission="<?php echo esc_attr( $submission_action ); ?>" message-type="<?php echo esc_attr( $confirmation_type ? $confirmation_type : 'same page' ); ?>" success-url="<?php echo esc_attr( $success_url ? $success_url : '' ); ?>" ajaxurl="<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>" data-submit-token="<?php echo esc_attr( $submit_token ); ?>" data-view-token="<?php echo esc_attr( $view_token ); ?>"
+				form-id="<?php echo esc_attr( Helper::get_string_value( $id ) ); ?>" after-submission="<?php echo esc_attr( $submission_action ); ?>" message-type="<?php echo esc_attr( $confirmation_type ? $confirmation_type : 'same page' ); ?>" success-url="<?php echo esc_attr( $success_url ? $success_url : '' ); ?>" ajaxurl="<?php echo esc_url( admin_url( 'admin-ajax.php' ) ); ?>" data-submit-token="<?php echo esc_attr( $submit_token ); ?>" data-view-token="<?php echo esc_attr( $view_token ); ?>"<?php echo $auto_advance ? ' data-srfm-auto-advance="1"' : ''; ?><?php echo $auto_advance_hide_next ? ' data-srfm-hide-next="1"' : ''; ?>
 				>
 				<?php
 					// Submission security is handled via the HMAC token in data-submit-token.

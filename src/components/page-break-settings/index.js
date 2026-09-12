@@ -119,6 +119,33 @@ const PageBreakSettings = () => {
 				}
 				isFormSpecific={ true }
 			/>
+			<ToggleControl
+				label={ __( 'Auto-Advance to Next Step', 'sureforms' ) }
+				help={ __(
+					'Move to the next step automatically when a single-choice answer is selected. The last step always needs the Submit button.',
+					'sureforms'
+				) }
+				checked={ !! pageBreakSettings?.auto_advance }
+				onChange={ ( value ) =>
+					updatePageBreakSettings( 'auto_advance', value )
+				}
+			/>
+			{ pageBreakSettings?.auto_advance && (
+				<ToggleControl
+					label={ __( 'Hide Next Button', 'sureforms' ) }
+					help={ __(
+						'Hides the Next button while auto-advance is on. It stays reachable by keyboard, so people who navigate with a keyboard are not stranded.',
+						'sureforms'
+					) }
+					checked={ !! pageBreakSettings?.auto_advance_hide_next }
+					onChange={ ( value ) =>
+						updatePageBreakSettings(
+							'auto_advance_hide_next',
+							value
+						)
+					}
+				/>
+			) }
 		</>
 	);
 };
