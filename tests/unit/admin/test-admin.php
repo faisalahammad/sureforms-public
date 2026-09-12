@@ -1330,6 +1330,88 @@ class Test_Admin extends TestCase {
 	}
 
 	/**
+	 * The report's prose translates; the debug log does not.
+	 *
+	 * The site owner reads this on screen before sending it, so every label in it is
+	 * copy and belongs in the catalogue. The values beside those labels are machine
+	 * data -- a version, a URL, a plugin name -- and the JSON log below them is the
+	 * raw record support greps, so neither is touched.
+	 *
+	 * Driven through a gettext filter rather than a real locale, because the suite
+	 * has no translations loaded and an untranslated string is indistinguishable
+	 * from a translated one that happens to match.
+	 */
+	public function test_support_message_translates_its_labels_but_not_the_log() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::clear();
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
+		Client_Logger::append(
+			Client_Logger::sanitize_entry(
+				[
+					'type'    => 'network',
+					'status'  => 500,
+					'form_id' => 42,
+					'message' => 'Submission responded 500',
+				]
+			)
+		);
+		Admin::reset_action_items_cache();
+
+		// Marks anything that reached the catalogue, so a label that was never
+		// wrapped simply will not carry the marker.
+		$translate = static function ( $translated ) {
+			return '[t]' . $translated;
+		};
+
+		add_filter( 'gettext', $translate, 99 );
+
+		$method = new ReflectionMethod( Admin::class, 'get_support_message' );
+		$method->setAccessible( true );
+		$message = Helper::get_string_value( $method->invoke( Admin::get_instance(), 'notification', 'Contact Form' ) );
+
+		$log = Helper::get_string_value(
+			( new ReflectionMethod( Admin::class, 'get_support_log_block' ) )->getClosure( Admin::get_instance() )( 8000 )
+		);
+
+		remove_filter( 'gettext', $translate, 99 );
+
+		// Every label a reader sees, including the six that shipped as bare English
+		// while the values beside them were already translated.
+		foreach (
+			[
+				'Hello SureForms support,',
+				'Site details',
+				'Site: ',
+				'SureForms: ',
+				'SureForms Pro: ',
+				'WordPress: ',
+				'PHP: ',
+				'Caching: ',
+				'Recorded failures: ',
+			] as $label
+		) {
+			$this->assertStringContainsString(
+				'[t]' . $label,
+				$message,
+				sprintf( '"%s" is copy the site owner reads, so it must go through the catalogue.', trim( $label ) )
+			);
+		}
+
+		// The values are not copy, so they must arrive verbatim.
+		$this->assertStringContainsString( '[t]SureForms: ' . SRFM_VER, $message, 'The version itself is machine data.' );
+		$this->assertStringContainsString( '[t]Site: ' . home_url(), $message, 'So is the site address.' );
+
+		// And the log is the raw record support greps. Nothing in it may be rewritten.
+		$this->assertStringContainsString( '"type":"network"', $log, 'The JSON must survive verbatim.' );
+		$this->assertStringNotContainsString( '[t]{', $log, 'No entry line may be translated.' );
+		$this->assertStringNotContainsString( '[t]"type"', $log );
+
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::clear();
+	}
+
+	/**
 	 * The served details payload keeps its line breaks.
 	 *
 	 * The text is several lines of diagnostics and a fenced log; one long line is

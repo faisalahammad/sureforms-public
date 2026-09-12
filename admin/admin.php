@@ -5180,13 +5180,33 @@ CSS;
 				'',
 				'---',
 				__( 'Site details', 'sureforms' ),
-				'Site: ' . home_url(),
-				'SureForms: ' . SRFM_VER,
-				'SureForms Pro: ' . ( Helper::has_pro() && defined( 'SRFM_PRO_VER' ) ? SRFM_PRO_VER : __( 'not active', 'sureforms' ) ),
-				'WordPress: ' . Helper::get_string_value( $wp_version ),
-				'PHP: ' . PHP_VERSION,
-				'Caching: ' . ( '' !== $caching ? $caching : __( 'none detected', 'sureforms' ) ),
-				'Recorded failures: ' . ( $count > 0 ? $count : __( 'none recorded', 'sureforms' ) ),
+				// Labels translated, values not. The site owner reads this on screen
+				// before sending it, so the labels are copy; the values are machine
+				// data -- a version, a URL, a plugin name -- and stay verbatim. The
+				// debug log below is left alone entirely for the same reason.
+				/* translators: %s: site address. */
+				sprintf( __( 'Site: %s', 'sureforms' ), home_url() ),
+				/* translators: %s: SureForms version. */
+				sprintf( __( 'SureForms: %s', 'sureforms' ), SRFM_VER ),
+				sprintf(
+					/* translators: %s: SureForms Pro version, or a note that it is not active. */
+					__( 'SureForms Pro: %s', 'sureforms' ),
+					Helper::has_pro() && defined( 'SRFM_PRO_VER' ) ? SRFM_PRO_VER : __( 'not active', 'sureforms' )
+				),
+				/* translators: %s: WordPress version. */
+				sprintf( __( 'WordPress: %s', 'sureforms' ), Helper::get_string_value( $wp_version ) ),
+				/* translators: %s: PHP version. */
+				sprintf( __( 'PHP: %s', 'sureforms' ), PHP_VERSION ),
+				sprintf(
+					/* translators: %s: caching plugin name, or a note that none was detected. */
+					__( 'Caching: %s', 'sureforms' ),
+					'' !== $caching ? $caching : __( 'none detected', 'sureforms' )
+				),
+				sprintf(
+					/* translators: %s: number of recorded failures, or a note that none were. */
+					__( 'Recorded failures: %s', 'sureforms' ),
+					$count > 0 ? Helper::get_string_value( $count ) : __( 'none recorded', 'sureforms' )
+				),
 			]
 		);
 
