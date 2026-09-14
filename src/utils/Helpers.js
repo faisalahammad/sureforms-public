@@ -194,12 +194,18 @@ export const generateDropDownOptions = (
 
 // Creates excerpt.
 export function trimTextToWords( text, wordLimit, ending = '...' ) {
+	// Callers pass block attributes straight in, and not every block that reaches
+	// them declares a label -- srfm/register and srfm/login carry a slug but no
+	// label attribute, so text arrives undefined. Always resolve to a string
+	// before splitting: this helper must never throw, whatever a block hands it.
+	const safeText = String( text ?? '' );
+
 	// Split the text into words
-	const words = text.split( /\s+/ );
+	const words = safeText.split( /\s+/ );
 
 	// If the text has fewer words than the limit, return it as is
 	if ( words.length <= wordLimit ) {
-		return text;
+		return safeText;
 	}
 
 	// Slice the array to the limit and join it back into a string and append the ending if there are more words than the limit
