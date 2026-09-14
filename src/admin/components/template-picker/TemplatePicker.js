@@ -5,7 +5,21 @@ import AiFormBuilder from './components/AiFormBuilder.js';
 const TemplatePicker = () => {
 	// Remove admin bar padding.
 	useEffect( () => {
-		document.querySelector( 'html.wp-toolbar' ).style.paddingTop = 0;
+		// The wp-toolbar class is only present when WordPress renders the admin
+		// bar, so bail out instead of dereferencing a missing element.
+		const htmlElement = document.querySelector( 'html.wp-toolbar' );
+
+		if ( ! htmlElement ) {
+			return;
+		}
+
+		const previousPaddingTop = htmlElement.style.paddingTop;
+
+		htmlElement.style.paddingTop = 0;
+
+		return () => {
+			htmlElement.style.paddingTop = previousPaddingTop;
+		};
 	}, [] );
 
 	function QueryScreen() {
