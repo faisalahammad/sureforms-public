@@ -257,6 +257,326 @@ class Test_Client_Logger extends TestCase {
 	}
 
 	/**
+	 * Two different budgets in one request return two different excerpts.
+	 *
+	 * The memo is keyed by blog id and budget. Keying it by reusing $max_chars
+	 * made the key a string, and the byte-budget comparison inside the line loop
+	 * coerces "1:1200" to 1 -- so every excerpt collapsed to a single line, on
+	 * every consumer, silently. Nothing caught it because no test had asked for
+	 * two budgets in the same process.
+	 */
+	public function test_get_tail_budget_is_not_the_memo_key() {
+		Client_Logger::clear();
+
+		for ( $i = 0; $i < 40; $i++ ) {
+			Client_Logger::append(
+				Client_Logger::sanitize_entry(
+					[
+						'type'        => 'network',
+						'status'      => 500,
+						'form_id'     => 42,
+						'form_title'  => 'Contact Form',
+						'message'     => 'Submission responded 500 (text/html): a long server failure message repeated to fill the log ' . $i,
+						'duration_ms' => 900,
+					]
+				)
+			);
+		}
+
+		$small = Client_Logger::get_tail( 1200 );
+		$large = Client_Logger::get_tail( 8000 );
+
+		// The budget is a byte count, so a small one keeps several whole lines --
+		// not one, which is what a string key produced.
+		$this->assertGreaterThan( 1, $small['shown'], 'A 1200-byte budget holds more than one entry.' );
+		$this->assertGreaterThan(
+			$small['shown'],
+			$large['shown'],
+			'A larger budget must return more entries, not the memoised smaller one.'
+		);
+		$this->assertGreaterThan( strlen( $small['text'] ), strlen( $large['text'] ) );
+
+		// And the memo still works: the same budget twice is one read.
+		$this->assertSame( $small, Client_Logger::get_tail( 1200 ) );
+
+		Client_Logger::clear();
+	}
+
+	/**
+	 * Webhook credentials are masked in every shape they actually arrive in.
+	 *
+	 * The round-1 finding this answers was about a Slack token surviving in a URL
+	 * path. The first version of these rules missed it in the largest sink: a WP
+	 * REST error body is slash-escaped, and two of the four body sinks log the raw
+	 * response text, so every URL rule saw `https:\/\/` and matched nothing. It
+	 * also only fired when the credential keyword was the last token of the name,
+	 * so AWS_SECRET_ACCESS_KEY, stripe_secret_key and X-Hub-Signature all passed
+	 * through untouched.
+	 *
+	 * @dataProvider provide_secrets
+	 * @param string $input  Log text as it would arrive.
+	 * @param string $secret The substring that must not survive.
+	 */
+	public function test_scrub_text_masks_credentials( $input, $secret ) {
+		$this->assertStringNotContainsString(
+			$secret,
+			Client_Logger::scrub_text( $input ),
+			'This is written to a downloadable log and pasted into a support email.'
+		);
+	}
+
+	/**
+	 * Inputs whose secret must not survive scrub_text().
+	 *
+	 * @return array<string,array{0:string,1:string}>
+	 */
+	public function provide_secrets() {
+		return [
+			'slack in a path'         => [ 'POST https://hooks.slack.com/services/T0/B0/xoxb-secrettoken failed', 'xoxb-secrettoken' ],
+			'slack slash-escaped'     => [ '{"message":"post to https:\\/\\/hooks.slack.com\\/services\\/T1\\/B2\\/xoxb-escapedtoken failed"}', 'xoxb-escapedtoken' ],
+			'discord webhook'         => [ 'Discord https://discord.com/api/webhooks/123/AbCdEfGhIjKlMnOp rejected', 'AbCdEfGhIjKlMnOp' ],
+			'aws prefixed name'       => [ 'AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENG', 'wJalrXUtnFEMIK7MDENG' ],
+			'stripe suffixed name'    => [ 'stripe_secret_key: sk_live_51H8xyzABCDEF', 'sk_live_51H8xyzABCDEF' ],
+			'private key'             => [ 'private_key=MIIEvQIBADANBgkq', 'MIIEvQIBADANBgkq' ],
+			'basic auth'              => [ 'Authorization: Basic dXNlcjpwYXNzd29yZA==', 'dXNlcjpwYXNzd29yZA' ],
+			'bearer token'            => [ 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload.sig', 'eyJhbGciOiJIUzI1NiJ9' ],
+			'signature header'        => [ 'X-Hub-Signature: sha256=9f86d081884c7d659a2f1234567890ab', '9f86d081884c7d659a2f' ],
+			'url userinfo'            => [ 'https://admin:hunter2pass@api.example.com/v1/x', 'hunter2pass' ],
+			'json token value'        => [ '{"token": "abc123def456", "ok": false}', 'abc123def456' ],
+			'query string'            => [ 'GET https://example.com/reset?key=supersecretvalue failed', 'supersecretvalue' ],
+		];
+	}
+
+	/**
+	 * The diagnosis survives, which is the half with no coverage before now.
+	 *
+	 * An earlier version of these rules truncated every URL path, including
+	 * same-origin ones -- but `source` is a stack frame, not a page address, so
+	 * that deleted the filename, the line and column, and which plugin threw. It
+	 * also redacted ordinary prose, because the credential rule accepted a bare
+	 * space as a separator: "Invalid token provided" and "password protected" are
+	 * among the most common things support reads out of this log.
+	 *
+	 * @dataProvider provide_diagnostics
+	 * @param string $input  Log text as it would arrive.
+	 * @param string $needle The substring support needs to still be there.
+	 */
+	public function test_scrub_text_keeps_the_diagnosis( $input, $needle ) {
+		$this->assertStringContainsString(
+			$needle,
+			Client_Logger::scrub_text( $input ),
+			'Redaction must not cost the reason the log is read.'
+		);
+	}
+
+	/**
+	 * Inputs whose diagnostic content must survive scrub_text().
+	 *
+	 * @return array<string,array{0:string,1:string}>
+	 */
+	public function provide_diagnostics() {
+		return [
+			'own stack frame'   => [ 'at handleSubmit (' . home_url( '/wp-content/plugins/sureforms/assets/js/form-submit.min.js' ) . ':12:3456)', 'form-submit.min.js' ],
+			'own line number'   => [ 'at handleSubmit (' . home_url( '/wp-content/plugins/sureforms/assets/js/form-submit.min.js' ) . ':12:3456)', ':12:3456' ],
+			'prose token'       => [ 'Invalid token provided', 'token provided' ],
+			'prose password'    => [ 'This form is password protected', 'password protected' ],
+			'captcha message'   => [ 'captcha token verification failed', 'token verification failed' ],
+			'prose secret'      => [ 'The secret provided was rejected', 'secret provided' ],
+			'http status'       => [ 'Submission responded 500 (text/html)', '500' ],
+			'foreign host kept' => [ 'POST https://hooks.slack.com/services/T0/B0/tok failed', 'hooks.slack.com' ],
+		];
+	}
+
+	/**
+	 * Logging off records nothing, not merely displays nothing.
+	 *
+	 * The display side was already gated. The counter was not: the two record_failure()
+	 * calls in form-submit.php sit beside an append() that the enabled check does stop,
+	 * so a site with logging switched off kept accumulating failure state invisibly --
+	 * and switching logging back on surfaced every fault from the quiet period, behind a
+	 * View details report whose debug log is empty because nothing was ever written.
+	 *
+	 * Asserted across the toggle rather than in one state, because "no notice right now"
+	 * was already true and is what hid this.
+	 */
+	public function test_nothing_is_recorded_while_logging_is_disabled() {
+		$general = get_option( 'srfm_general_settings_options', [] );
+		$general = is_array( $general ) ? $general : [];
+
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::clear();
+
+		update_option( 'srfm_general_settings_options', array_merge( $general, [ 'srfm_enable_logs' => false ] ) );
+		$this->assertFalse( Client_Logger::is_enabled(), 'Fixture must actually switch logging off.' );
+
+		// Every path that reports a fault: the server-side categories called directly
+		// from form-submit.php, and the client entries that route through append().
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
+		Client_Logger::record_failure( 'integration', 42, 'Contact Form' );
+		Client_Logger::append(
+			Client_Logger::sanitize_entry(
+				[
+					'type'    => 'network',
+					'status'  => 500,
+					'form_id' => 42,
+					'message' => 'Submission responded 500',
+				]
+			)
+		);
+
+		$this->assertSame( 0, Client_Logger::get_file_size(), 'Nothing may be written to the log.' );
+		$this->assertSame( [], Client_Logger::get_failures(), 'Nothing may be counted either.' );
+		$this->assertSame( [], Client_Logger::get_open_failures(), 'So there is nothing to raise a notice about.' );
+
+		// Switching logging on must not surface a backlog from the quiet period.
+		update_option( 'srfm_general_settings_options', array_merge( $general, [ 'srfm_enable_logs' => true ] ) );
+
+		$this->assertTrue( Client_Logger::is_enabled() );
+		$this->assertSame(
+			[],
+			Client_Logger::get_open_failures(),
+			'Turning logging on must not reveal faults from while it was off -- there is no log behind them.'
+		);
+
+		// And recording works again, so the guard is not simply always denying.
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
+		$this->assertArrayHasKey( 'notification', Client_Logger::get_open_failures() );
+
+		update_option( 'srfm_general_settings_options', $general );
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::clear();
+	}
+
+	/**
+	 * An after-submission failure the browser only guessed at raises no notice.
+	 *
+	 * The step runs after the entry is saved. When the client reports it without a
+	 * status it is reporting an abandoned fetch -- the page unloading behind a
+	 * redirect confirmation, which is what keepalive exists to survive -- and that
+	 * says nothing about whether the server ran srfm_after_submission_process. It is
+	 * guarded by is_after_submission_process_triggered and usually has.
+	 *
+	 * This shipped as type 'error', which is_fault() counts unconditionally, so every
+	 * Safari "TypeError: Load failed" raised a non-dismissible notice reading
+	 * "Visitors may not be able to reach you, and their entries were not saved" about
+	 * entries that were saved and visitors who saw the success message.
+	 */
+	public function test_a_browser_side_after_submission_failure_is_not_a_fault() {
+		$entry = Client_Logger::sanitize_entry(
+			[
+				'type'    => 'after_submission',
+				'form_id' => 4355,
+				'message' => 'After-submission step failed: TypeError: Load failed',
+			]
+		);
+
+		$this->assertNotEmpty( $entry, 'The type must survive sanitisation, or it is never logged at all.' );
+		$this->assertFalse(
+			Client_Logger::is_fault( $entry ),
+			'A fetch the browser abandoned is not evidence the server did not do the work.'
+		);
+	}
+
+	/**
+	 * A server-confirmed after-submission failure is a fault, and an integration one.
+	 *
+	 * srfm_after_submission_process is where integrations and webhooks hook in, so a
+	 * 5xx there means a third party did not receive the entry -- which is what the
+	 * integration notice says. The submission notice says entries were not saved, and
+	 * by this point they have been.
+	 */
+	public function test_a_server_confirmed_after_submission_failure_is_an_integration_fault() {
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::clear();
+
+		$entry = Client_Logger::sanitize_entry(
+			[
+				'type'    => 'after_submission',
+				'status'  => 500,
+				'form_id' => 4355,
+				'message' => 'After-submission step responded 500',
+			]
+		);
+
+		$this->assertTrue( Client_Logger::is_fault( $entry ), 'The server said it failed.' );
+
+		Client_Logger::append( $entry );
+
+		$open = Client_Logger::get_open_failures();
+
+		$this->assertArrayHasKey( 'integration', $open, 'A failed after-submission step is an integration failure.' );
+		$this->assertArrayNotHasKey(
+			'submission',
+			$open,
+			'It must not claim the entry was never saved -- it was saved before this step ran.'
+		);
+
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::clear();
+	}
+
+	/**
+	 * A captcha stop is the visitor's to clear, and raises nothing.
+	 *
+	 * Pinned because it is the precedent the after-submission rule above follows, and
+	 * because "Please verify that you are not a robot" is among the most common lines
+	 * in a real log -- counting it would tell healthy sites to contact support.
+	 */
+	public function test_a_blocked_entry_is_not_a_fault() {
+		$entry = Client_Logger::sanitize_entry(
+			[
+				'type'    => 'blocked',
+				'form_id' => 4355,
+				'message' => 'Blocked before submit: Please verify that you are not a robot.',
+			]
+		);
+
+		$this->assertNotEmpty( $entry );
+		$this->assertFalse( Client_Logger::is_fault( $entry ) );
+	}
+
+	/**
+	 * A site on a non-default port keeps its own stack frames.
+	 *
+	 * The URL pattern captures the whole authority, so a frame from a site served on
+	 * :8443 arrives as `example.test:8443`, while $site_host is PHP_URL_HOST and never
+	 * carries a port. Every own frame therefore failed the same-origin check and was
+	 * truncated to /[path] -- deleting the filename, the line and the column, which is
+	 * the exact loss this exemption exists to prevent. Local installs, staging behind a
+	 * proxy and anything not on 80/443 were all affected.
+	 *
+	 * The existing provider cannot catch this: it builds its frames from home_url(),
+	 * which has no port on the test site, so both sides of the comparison match by
+	 * accident.
+	 */
+	public function test_scrub_text_keeps_own_frames_on_a_non_default_port() {
+		$home = static function () {
+			return 'https://example.test:8443';
+		};
+
+		add_filter( 'home_url', $home, 99 );
+
+		$own = Client_Logger::scrub_text(
+			'at handleSubmit (https://example.test:8443/wp-content/plugins/sureforms/assets/js/form-submit.min.js:12:3456)'
+		);
+
+		// A foreign host, same port, so the port strip cannot have turned the
+		// exemption into "anything carrying a port is ours".
+		$foreign = Client_Logger::scrub_text(
+			'POST https://hooks.slack.com:8443/services/T0/B0/tok failed'
+		);
+
+		remove_filter( 'home_url', $home, 99 );
+
+		$this->assertStringContainsString( 'form-submit.min.js', $own, 'The filename is the diagnosis.' );
+		$this->assertStringContainsString( ':12:3456', $own, 'So are the line and column.' );
+		$this->assertStringNotContainsString( '[path]', $own, 'Our own frame must not be truncated.' );
+
+		$this->assertStringContainsString( 'hooks.slack.com', $foreign, 'The origin still identifies the third party.' );
+		$this->assertStringNotContainsString( 'tok', $foreign, 'A foreign path may still hold a credential.' );
+	}
+
+	/**
 	 * A phone number is written 555-123-4567, not 5551234567, so a
 	 * contiguous-digits rule never sees a real one. The earlier test only used an
 	 * unformatted run and passed regardless.

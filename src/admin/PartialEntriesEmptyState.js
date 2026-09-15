@@ -18,7 +18,7 @@ import './tw-base.scss';
 
 const features = [
 	__(
-		'Capture in-progress form data the moment visitors stop typing — no submit required',
+		'Capture in-progress form data the moment visitors stop typing, no submit required',
 		'sureforms'
 	),
 	__(

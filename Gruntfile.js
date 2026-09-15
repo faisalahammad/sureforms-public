@@ -268,7 +268,7 @@ module.exports = function ( grunt ) {
 				overwrite: true,
 				replacements: [
 					{
-						from: /UAGB_VER', '.*?'/g,
+						from: /SRFM_VER', '.*?'/g,
 						to: "SRFM_VER', '<%= pkg.version %>'",
 					},
 				],

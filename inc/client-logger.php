@@ -83,7 +83,7 @@ class Client_Logger {
 	 * Option holding per-category failure state, keyed by category.
 	 *
 	 * Shape: [ category => [ 'count' => int, 'form_id' => int, 'form_title' => string,
-	 * 'at' => int, 'acked' => int ] ].
+	 * 'at' => int, 'acked' => int, 'acked_at' => int ] ].
 	 *
 	 * Kept per category because the three read completely differently to a site
 	 * owner: submissions failing means visitors cannot reach you, a notification
@@ -101,6 +101,18 @@ class Client_Logger {
 	 * @since 2.12.6
 	 */
 	public const CATEGORIES = [ 'submission', 'notification', 'integration' ];
+
+	/**
+	 * Memoised get_tail() results for this request, keyed by character budget.
+	 *
+	 * A class property rather than a static inside the method so append() and
+	 * clear() can invalidate it: a request that writes to the log and then reads a
+	 * tail must not be handed the tail from before the write.
+	 *
+	 * @var array<string,array{text:string,shown:int,total:int}>
+	 * @since 2.12.7
+	 */
+	private static $tail_memo = [];
 
 	/**
 	 * Whether client error logging is currently switched on.
@@ -157,7 +169,14 @@ class Client_Logger {
 			return true;
 		}
 
-		if ( 'network' !== $type ) {
+		// 'after_submission' runs after the entry is already saved, so it is only a
+		// fault when the server said so. A browser-side failure there -- an aborted
+		// fetch as the page unloads, which is what a redirect confirmation does and
+		// what `keepalive` exists to survive -- tells us nothing about whether the
+		// work ran: the endpoint is guarded by is_after_submission_process_triggered
+		// and usually has. Safari spells that abort "TypeError: Load failed", and
+		// alarming on it reported healthy sites as broken.
+		if ( ! in_array( $type, [ 'network', 'after_submission' ], true ) ) {
 			return false;
 		}
 
@@ -181,6 +200,25 @@ class Client_Logger {
 	 * @return void
 	 */
 	public static function record_failure( $category, $form_id = 0, $form_title = '' ) {
+		// Logging off means nothing is recorded, not merely nothing displayed.
+		//
+		// The display side was already gated -- get_action_items() skips the
+		// first-party items and has_action_item_warnings() returns false -- but the
+		// counter kept being written, from the two call sites in form-submit.php
+		// that sit beside an append() the enabled check does stop. So a site with
+		// logging switched off still accumulated failure state, and switching
+		// logging on surfaced every fault recorded while it was off, behind a View
+		// details report whose debug log is empty because nothing was written.
+		//
+		// Gated here rather than at the call sites, for the reason append() states:
+		// the guard belongs on the function that writes, not on today's callers.
+		// clear_category() and the acknowledge helpers are deliberately left
+		// ungated -- they only remove state, and must keep working so nothing is
+		// stranded by the toggle.
+		if ( ! self::is_enabled() ) {
+			return;
+		}
+
 		if ( ! in_array( $category, self::CATEGORIES, true ) ) {
 			return;
 		}
@@ -196,6 +234,11 @@ class Client_Logger {
 			// Preserved: a report already made still stands until this new count
 			// overtakes it, which is what get_open_failures() compares.
 			'acked'      => Helper::get_integer_value( $existing['acked'] ?? 0 ),
+			// Carried forward too. This array is rebuilt from a fixed set of keys, so
+			// anything not named here is dropped -- and "when did I last report
+			// this" quietly disappearing on the next failure is exactly the kind of
+			// loss nobody notices until support asks.
+			'acked_at'   => Helper::get_integer_value( $existing['acked_at'] ?? 0 ),
 		];
 
 		update_option( self::FAILURES_OPTION, $failures, false );
@@ -253,6 +296,16 @@ class Client_Logger {
 		}
 
 		$failures[ $category ]['acked'] = Helper::get_integer_value( $failures[ $category ]['count'] ?? 0 );
+
+		// Recorded for the report -- "you told us at 14:12" is worth having when
+		// support reads the ticket -- but deliberately not what decides whether the
+		// notice comes back. The count does that.
+		//
+		// A timestamp cannot: it is written to the second, so a failure recorded in
+		// the same second as the acknowledgement compares equal and gets swallowed.
+		// That is the one moment it matters most, because a fault arriving as
+		// someone reports the last one is a fault still happening.
+		$failures[ $category ]['acked_at'] = time();
 
 		update_option( self::FAILURES_OPTION, $failures, false );
 	}
@@ -314,8 +367,14 @@ class Client_Logger {
 		}
 
 		return [
-			'at'     => Helper::get_integer_value( $failures['submission']['at'] ?? 0 ),
-			'streak' => $acked,
+			// The last fault time, not the acknowledgement time. Kept under this
+			// key because callers already read it as "when the thing happened".
+			'at'       => Helper::get_integer_value( $failures['submission']['at'] ?? 0 ),
+			// When the owner reported it. Separate, because the two answer
+			// different questions and are usually seconds apart on a fresh fault
+			// and days apart on an old one.
+			'acked_at' => Helper::get_integer_value( $failures['submission']['acked_at'] ?? 0 ),
+			'streak'   => $acked,
 		];
 	}
 
@@ -347,8 +406,13 @@ class Client_Logger {
 	 * Hooked - srfm_form_submit, which fires only on the success path.
 	 *
 	 * Only the submission category is cleared. A submission getting through says
-	 * nothing about whether its notification email sent or its integrations ran,
-	 * so those clear when they next succeed or when the owner reports them.
+	 * nothing about whether its notification email sent or its integrations ran.
+	 * Notification clears on its own path, in Form_Submit::send_email(), once every
+	 * recipient for a submission has sent. Integration has no success signal to
+	 * clear on yet -- the failures are recorded by pro through
+	 * Form_Submit::log_integration_failure() and there is no matching
+	 * "it worked" call -- so that category still clears only when the owner
+	 * reports it.
 	 *
 	 * @since 2.12.6
 	 * @return void
@@ -392,6 +456,9 @@ class Client_Logger {
 	 * @return bool True when the line was written.
 	 */
 	public static function append( array $entry ) {
+		// Any write invalidates a memoised tail, whether or not this one lands.
+		self::$tail_memo = [];
+
 		// Checked here as well as at the route, so the guard sits on the function
 		// that writes rather than only on today's single caller. Without it any
 		// future caller writes to disk on a site that never switched logging on.
@@ -408,9 +475,18 @@ class Client_Logger {
 		// on a badly broken site those are exactly the conditions that occur.
 		// A notification or integration failure records its own category at the call
 		// site; everything else reaching here is the submission itself.
-		if ( self::is_fault( $entry ) && 'message' !== ( $entry['type'] ?? '' ) ) {
+		$type = Helper::get_string_value( $entry['type'] ?? '' );
+
+		if ( self::is_fault( $entry ) && 'message' !== $type ) {
+			// The after-submission step runs on an entry that is already saved and
+			// fires srfm_after_submission_process, which is where integrations and
+			// webhooks hook in. Calling that a submission failure told the site owner
+			// "their entries were not saved" about entries that were -- the wrong
+			// message on the one notice that cannot be dismissed. The category is
+			// derived here rather than taken from the entry: the client names what
+			// happened, the server decides what it means.
 			self::record_failure(
-				'submission',
+				'after_submission' === $type ? 'integration' : 'submission',
 				Helper::get_integer_value( $entry['form_id'] ?? 0 ),
 				Helper::get_string_value( $entry['form_title'] ?? '' )
 			);
@@ -443,10 +519,12 @@ class Client_Logger {
 	/**
 	 * The most recent whole log lines, up to a character budget.
 	 *
-	 * For pasting into a support email, where the transport imposes the limit: a
-	 * mailto URL has to survive percent-encoding and every mail client's own
-	 * length cap, so only a tail fits. Newest entries are the ones that describe
-	 * the failure being reported, so the tail is the useful end.
+	 * An excerpt for reading and pasting. The budget is the caller's: the details
+	 * dialog shows it on screen and copies it to a clipboard, neither of which has
+	 * a length limit worth designing around, while an excerpt embedded anywhere
+	 * length-bound needs a smaller one. Newest entries are the ones that describe
+	 * the failure being reported, so the tail is the useful end and the oldest are
+	 * what a smaller budget drops.
 	 *
 	 * Whole lines only -- half a JSON object helps nobody.
 	 *
@@ -455,6 +533,26 @@ class Client_Logger {
 	 * @return array{text:string,shown:int,total:int}
 	 */
 	public static function get_tail( $max_chars = 1200 ) {
+		// Memoised per request and per budget. get_action_items() asks once per
+		// open failure category and runs twice per admin request -- building the
+		// localisation payload and again in the classic renderer -- so a site with
+		// three open failures was reading a file capped at 1 MB six times to render
+		// one page.
+		$max_chars = (int) $max_chars;
+
+		// Keyed by blog as well as budget: get_log_path() hashes the blog id into
+		// the filename, so after a switch_to_blog() the same budget is a different
+		// file. Unreachable today; nothing switches blogs on this path.
+		//
+		// Its own variable, not $max_chars reused -- that key is a string, and the
+		// byte-budget comparison below coerces "1:1200" to 1, which silently
+		// reduces every excerpt to a single line.
+		$memo_key = get_current_blog_id() . ':' . $max_chars;
+
+		if ( isset( self::$tail_memo[ $memo_key ] ) ) {
+			return self::$tail_memo[ $memo_key ];
+		}
+
 		$empty = [
 			'text'  => '',
 			'shown' => 0,
@@ -464,6 +562,8 @@ class Client_Logger {
 		$path = self::get_log_path( false );
 
 		if ( '' === $path || ! file_exists( $path ) ) {
+			self::$tail_memo[ $memo_key ] = $empty;
+
 			return $empty;
 		}
 
@@ -471,6 +571,8 @@ class Client_Logger {
 		$lines = file( $path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES );
 
 		if ( ! is_array( $lines ) || empty( $lines ) ) {
+			self::$tail_memo[ $memo_key ] = $empty;
+
 			return $empty;
 		}
 
@@ -491,11 +593,13 @@ class Client_Logger {
 			$used += $length;
 		}
 
-		return [
+		self::$tail_memo[ $memo_key ] = [
 			'text'  => implode( "\n", $kept ),
 			'shown' => count( $kept ),
 			'total' => $total,
 		];
+
+		return self::$tail_memo[ $memo_key ];
 	}
 
 	/**
@@ -533,6 +637,8 @@ class Client_Logger {
 	 * @return bool
 	 */
 	public static function clear() {
+		self::$tail_memo = [];
+
 		$path = self::get_log_path( false );
 
 		if ( '' === $path || ! file_exists( $path ) ) {
@@ -555,7 +661,7 @@ class Client_Logger {
 	 * @return array<string,mixed> Empty when nothing usable survived.
 	 */
 	public static function sanitize_entry( array $raw ) {
-		$allowed_types = [ 'network', 'response', 'error', 'message', 'blocked' ];
+		$allowed_types = [ 'network', 'response', 'error', 'message', 'blocked', 'after_submission' ];
 		$type          = isset( $raw['type'] ) ? sanitize_key( Helper::get_string_value( $raw['type'] ) ) : '';
 
 		if ( ! in_array( $type, $allowed_types, true ) ) {
@@ -594,7 +700,21 @@ class Client_Logger {
 			// disabled the feature until an admin cleared it. A real key is
 			// `srfm-input-lbl-<base64>`, far inside this bound.
 			foreach ( array_slice( $raw['field_keys'], 0, 100 ) as $field_key ) {
-				$keys[] = mb_substr( sanitize_text_field( Helper::get_string_value( $field_key ) ), 0, self::MAX_KEY_LENGTH );
+				// Through scrub_text() like every other free-text value. A key is
+				// supposed to be `srfm-input-lbl-<base64>`, but the array arrives
+				// from the browser and nothing server-side guarantees that, so a
+				// caller is free to put an address or a token in one.
+				//
+				// wp_check_invalid_utf8() is kept because scrub_text() is not a
+				// drop-in for sanitize_text_field(): invalid UTF-8 reaching
+				// wp_json_encode() in append() makes it return false and drop the
+				// whole line -- after record_failure() has already incremented the
+				// counter, leaving a banner with no log line behind it.
+				$keys[] = mb_substr(
+					self::scrub_text( wp_check_invalid_utf8( Helper::get_string_value( $field_key ) ) ),
+					0,
+					self::MAX_KEY_LENGTH
+				);
 			}
 
 			$entry['field_keys'] = $keys;
@@ -615,6 +735,19 @@ class Client_Logger {
 	 * string. Whitespace is collapsed as a log-injection guard, matching
 	 * inc/ai-form-builder/ai-helper.php.
 	 *
+	 * Removes, in order: JSON slash-escaping, so the rules below can see URLs at
+	 * all; credentials in a URL's userinfo; query strings and fragments; a foreign
+	 * URL's path past its first segment, keeping same-origin paths intact because
+	 * those are stack frames and the path is the diagnosis; the value following a
+	 * name that identifies a credential; email addresses; and long digit runs.
+	 *
+	 * A single-segment foreign path is truncated whole rather than kept, which is
+	 * the safe direction.
+	 *
+	 * What it cannot remove is a name, a street address or a free-text message
+	 * body -- those have no shape to match, so the log excerpt this produces
+	 * should still be treated as personal data.
+	 *
 	 * @param string $text Raw text.
 	 * @since 2.12.6
 	 * @return string
@@ -624,9 +757,74 @@ class Client_Logger {
 			return '';
 		}
 
+		// Clamped before the rules run, not after. Without it every pattern below
+		// is applied to whatever the caller sent, however long that is.
+		$text = mb_substr( $text, 0, self::MAX_TEXT_LENGTH * 4 );
+
+		// A WP REST error body arrives slash-escaped -- wp_json_encode() escapes
+		// "/" and WP_REST_Server::serve_request() does not pass
+		// JSON_UNESCAPED_SLASHES -- and two of the four body sinks log the raw
+		// response text rather than the decoded object. Without this every URL
+		// rule below misses every URL in the largest sink, including the webhook
+		// tokens they exist for.
+		$text = str_replace( '\\/', '/', $text );
+
+		// Credentials in the userinfo position, before the host rules see them.
+		$text = (string) preg_replace( '#(https?://)[^\s/@]+@#i', '$1[credentials]@', $text );
+
 		// Drop query strings and fragments wholesale rather than allowlisting
 		// parameters. A token after # is just as sensitive as one after ?.
-		$text = (string) preg_replace( '#(https?://[^\s?\#]+)[?\#]\S*#i', '$1', $text );
+		$text = (string) preg_replace( '#(https?://[^\s?\#]+)[?\#][^\s"\'<>,;)\]}]*#i', '$1', $text );
+
+		$site_host = Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) );
+
+		// Keep the origin and the first path segment of a foreign URL, drop the
+		// rest: a webhook credential sits in the path as often as in the query,
+		// and Slack and Discord both put theirs there.
+		//
+		// Same-origin URLs are exempt. `source` is a stack frame, not a page
+		// address -- assets/js/unminified/form-submit.js takes
+		// error.stack.split( "\n" )[1] -- so truncating our own paths deletes the
+		// filename, the line and column, and which plugin threw, which is the
+		// whole diagnosis. A third-party credential is never same-origin.
+		//
+		// The port is stripped before comparing. The pattern captures the whole
+		// authority, so a site served on a non-default port produced frames reading
+		// `example.test:8443`, while $site_host is PHP_URL_HOST and never carries a
+		// port -- every own frame failed the check and was truncated to /[path],
+		// which is the case this exemption exists for. Same host, different port is
+		// treated as ours: on a WordPress install that is the same site behind a dev
+		// server or a proxy, and the alternative is deleting the diagnosis.
+		$text = (string) preg_replace_callback(
+			'#(https?://)([^\s/]+)((?:/[^\s/]*)?)/[^\s"\'<>,;)\]}]+#i',
+			static function ( $matches ) use ( $site_host ) {
+				// Trailing :digits only, so an IPv6 literal keeps its brackets and
+				// its own colons -- [::1]:8080 becomes [::1], which is the form
+				// wp_parse_url() returns for one.
+				$host = (string) preg_replace( '/:\d+$/', '', $matches[2] );
+
+				if ( '' !== $site_host && 0 === strcasecmp( $host, $site_host ) ) {
+					return $matches[0];
+				}
+
+				return $matches[1] . $matches[2] . $matches[3] . '/[path]';
+			},
+			$text
+		);
+
+		// Credentials named in the text itself. The name is matched as a whole
+		// identifier, so a keyword with a prefix or suffix is still caught --
+		// AWS_SECRET_ACCESS_KEY, stripe_secret_key, X-Hub-Signature. And a
+		// separator is required, so ordinary prose survives: "Invalid token
+		// provided" and "password protected" are the most common things support
+		// reads out of this log, and an earlier version redacted both. `bearer`
+		// and `basic` are the exception, because those carry the value after a
+		// space with no separator at all.
+		$text = (string) preg_replace(
+			'/(\b[\w.-]*(?:api[_-]?key|key|secret|token|password|passwd|pwd|auth|credential|signature)[\w.-]*["\']?\s*[:=]\s*["\']?|\b(?:bearer|basic)\s+)[^\s"\',;&]{8,}/i',
+			'$1[redacted]',
+			$text
+		);
 
 		// Email addresses.
 		$text = (string) preg_replace( '/[\w.+-]+@[\w-]+\.[\w.-]+/', '[email]', $text );
