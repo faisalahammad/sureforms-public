@@ -48,7 +48,10 @@ const TypographyControl = ( props ) => {
 	}, [] );
 
 	useLayoutEffect( () => {
-		window.addEventListener( 'click', function ( e ) {
+		// Named so the cleanup below can remove it. As an inline anonymous
+		// function this listener could never be detached, and one accumulated on
+		// window per mount -- this control remounts on every block selection.
+		const handleOutsideClick = ( e ) => {
 			const popupButton = document.querySelector(
 				`.active.popup-${ props?.attributes?.block_id } .spectra-control-popup__options--action-button`
 			);
@@ -92,7 +95,13 @@ const TypographyControl = ( props ) => {
 					);
 				}
 			}
-		} );
+		};
+
+		window.addEventListener( 'click', handleOutsideClick );
+
+		return () => {
+			window.removeEventListener( 'click', handleOutsideClick );
+		};
 	}, [] );
 
 	let lineHeight;
