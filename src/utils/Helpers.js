@@ -135,12 +135,11 @@ export const handleAddNewPost = async (
 };
 
 export const initiateAuth = async ( source = 'default' ) => {
+	// No manual X-WP-Nonce header: apiFetch's nonce middleware adds the REST
+	// nonce on every screen, whereas template_picker_nonce is only localized
+	// on the template-picker page and would be sent as "undefined" elsewhere.
 	const response = await apiFetch( {
 		path: `/sureforms/v1/initiate-auth?source=${ source }`,
-		headers: {
-			'Content-Type': 'application/json',
-			'X-WP-Nonce': srfm_admin.template_picker_nonce,
-		},
 		method: 'GET',
 	} );
 

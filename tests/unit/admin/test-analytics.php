@@ -10,6 +10,7 @@
 use Yoast\PHPUnitPolyfills\TestCases\TestCase;
 use SRFM\Admin\Analytics;
 use SRFM\Inc\Helper;
+use SRFM\Inc\Onboarding;
 
 /**
  * Tests for embed styling and MCP analytics tracking.
@@ -63,7 +64,102 @@ class Test_Analytics extends TestCase {
 		Helper::update_srfm_option( 'usage_events_pushed', [] );
 		Helper::update_srfm_option( 'usage_events_pending', [] );
 
+		// Only the onboarding_completed tests touch these, and this class has no
+		// DB rollback, so put back exactly what was there rather than blanketing
+		// every test in the class with a write.
+		if ( null !== $this->onboarding_options_backup ) {
+			foreach ( $this->onboarding_options_backup as $key => $value ) {
+				Helper::update_srfm_option( $key, $value );
+			}
+			$this->onboarding_options_backup = null;
+		}
+
 		parent::tearDown();
+	}
+
+	// ─── onboarding_completed (state event) ───────────────────────
+
+	/**
+	 * Onboarding options as they were before a test overwrote them, or null
+	 * when the running test never touched them.
+	 *
+	 * @var array<string,mixed>|null
+	 */
+	private $onboarding_options_backup = null;
+
+	/**
+	 * Store an onboarding analytics blob, run state detection, and return the
+	 * properties the onboarding_completed event was tracked with.
+	 *
+	 * @param array<string,mixed> $blob The onboarding_analytics option value.
+	 * @return array<string,mixed>
+	 */
+	private function detect_onboarding_completed_props( array $blob ) {
+		$this->onboarding_options_backup = [
+			'onboarding_completed'       => Helper::get_srfm_option( 'onboarding_completed', 'no' ),
+			'onboarding_analytics'       => Helper::get_srfm_option( 'onboarding_analytics', [] ),
+			'onboarding_event_v2_flushed' => Helper::get_srfm_option( 'onboarding_event_v2_flushed', false ),
+		];
+
+		Onboarding::get_instance()->set_onboarding_status( 'yes' );
+		Helper::update_srfm_option( 'onboarding_event_v2_flushed', true );
+		Helper::update_srfm_option( 'onboarding_analytics', $blob );
+
+		// The constructor runs detect_state_events(); the singleton was built
+		// before this test could seed the option, so construct a fresh instance.
+		new Analytics();
+
+		$pending = get_option( 'srfm_options', [] )['usage_events_pending'] ?? [];
+		foreach ( $pending as $event ) {
+			if ( 'onboarding_completed' === ( $event['event_name'] ?? '' ) ) {
+				return $event['properties'] ?? [];
+			}
+		}
+
+		$this->fail( 'onboarding_completed was not tracked.' );
+	}
+
+	/**
+	 * The add-ons step reports the tabs the user opened and whether they clicked
+	 * Upgrade; the cache step reports whether the warning was acknowledged.
+	 */
+	public function test_onboarding_completed_maps_viewed_tabs_upgrade_and_cache_ack() {
+		$props = $this->detect_onboarding_completed_props(
+			[
+				'skippedSteps'             => [ 'connect' ],
+				'premiumFeatures'          => [
+					'viewedTabs'     => [ 'multistep', 'conditional' ],
+					'upgradeClicked' => true,
+				],
+				'cacheConflictAcknowledged' => true,
+				'completed'                => true,
+			]
+		);
+
+		$this->assertSame( 'connect', $props['skipped_steps'] );
+		$this->assertSame( 'multistep,conditional', $props['viewed_premium_tabs'] );
+		$this->assertSame( 'yes', $props['premium_upgrade_clicked'] );
+		$this->assertSame( 'yes', $props['cache_conflict_acknowledged'] );
+		$this->assertArrayNotHasKey( 'selected_premium_features', $props );
+		$this->assertArrayNotHasKey( 'premium_features_count', $props );
+	}
+
+	/**
+	 * A blob written by an older wizard (no tab / cache keys) must not emit the
+	 * new properties, so dashboards can tell "not tracked" from "no".
+	 */
+	public function test_onboarding_completed_omits_new_props_when_absent() {
+		$props = $this->detect_onboarding_completed_props(
+			[
+				'skippedSteps' => [ 'emailDelivery' ],
+				'completed'    => true,
+			]
+		);
+
+		$this->assertSame( 'emailDelivery', $props['skipped_steps'] );
+		$this->assertArrayNotHasKey( 'viewed_premium_tabs', $props );
+		$this->assertArrayNotHasKey( 'premium_upgrade_clicked', $props );
+		$this->assertArrayNotHasKey( 'cache_conflict_acknowledged', $props );
 	}
 
 	// ─── embed_styling_gutenberg_count ────────────────────────────

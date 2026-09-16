@@ -1011,15 +1011,25 @@ class Analytics {
 					$onboarding_props['exited_early'] = (bool) $onboarding_analytics['exitedEarly'] ? 'yes' : 'no';
 				}
 
-				if ( ! empty( $onboarding_analytics['premiumFeatures']['selectedFeatures'] ) && is_array( $onboarding_analytics['premiumFeatures']['selectedFeatures'] ) ) {
-					$premium                                       = array_filter(
-						$onboarding_analytics['premiumFeatures']['selectedFeatures'],
-						static function( $f ) {
-							return 'ai-form-generation' !== $f && 'entries' !== $f;
-						}
-					);
-					$onboarding_props['selected_premium_features'] = implode( ',', $premium );
-					$onboarding_props['premium_features_count']    = (string) count( $premium );
+				// Add-ons step (2.13.0): the wizard shows one feature tab at a time
+				// instead of a checkbox list, so we report which tabs were opened and
+				// whether Upgrade was clicked. Blobs written by older wizards carry
+				// neither key and emit neither property.
+				if ( ! empty( $onboarding_analytics['premiumFeatures']['viewedTabs'] ) && is_array( $onboarding_analytics['premiumFeatures']['viewedTabs'] ) ) {
+					// The blob is whatever the wizard POSTed, so drop anything that
+					// is not a scalar slug before imploding.
+					$viewed_tabs                             = array_map( 'strval', array_filter( $onboarding_analytics['premiumFeatures']['viewedTabs'], 'is_scalar' ) );
+					$onboarding_props['viewed_premium_tabs'] = implode( ',', $viewed_tabs );
+				}
+
+				if ( isset( $onboarding_analytics['premiumFeatures']['upgradeClicked'] ) ) {
+					$onboarding_props['premium_upgrade_clicked'] = (bool) $onboarding_analytics['premiumFeatures']['upgradeClicked'] ? 'yes' : 'no';
+				}
+
+				// Cache-conflict step (2.13.0): shown only when a recognised caching
+				// plugin is active; "yes" means the user pressed "I've fixed this".
+				if ( isset( $onboarding_analytics['cacheConflictAcknowledged'] ) ) {
+					$onboarding_props['cache_conflict_acknowledged'] = (bool) $onboarding_analytics['cacheConflictAcknowledged'] ? 'yes' : 'no';
 				}
 			}
 

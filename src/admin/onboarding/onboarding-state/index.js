@@ -5,14 +5,8 @@ const leadDetails = srfm_admin?.website_lead_details || {};
 // Session storage key for onboarding state
 export const ONBOARDING_SESSION_STORAGE_KEY = 'sureforms_onboarding_state';
 
-// Storage keys used in onboarding process
-export const ONBOARDING_STORAGE_KEYS = [
-	'srfm_onboarding_premium_features',
-	'srfm_onboarding_premium_selections',
-	'srfm_onboarding_current_plan',
-	'srfm_onboarding_user_id',
-	'srfm_suremail_installation_started',
-];
+// localStorage keys written during onboarding and cleared on exit/finish.
+export const ONBOARDING_STORAGE_KEYS = [ 'srfm_suremail_installation_started' ];
 
 // Initial state
 const initialState = {
@@ -32,11 +26,19 @@ const initialState = {
 	// Analytics data
 	analytics: {
 		skippedSteps: [],
+		// Add-ons step: which feature tabs were opened and whether Upgrade
+		// was clicked. Mapped to viewed_premium_tabs / premium_upgrade_clicked
+		// in admin/analytics.php.
 		premiumFeatures: {
-			selectedFeatures: [],
+			viewedTabs: [],
+			upgradeClicked: false,
 		},
 		suremailInstalled: false,
 		accountConnected: false,
+		// Cache-conflict step: null until the step renders, then false/true.
+		// PHP reads this with isset(), so null keeps "never shown" distinct
+		// from "shown and not acknowledged" in the analytics blob.
+		cacheConflictAcknowledged: null,
 		completed: false,
 		exitedEarly: false,
 		// Migration step state. Captured for telemetry on /done.
@@ -51,7 +53,9 @@ const ACTIONS = {
 	MARK_STEP_SKIPPED: 'MARK_STEP_SKIPPED',
 	UNMARK_STEP_SKIPPED: 'UNMARK_STEP_SKIPPED',
 	SET_SUREMAIL_INSTALLED: 'SET_SUREMAIL_INSTALLED',
-	SET_SELECTED_PREMIUM_FEATURES: 'SET_SELECTED_PREMIUM_FEATURES',
+	MARK_PREMIUM_TAB_VIEWED: 'MARK_PREMIUM_TAB_VIEWED',
+	SET_PREMIUM_UPGRADE_CLICKED: 'SET_PREMIUM_UPGRADE_CLICKED',
+	SET_CACHE_CONFLICT_ACKNOWLEDGED: 'SET_CACHE_CONFLICT_ACKNOWLEDGED',
 	SET_ACCOUNT_CONNECTED: 'SET_ACCOUNT_CONNECTED',
 	SET_USER_DETAILS: 'SET_USER_DETAILS',
 	SET_COMPLETED: 'SET_COMPLETED',
@@ -105,17 +109,44 @@ const onboardingReducer = ( state, action ) => {
 						: state.analytics.skippedSteps,
 				},
 			};
-		case ACTIONS.SET_SELECTED_PREMIUM_FEATURES:
-			// Filter out any duplicate features before setting them
-			const uniqueFeatures = [ ...new Set( action.payload ) ];
+		case ACTIONS.MARK_PREMIUM_TAB_VIEWED:
+			if (
+				state.analytics.premiumFeatures.viewedTabs.includes(
+					action.payload
+				)
+			) {
+				return state;
+			}
 			return {
 				...state,
 				analytics: {
 					...state.analytics,
 					premiumFeatures: {
 						...state.analytics.premiumFeatures,
-						selectedFeatures: uniqueFeatures,
+						viewedTabs: [
+							...state.analytics.premiumFeatures.viewedTabs,
+							action.payload,
+						],
 					},
+				},
+			};
+		case ACTIONS.SET_PREMIUM_UPGRADE_CLICKED:
+			return {
+				...state,
+				analytics: {
+					...state.analytics,
+					premiumFeatures: {
+						...state.analytics.premiumFeatures,
+						upgradeClicked: action.payload,
+					},
+				},
+			};
+		case ACTIONS.SET_CACHE_CONFLICT_ACKNOWLEDGED:
+			return {
+				...state,
+				analytics: {
+					...state.analytics,
+					cacheConflictAcknowledged: action.payload,
 				},
 			};
 		case ACTIONS.SET_ACCOUNT_CONNECTED:
@@ -157,7 +188,9 @@ const onboardingReducer = ( state, action ) => {
 		case ACTIONS.SET_MIGRATION_SOURCES:
 			return {
 				...state,
-				migrationSources: Array.isArray( action.payload ) ? action.payload : [],
+				migrationSources: Array.isArray( action.payload )
+					? action.payload
+					: [],
 				migrationDetectionLoaded: true,
 			};
 		case ACTIONS.SET_MIGRATION_RESULT:
@@ -223,10 +256,20 @@ export const OnboardingProvider = ( { children } ) => {
 				type: ACTIONS.SET_SUREMAIL_INSTALLED,
 				payload: installed,
 			} ),
-		setSelectedPremiumFeatures: ( features ) =>
+		markPremiumTabViewed: ( slug ) =>
 			dispatch( {
-				type: ACTIONS.SET_SELECTED_PREMIUM_FEATURES,
-				payload: features,
+				type: ACTIONS.MARK_PREMIUM_TAB_VIEWED,
+				payload: slug,
+			} ),
+		setPremiumUpgradeClicked: ( clicked ) =>
+			dispatch( {
+				type: ACTIONS.SET_PREMIUM_UPGRADE_CLICKED,
+				payload: clicked,
+			} ),
+		setCacheConflictAcknowledged: ( acknowledged ) =>
+			dispatch( {
+				type: ACTIONS.SET_CACHE_CONFLICT_ACKNOWLEDGED,
+				payload: acknowledged,
 			} ),
 		setAccountConnected: ( connected ) =>
 			dispatch( {

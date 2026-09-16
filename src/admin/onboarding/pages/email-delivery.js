@@ -1,20 +1,20 @@
 import { __ } from '@wordpress/i18n';
-import { Container, Text, Title } from '@bsf/force-ui';
-import { Check } from 'lucide-react';
 import { useState, useEffect } from '@wordpress/element';
 import apiFetch from '@wordpress/api-fetch';
 import { useOnboardingNavigation } from '../hooks';
 import { useOnboardingState } from '../onboarding-state';
 import { handlePluginActionTrigger } from '@Utils/Helpers';
-import { Divider } from '../components';
+import { Divider, Header, FeatureList, HERO_PANEL_CLASS } from '../components';
 import NavigationButtons from '../components/navigation-buttons';
-import ICONS from '@Admin/components/template-picker/components/icons';
+// Rendered via <object>, not <img> or an inlined component: the artwork
+// animates with CSS keyframes, which svgr/svgo strips when inlining, and
+// <object> gives the SVG its own document where they run untouched.
+import emailDeliveryIllustration from '@Image/onboarding/email-delivery.svg';
 
 const features = [
-	__( 'Works smoothly with forms made using SureForms', 'sureforms' ),
-	__( 'Helps your emails reach the inbox instead of spam', 'sureforms' ),
-	__( "Setup is straightforward, even if you're not technical", 'sureforms' ),
-	__( 'Lightweight and easy to use without adding clutter', 'sureforms' ),
+	__( 'Form submission emails land in the inbox, not spam', 'sureforms' ),
+	__( 'Set up any SMTP provider in under 2 minutes', 'sureforms' ),
+	__( 'Works automatically with every SureForms form', 'sureforms' ),
 ];
 
 const EmailDelivery = () => {
@@ -45,16 +45,12 @@ const EmailDelivery = () => {
 			// Handle access key by sending it to the server
 			const handleAccessKey = async () => {
 				try {
+					// apiFetch adds the REST nonce itself; template_picker_nonce
+					// is not localized on this screen.
 					const response = await apiFetch( {
 						path: '/sureforms/v1/handle-access-key',
-						headers: {
-							'Content-Type': 'application/json',
-							'X-WP-Nonce': srfm_admin.template_picker_nonce,
-						},
 						method: 'POST',
-						body: JSON.stringify( {
-							accessKey,
-						} ),
+						data: { accessKey },
 					} );
 
 					if ( response?.success ) {
@@ -228,51 +224,37 @@ const EmailDelivery = () => {
 	};
 
 	return (
-		<div className="space-y-6">
-			<Container gap="sm" align="center" className="h-auto">
-				<div className="space-y-2">
-					<Title
-						tag="h3"
-						title={ __(
-							'Make Sure Your Emails Get Delivered',
-							'sureforms'
-						) }
-						size="lg"
-					/>
-					<Text size={ 14 } weight={ 400 } color="secondary">
-						{ __(
-							'Most WordPress sites struggle to send emails reliably, which means form submissions from your site might not reach your inbox — or end up in spam.',
-							'sureforms'
-						) }
-					</Text>
-					<Text size={ 14 } weight={ 400 } color="secondary">
-						{ __(
-							'SureMail is a simple SMTP plugin that helps make sure your emails actually get delivered.',
-							'sureforms'
-						) }
-					</Text>
-				</div>
-				<div className="h-full mx-auto">
-					{ ICONS.onboardingSureMailsScreen }
-				</div>
-			</Container>
-
-			<div className="space-y-2">
-				<Text size={ 14 } weight={ 600 } color="primary">
-					{ __( 'What you will get:', 'sureforms' ) }
-				</Text>
-				{ features.map( ( feature, index ) => (
-					<Container
-						key={ index }
-						className="flex items-center gap-1.5"
-					>
-						<Check className="size-4 text-icon-interactive" />
-						<Text size={ 14 } weight={ 400 } color="label">
-							{ feature }
-						</Text>
-					</Container>
-				) ) }
+		<div className="space-y-4">
+			<div className={ HERO_PANEL_CLASS }>
+				<object
+					type="image/svg+xml"
+					data={ emailDeliveryIllustration }
+					className="pointer-events-none block h-auto w-full"
+					aria-label={ __(
+						'Illustration of a form submission travelling to an inbox',
+						'sureforms'
+					) }
+				/>
 			</div>
+
+			<Header
+				title={ __(
+					'Make Sure Your Emails Get Delivered',
+					'sureforms'
+				) }
+				description={ __(
+					'WordPress can lose form emails to spam or failed delivery. SureMail routes them through a proper SMTP connection so every submission actually arrives.',
+					'sureforms'
+				) }
+			/>
+
+			<FeatureList
+				heading={ __(
+					'Connect your free account to get started.',
+					'sureforms'
+				) }
+				items={ features }
+			/>
 
 			<Divider />
 
@@ -284,7 +266,7 @@ const EmailDelivery = () => {
 					onClick: handleInstallSureMail,
 					text: pluginStatus.includes( suremailsPlugin?.status )
 						? __( 'Continue', 'sureforms' )
-						: __( 'Install SureMail', 'sureforms' ),
+						: __( 'Get SureMail', 'sureforms' ),
 				} }
 				skipProps={ {
 					onClick: handleSkip,
