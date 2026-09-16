@@ -1,5 +1,4 @@
 import { __ } from '@wordpress/i18n';
-import { addQueryArgs } from '@wordpress/url';
 import apiFetch from '@wordpress/api-fetch';
 import { useEffect, useRef, useState } from '@wordpress/element';
 
@@ -9,7 +8,6 @@ const SelectForm = ( {
 	formId,
 	selectedVal,
 	handleChange,
-	setForm,
 	setFormId,
 } ) => {
 	const [ formsData, setFormsData ] = useState( [] );
@@ -38,25 +36,6 @@ const SelectForm = ( {
 				}
 			} );
 			setFormsData( response );
-		} catch ( error ) {
-			console.log( error );
-		}
-	};
-
-	const getFormMarkup = async ( queryParams ) => {
-		let response;
-		try {
-			// See fetchForms(): apiFetch supplies the wp_rest nonce itself.
-			response = await apiFetch( {
-				path: addQueryArgs(
-					srfm_block_data.get_form_markup_url,
-					queryParams
-				),
-				headers: {
-					'content-type': 'application/json',
-				},
-			} );
-			return response;
 		} catch ( error ) {
 			console.log( error );
 		}
@@ -135,10 +114,7 @@ const SelectForm = ( {
 						<div
 							onClick={ () => {
 								selectOption( option );
-								const queryParams = { id: option.id };
-								const formMarkup = getFormMarkup( queryParams );
 								setFormId( option.id );
-								setForm( formMarkup );
 							} }
 							className={ `srfm-form-single-option ${
 								option[ id ] === formId
