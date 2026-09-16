@@ -6,7 +6,7 @@ import { Dot, Plus } from 'lucide-react';
 import ottoKitImage from '@Image/ottokit-integration.svg';
 import LoadingSkeleton from '@Admin/components/LoadingSkeleton';
 import apiFetch from '@wordpress/api-fetch';
-import { useState, useEffect } from '@wordpress/element';
+import { useState, useEffect, useRef } from '@wordpress/element';
 
 const OttoKitPage = ( {
 	loading,
@@ -35,6 +35,35 @@ const OttoKitPage = ( {
 	const [ CTA, setCTA ] = useState( '' );
 	const [ loadingData, setLoadingData ] = useState( false );
 
+	// The OAuth poll outlives the render that starts it, so its interval and popup
+	// live in a ref that the unmount cleanup below can still reach.
+	const authPollRef = useRef( { interval: null, popup: null } );
+	const isMountedRef = useRef( true );
+
+	// Stop the OAuth poll and close the popup it was watching, if either is still around.
+	const stopAuthPoll = () => {
+		const { interval, popup } = authPollRef.current;
+
+		if ( interval ) {
+			clearInterval( interval );
+		}
+
+		if ( popup && ! popup.closed ) {
+			popup.close();
+		}
+
+		authPollRef.current = { interval: null, popup: null };
+	};
+
+	// Tear the poll down on unmount. Without this the interval keeps polling
+	// admin-ajax and writing into a parent that is still mounted.
+	useEffect( () => {
+		return () => {
+			isMountedRef.current = false;
+			stopAuthPoll();
+		};
+	}, [] );
+
 	// Reuse the connection logic from integrations/index.js
 	const integrateWithSureTriggers = () => {
 		const formData = new window.FormData();
@@ -47,6 +76,13 @@ const OttoKitPage = ( {
 			method: 'POST',
 			body: formData,
 		} ).then( ( response ) => {
+			// This can resolve after unmount, and everything below either touches
+			// a still-mounted parent's state or opens a popup nothing is left to
+			// clean up.
+			if ( ! isMountedRef.current ) {
+				return;
+			}
+
 			if ( response.success ) {
 				window.SureTriggersConfig = response.data.data;
 				if ( setSelectedTab ) {
@@ -55,6 +91,10 @@ const OttoKitPage = ( {
 			} else {
 				if ( response.data.code ) {
 					if ( 'invalid_secret_key' === response.data.code ) {
+						// This effect re-runs on several deps, so drop any poll
+						// already in flight rather than stacking another on top.
+						stopAuthPoll();
+
 						const windowDimension = { width: 800, height: 720 };
 						const positioning = {
 							left: ( screen.width - windowDimension.width ) / 2,
@@ -65,6 +105,28 @@ const OttoKitPage = ( {
 							'',
 							`width=${ windowDimension.width },height=${ windowDimension.height },top=${ positioning.top },left=${ positioning.left },scrollbars=0`
 						);
+
+						// window.open runs from a promise continuation, so it has
+						// no user activation left and browsers routinely block it.
+						// Bail out here: polling on a null handle throws on every
+						// tick, before the clearInterval that would stop it.
+						if ( ! sureTriggersAuthenticationWindow ) {
+							setBtnDisabled( false );
+							setButtonText(
+								getButtonText(
+									'Activated',
+									pluginConnected || plugin.connected
+								)
+							);
+							setCTA( getCTA( 'Activated' ) );
+							alert(
+								__(
+									'Could not open the OttoKit connection window. Please allow popups for this site and try again.',
+									'sureforms'
+								)
+							);
+							return;
+						}
 
 						let iterations = 0;
 
@@ -80,8 +142,16 @@ const OttoKitPage = ( {
 								if ( authResponse.success ) {
 									window.SureTriggersConfig =
 										authResponse.data.data;
-									sureTriggersAuthenticationWindow.close();
-									clearInterval( suretriggersAuthInterval );
+									stopAuthPoll();
+
+									// This request can land after unmount, and the
+									// setters below belong to a parent that is
+									// still mounted -- setSelectedTab would move
+									// the user's tab out from under them.
+									if ( ! isMountedRef.current ) {
+										return;
+									}
+
 									setPluginConnected( true );
 									setLocalPluginStatus( 'Activated' );
 									if ( setSelectedTab ) {
@@ -100,12 +170,7 @@ const OttoKitPage = ( {
 								iterations >= 240 ||
 								sureTriggersAuthenticationWindow.closed
 							) {
-								if (
-									! sureTriggersAuthenticationWindow.closed
-								) {
-									sureTriggersAuthenticationWindow.close();
-								}
-								clearInterval( suretriggersAuthInterval );
+								stopAuthPoll();
 								setButtonText(
 									getButtonText(
 										'Activated',
@@ -116,6 +181,11 @@ const OttoKitPage = ( {
 								setBtnDisabled( false );
 							}
 						}, 500 );
+
+						authPollRef.current = {
+							interval: suretriggersAuthInterval,
+							popup: sureTriggersAuthenticationWindow,
+						};
 					}
 				}
 				console.error( response.data.message );
