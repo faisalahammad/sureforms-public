@@ -12,7 +12,6 @@ import { __ } from '@wordpress/i18n';
 import SelectForm from './SelectForm';
 
 export default ( { setAttributes } ) => {
-	const [ form, setForm ] = useState( {} );
 	const [ formId, setFormId ] = useState();
 	const [ value, setValue ] = useState( '' );
 
@@ -92,8 +91,6 @@ export default ( { setAttributes } ) => {
 			>
 				<div className="srfm-select-form-container">
 					<SelectForm
-						form={ form }
-						setForm={ setForm }
 						setFormId={ setFormId }
 						label="title"
 						id="id"
