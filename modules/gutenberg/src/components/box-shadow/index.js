@@ -33,7 +33,8 @@ const BoxShadowControl = ( props ) => {
 	const { getSelectedBlock } = select( 'core/block-editor' );
 
 	useLayoutEffect( () => {
-		window.addEventListener( 'click', function ( e ) {
+		// Named so the cleanup can remove it.
+		const handleOutsideClick = ( e ) => {
 			const popupButton = document.querySelector(
 				`.active.popup-${ blockId } .spectra-control-popup__options--action-button`
 			);
@@ -73,7 +74,13 @@ const BoxShadowControl = ( props ) => {
 					);
 				}
 			}
-		} );
+		};
+
+		window.addEventListener( 'click', handleOutsideClick );
+
+		return () => {
+			window.removeEventListener( 'click', handleOutsideClick );
+		};
 	}, [] );
 
 	const blockNameForHook = getSelectedBlock()?.name.split( '/' ).pop(); // eslint-disable-line @wordpress/no-unused-vars-before-return

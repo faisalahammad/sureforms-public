@@ -119,11 +119,23 @@ const Header = ( { breadCrumb } ) => {
 	} );
 
 	useEffect( () => {
-		window.addEventListener( 'srfm_license_status_updated', ( event ) => {
+		const handleLicenseStatusUpdate = ( event ) => {
 			if ( event?.detail ) {
 				setIsLicenseActive( event.detail.is_license_active );
 			}
-		} );
+		};
+
+		window.addEventListener(
+			'srfm_license_status_updated',
+			handleLicenseStatusUpdate
+		);
+
+		return () => {
+			window.removeEventListener(
+				'srfm_license_status_updated',
+				handleLicenseStatusUpdate
+			);
+		};
 	}, [] );
 
 	return (
