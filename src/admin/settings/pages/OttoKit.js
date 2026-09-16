@@ -28,7 +28,7 @@ const OttoKitPage = ( {
 	];
 	const plugin = srfm_admin?.integrations?.sure_triggers;
 
-	// Add state management for connection functionality (reused from integrations/index.js)
+	// State backing the connect/install/activate button.
 	const [ btnDisabled, setBtnDisabled ] = useState( false );
 	const [ buttonText, setButtonText ] = useState( '' );
 	const [ action, setAction ] = useState( '' );
@@ -40,7 +40,9 @@ const OttoKitPage = ( {
 	const authPollRef = useRef( { interval: null, popup: null } );
 	const isMountedRef = useRef( true );
 
-	// Stop the OAuth poll and close the popup it was watching, if either is still around.
+	// Stop the OAuth poll and close the popup it was watching. For the paths that
+	// own the popup's lifetime: success, timeout/user-closed, and replacing a poll
+	// that is still in flight.
 	const stopAuthPoll = () => {
 		const { interval, popup } = authPollRef.current;
 
@@ -55,16 +57,27 @@ const OttoKitPage = ( {
 		authPollRef.current = { interval: null, popup: null };
 	};
 
-	// Tear the poll down on unmount. Without this the interval keeps polling
-	// admin-ajax and writing into a parent that is still mounted.
+	// Drop the poll on unmount, but deliberately leave the popup open: the user may
+	// still be logging in, and OttoKit completes that server-side. force-ui renders
+	// its dialog as `{ open && ... }`, so closing the form dialog unmounts this
+	// component -- closing the window here would kill a login in progress just
+	// because a dialog closed or a settings tab changed.
 	useEffect( () => {
+		isMountedRef.current = true;
+
 		return () => {
 			isMountedRef.current = false;
-			stopAuthPoll();
+
+			if ( authPollRef.current.interval ) {
+				clearInterval( authPollRef.current.interval );
+			}
+
+			authPollRef.current = { interval: null, popup: null };
 		};
 	}, [] );
 
-	// Reuse the connection logic from integrations/index.js
+	// Connect this site to OttoKit, opening the OAuth popup when the stored
+	// secret key is missing or stale.
 	const integrateWithSureTriggers = () => {
 		const formData = new window.FormData();
 		formData.append( 'action', 'sureforms_integration' );
@@ -76,23 +89,27 @@ const OttoKitPage = ( {
 			method: 'POST',
 			body: formData,
 		} ).then( ( response ) => {
-			// This can resolve after unmount, and everything below either touches
-			// a still-mounted parent's state or opens a popup nothing is left to
-			// clean up.
+			if ( response.success ) {
+				// Process-wide state rather than this component's, so it is written
+				// even when the response lands after unmount.
+				window.SureTriggersConfig = response.data.data;
+			}
+
+			// Everything past here either touches a still-mounted parent's state or
+			// opens a popup nothing would be left to clean up.
 			if ( ! isMountedRef.current ) {
 				return;
 			}
 
 			if ( response.success ) {
-				window.SureTriggersConfig = response.data.data;
 				if ( setSelectedTab ) {
 					setSelectedTab( 'suretriggers' );
 				}
 			} else {
 				if ( response.data.code ) {
 					if ( 'invalid_secret_key' === response.data.code ) {
-						// This effect re-runs on several deps, so drop any poll
-						// already in flight rather than stacking another on top.
+						// Callers can invoke this while a poll is in flight, so
+						// drop the old one rather than stacking another on top.
 						stopAuthPoll();
 
 						const windowDimension = { width: 800, height: 720 };
@@ -193,7 +210,7 @@ const OttoKitPage = ( {
 		} );
 	};
 
-	// Complete plugin lifecycle management from integrations/index.js
+	// Complete plugin lifecycle management: install, activate, then connect.
 	const handlePluginActionTrigger = () => {
 		// For global settings: use internal methods so React state updates trigger re-render
 		if ( ! isFormSettings ) {
@@ -333,7 +350,7 @@ const OttoKitPage = ( {
 		return __( 'Install & Activate', 'sureforms' );
 	};
 
-	// Optimized button text logic from integrations/index.js
+	// Button label for the current plugin status and connection state.
 	const getButtonText = ( status, connected = false ) => {
 		if ( status === 'Activated' ) {
 			if ( isFormSettings ) {
