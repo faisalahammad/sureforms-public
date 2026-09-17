@@ -63,15 +63,6 @@ const CacheConflict = () => {
 		navigateToNextRoute();
 	};
 
-	// Leaves cacheConflictAcknowledged at false. Without this the only forward
-	// action also acknowledged, so among people who finished the wizard the
-	// property was always 'yes' and 'no' only ever meant "abandoned here" --
-	// which is not the question the property is meant to answer.
-	const handleSkip = () => {
-		actions.markStepSkipped( 'cacheConflict' );
-		navigateToNextRoute();
-	};
-
 	return (
 		<div className="space-y-4">
 			<div className={ HERO_PANEL_CLASS }>
@@ -122,13 +113,16 @@ const CacheConflict = () => {
 			  * be "View full guide", which leaves the wizard for a docs tab, with
 			  * muted ghost text as the only way forward -- so people clicked the
 			  * primary, read the docs, came back and had to find the real control.
+			  *
+			  * There is deliberately no skip here: acknowledging is the only way
+			  * past this step. That makes cacheConflictAcknowledged an abandonment
+			  * signal rather than a measure of intent -- 'yes' for everyone who
+			  * finishes, 'no' only alongside exited_early. admin/analytics.php says
+			  * the same thing where the property is written, so nobody reads it as
+			  * "how many people ignored the warning".
 			  */ }
 			<NavigationButtons
 				backProps={ { onClick: navigateToPreviousRoute } }
-				skipProps={ {
-					onClick: handleSkip,
-					text: __( 'Skip for now', 'sureforms' ),
-				} }
 				continueProps={ {
 					onClick: handleFixed,
 					text: __( "I've fixed this, continue setup", 'sureforms' ),

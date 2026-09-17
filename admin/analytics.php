@@ -1033,8 +1033,14 @@ class Analytics {
 					$onboarding_props['premium_upgrade_clicked'] = (bool) $onboarding_analytics['premiumFeatures']['upgradeClicked'] ? 'yes' : 'no';
 				}
 
-				// Cache-conflict step: shown only when a recognised caching
-				// plugin is active; "yes" means the user pressed "I've fixed this".
+				// Cache-conflict step: shown only when a recognised caching plugin
+				// is active; "yes" means the user pressed "I've fixed this".
+				//
+				// Read this as an abandonment signal, not as intent. Acknowledging
+				// is the only way past the step, so everyone who completes the
+				// wizard reports "yes" and "no" only ever appears next to
+				// exited_early. It cannot answer "did people act on the warning" --
+				// only "did they stop here".
 				if ( isset( $onboarding_analytics['cacheConflictAcknowledged'] ) ) {
 					$onboarding_props['cache_conflict_acknowledged'] = (bool) $onboarding_analytics['cacheConflictAcknowledged'] ? 'yes' : 'no';
 				}
