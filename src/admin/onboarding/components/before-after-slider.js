@@ -1,12 +1,19 @@
-import { useState } from '@wordpress/element';
+import { useRef, useState } from '@wordpress/element';
 import { __, sprintf } from '@wordpress/i18n';
 import { ChevronsLeftRight } from 'lucide-react';
 
 /**
  * Before/after comparison. `before` fills the box; `after` is revealed from
- * the right edge up to a draggable divider. Dragging is a transparent native
- * range input laid over the whole box, so it works with mouse, touch and
- * keyboard without any extra code.
+ * the right edge up to a divider that follows the pointer -- move across the
+ * card and the two versions wipe between each other, with nothing to click.
+ *
+ * A transparent native range input sits over the box so the comparison is
+ * reachable by keyboard. It takes no pointer events, so mouse and touch are
+ * driven only by the move handler below and the two cannot compute slightly
+ * different positions and fight over the divider.
+ *
+ * Pointer rather than mouse events: touch has no hover, but a finger dragged
+ * across the card still emits pointermove, so the wipe works there too.
  *
  * @param {Object} props
  * @param {Node}   props.before  Full-size "before" card.
@@ -26,11 +33,34 @@ const BeforeAfterSlider = ( {
 	label = __( 'Compare free and premium', 'sureforms' ),
 } ) => {
 	const [ position, setPosition ] = useState( initial );
+	const trackRef = useRef( null );
 
+	// Measured per event rather than cached: the card is inside a tab panel that
+	// can be scrolled or re-laid-out between renders, and a stale rect silently
+	// offsets the divider from the cursor.
+	const followPointer = ( event ) => {
+		const rect = trackRef.current?.getBoundingClientRect();
+
+		if ( ! rect?.width ) {
+			return;
+		}
+
+		const percent = ( ( event.clientX - rect.left ) / rect.width ) * 100;
+
+		setPosition( Math.min( 100, Math.max( 0, Math.round( percent ) ) ) );
+	};
+
+	// The ring is keyed to :focus-visible, not :focus-within. The range input
+	// covers the whole card, so focus-within also fires on click and drew a
+	// border around the card every time someone used the slider with a mouse.
+	// Keyboard focus still needs the ring: the input itself is invisible, so
+	// without it there is nothing on screen to show where focus is.
 	return (
 		<div style={ { width } }>
 			<div
-				className="relative select-none overflow-hidden rounded-[13px] focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-button-primary"
+				ref={ trackRef }
+				onPointerMove={ followPointer }
+				className="relative cursor-ew-resize select-none overflow-hidden rounded-[13px] has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-button-primary"
 				style={ { width, height } }
 			>
 				<div className="absolute inset-0">{ before }</div>
@@ -64,7 +94,7 @@ const BeforeAfterSlider = ( {
 						__( '%s of the free version shown', 'sureforms' ),
 						`${ position }%`
 					) }
-					className="absolute inset-0 m-0 h-full w-full cursor-ew-resize appearance-none bg-transparent opacity-0"
+					className="pointer-events-none absolute inset-0 m-0 h-full w-full appearance-none bg-transparent opacity-0"
 				/>
 			</div>
 		</div>
