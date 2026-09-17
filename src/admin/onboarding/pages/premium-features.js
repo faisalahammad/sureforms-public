@@ -212,7 +212,7 @@ const PremiumFeatures = () => {
 							<Badge
 								label={ __( 'Premium', 'sureforms' ) }
 								size="xs"
-								variant="neutral"
+								variant="inverse"
 							/>
 						</div>
 						<Text size={ 14 } weight={ 400 } color="tertiary">
