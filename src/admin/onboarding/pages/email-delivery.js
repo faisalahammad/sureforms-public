@@ -67,8 +67,6 @@ const EmailDelivery = () => {
 						const newUrl = `${
 							url.pathname
 						}?${ url.searchParams.toString() }${ url.hash }`;
-						console.log( 'newUrl', newUrl );
-
 						window.history.replaceState(
 							{},
 							document.title,

@@ -1,4 +1,5 @@
 import { __, sprintf } from '@wordpress/i18n';
+import { Button } from '@bsf/force-ui';
 import { useEffect } from '@wordpress/element';
 import { ExternalLink } from 'lucide-react';
 import { useOnboardingNavigation } from '../hooks';
@@ -31,12 +32,20 @@ const tips = [
 const CacheConflict = () => {
 	const { navigateToNextRoute, navigateToPreviousRoute } =
 		useOnboardingNavigation();
-	const [ , actions ] = useOnboardingState();
+	const [ onboardingState, actions ] = useOnboardingState();
+	const acknowledged =
+		onboardingState?.analytics?.cacheConflictAcknowledged ?? null;
 
 	// Flip null -> false on render so the analytics blob distinguishes
 	// "never saw this step" from "saw it and did not acknowledge".
+	//
+	// Only from null. The effect re-runs on every mount, and this step is
+	// reachable again with browser Back, so an unconditional reset would turn a
+	// recorded acknowledgement back into "did not acknowledge".
 	useEffect( () => {
-		actions.setCacheConflictAcknowledged( false );
+		if ( null === acknowledged ) {
+			actions.setCacheConflictAcknowledged( false );
+		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [] );
 
@@ -51,6 +60,15 @@ const CacheConflict = () => {
 
 	const handleFixed = () => {
 		actions.setCacheConflictAcknowledged( true );
+		navigateToNextRoute();
+	};
+
+	// Leaves cacheConflictAcknowledged at false. Without this the only forward
+	// action also acknowledged, so among people who finished the wizard the
+	// property was always 'yes' and 'no' only ever meant "abandoned here" --
+	// which is not the question the property is meant to answer.
+	const handleSkip = () => {
+		actions.markStepSkipped( 'cacheConflict' );
 		navigateToNextRoute();
 	};
 
@@ -85,20 +103,35 @@ const CacheConflict = () => {
 				items={ tips }
 			/>
 
+			<Button
+				variant="outline"
+				size="sm"
+				icon={ <ExternalLink /> }
+				iconPosition="right"
+				className="[&>svg]:size-4"
+				onClick={ handleViewGuide }
+				disabled={ ! guideUrl }
+			>
+				{ __( 'View full guide', 'sureforms' ) }
+			</Button>
+
 			<Divider />
 
+			{ /*
+			  * The primary button is the one that moves the wizard on. It used to
+			  * be "View full guide", which leaves the wizard for a docs tab, with
+			  * muted ghost text as the only way forward -- so people clicked the
+			  * primary, read the docs, came back and had to find the real control.
+			  */ }
 			<NavigationButtons
 				backProps={ { onClick: navigateToPreviousRoute } }
 				skipProps={ {
-					onClick: handleFixed,
-					text: __( "I've fixed this, continue setup", 'sureforms' ),
+					onClick: handleSkip,
+					text: __( 'Skip for now', 'sureforms' ),
 				} }
 				continueProps={ {
-					onClick: handleViewGuide,
-					text: __( 'View full guide', 'sureforms' ),
-					icon: <ExternalLink />,
-					className: '[&>svg]:size-4',
-					disabled: ! guideUrl,
+					onClick: handleFixed,
+					text: __( "I've fixed this, continue setup", 'sureforms' ),
 				} }
 			/>
 		</div>

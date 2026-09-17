@@ -105,9 +105,13 @@ class Test_Analytics extends TestCase {
 		Helper::update_srfm_option( 'onboarding_event_v2_flushed', true );
 		Helper::update_srfm_option( 'onboarding_analytics', $blob );
 
-		// The constructor runs detect_state_events(); the singleton was built
-		// before this test could seed the option, so construct a fresh instance.
-		new Analytics();
+		// Invoke the detector on the existing singleton rather than constructing
+		// a second Analytics. The constructor registers four callbacks, and a new
+		// object identity means add_action cannot dedupe them -- they would
+		// survive this test and fire on every later test's save_post.
+		$detect = new \ReflectionMethod( Analytics::class, 'detect_state_events' );
+		$detect->setAccessible( true );
+		$detect->invoke( Analytics::get_instance() );
 
 		$pending = get_option( 'srfm_options', [] )['usage_events_pending'] ?? [];
 		foreach ( $pending as $event ) {
@@ -130,6 +134,10 @@ class Test_Analytics extends TestCase {
 				'premiumFeatures'          => [
 					'viewedTabs'     => [ 'multistep', 'conditional' ],
 					'upgradeClicked' => true,
+					// Present on purpose. The assertions below claim the old
+					// mapping is gone, and without this key in the blob they pass
+					// against the old code too.
+					'selectedFeatures' => [ 'multistep', 'calculations' ],
 				],
 				'cacheConflictAcknowledged' => true,
 				'completed'                => true,
@@ -160,6 +168,74 @@ class Test_Analytics extends TestCase {
 		$this->assertArrayNotHasKey( 'viewed_premium_tabs', $props );
 		$this->assertArrayNotHasKey( 'premium_upgrade_clicked', $props );
 		$this->assertArrayNotHasKey( 'cache_conflict_acknowledged', $props );
+	}
+
+	/**
+	 * A null flag means "this step never rendered" and must emit nothing.
+	 *
+	 * Distinct from the absent-key case above: that one passes because the key is
+	 * missing, this one because the value is null, and they are different paths
+	 * through isset(). Both are needed -- a refactor to array_key_exists() would
+	 * invert the meaning of both properties and leave the absent-key test green.
+	 */
+	public function test_onboarding_completed_omits_new_props_when_null() {
+		$props = $this->detect_onboarding_completed_props(
+			[
+				'skippedSteps'              => [ 'connect' ],
+				'premiumFeatures'           => [ 'upgradeClicked' => null ],
+				'cacheConflictAcknowledged' => null,
+				'completed'                 => true,
+			]
+		);
+
+		$this->assertArrayNotHasKey( 'premium_upgrade_clicked', $props );
+		$this->assertArrayNotHasKey( 'cache_conflict_acknowledged', $props );
+	}
+
+	/**
+	 * false is a real answer and must be reported, not swallowed with null.
+	 */
+	public function test_onboarding_completed_reports_false_flags_as_no() {
+		$props = $this->detect_onboarding_completed_props(
+			[
+				'premiumFeatures'           => [ 'upgradeClicked' => false ],
+				'cacheConflictAcknowledged' => false,
+				'completed'                 => true,
+			]
+		);
+
+		$this->assertSame( 'no', $props['premium_upgrade_clicked'] );
+		$this->assertSame( 'no', $props['cache_conflict_acknowledged'] );
+	}
+
+	/**
+	 * viewedTabs is whatever the wizard POSTed, so only known slugs get through.
+	 *
+	 * The tabs are a closed set of four. Intersecting against it drops arrays,
+	 * nulls and booleans that would otherwise stringify into the property, and
+	 * caps its length at the same time.
+	 */
+	public function test_onboarding_completed_keeps_only_known_premium_tabs() {
+		$props = $this->detect_onboarding_completed_props(
+			[
+				'premiumFeatures' => [
+					'viewedTabs' => [
+						'multistep',
+						[ 'x' ],
+						null,
+						true,
+						'not-a-tab',
+						'conversational',
+					],
+				],
+				'completed'       => true,
+			]
+		);
+
+		$this->assertSame(
+			'multistep,conversational',
+			$props['viewed_premium_tabs']
+		);
 	}
 
 	// ─── embed_styling_gutenberg_count ────────────────────────────

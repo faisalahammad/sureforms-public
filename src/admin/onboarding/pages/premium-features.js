@@ -84,10 +84,25 @@ const PremiumFeatures = () => {
 	const [ activeSlug, setActiveSlug ] = useState( TABS[ 0 ].slug );
 	const [ isCopied, setIsCopied ] = useState( false );
 	const [ isPaused, setIsPaused ] = useState( false );
+	const [ hasChosenTab, setHasChosenTab ] = useState( false );
 
-	// Rotate through the tabs while the pointer is outside the showcase.
+	// Rotate through the tabs while nobody is using the showcase.
+	//
+	// Stopping matters more than rotating. Each tick remounts BeforeAfterSlider
+	// (it is keyed by slug), and that slider's range input is the only focusable
+	// control in the step -- so a rotation while it has focus drops focus onto
+	// <body>. Pausing on pointer alone left a keyboard user unable to hold it for
+	// more than one tick, which is WCAG 2.2.2 as well as simply unusable.
+	//
+	// Three things stop it: the pointer or focus being inside (isPaused), the
+	// visitor having picked a tab (hasChosenTab), and prefers-reduced-motion,
+	// which is exactly the setting for content that moves on its own.
 	useEffect( () => {
-		if ( isPaused ) {
+		const prefersReducedMotion = window.matchMedia?.(
+			'(prefers-reduced-motion: reduce)'
+		)?.matches;
+
+		if ( isPaused || hasChosenTab || prefersReducedMotion ) {
 			return;
 		}
 		const timer = setInterval( () => {
@@ -99,16 +114,26 @@ const PremiumFeatures = () => {
 			} );
 		}, TAB_ROTATE_MS );
 		return () => clearInterval( timer );
-	}, [ isPaused ] );
+	}, [ isPaused, hasChosenTab ] );
 
 	const activeTab =
 		TABS.find( ( item ) => item.slug === activeSlug ) || TABS[ 0 ];
+
+	// TABS and ADDON_COMPARISONS are two hand-maintained maps over the same four
+	// slugs. Adding a tab without its illustration should show an empty panel,
+	// not throw and take the whole step down.
+	const comparison = ADDON_COMPARISONS[ activeTab.slug ] ?? {};
 
 	// Only the first tab is "viewed" without a click; every later entry comes
 	// from handleTabChange. Recording the rotation as well would turn
 	// viewed_premium_tabs into "sat on the step for 12 seconds".
 	useEffect( () => {
 		actions.markPremiumTabViewed( TABS[ 0 ].slug );
+		// Moves upgradeClicked off null, which is what tells analytics the step
+		// was reached at all. Pro installs skip it entirely, and without this they
+		// would report premium_upgrade_clicked='no' -- indistinguishable from a
+		// free user who saw the tabs and declined.
+		actions.setPremiumUpgradeClicked( false );
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [] );
 
@@ -144,9 +169,11 @@ const PremiumFeatures = () => {
 		}
 	};
 
-	// A deliberate choice should stick, so restart the rotation from it.
+	// A deliberate choice should stick: rotation stops for good once someone
+	// picks a tab, rather than sliding off it a few seconds later.
 	const handleTabChange = ( slug ) => {
 		setActiveSlug( slug );
+		setHasChosenTab( true );
 		actions.markPremiumTabViewed( slug );
 	};
 
@@ -166,6 +193,10 @@ const PremiumFeatures = () => {
 				className="flex flex-col items-center gap-8"
 				onMouseEnter={ () => setIsPaused( true ) }
 				onMouseLeave={ () => setIsPaused( false ) }
+				// Capture phase: focus and blur do not bubble, so the listener has
+				// to see them on the way down or a keyboard user never pauses.
+				onFocusCapture={ () => setIsPaused( true ) }
+				onBlurCapture={ () => setIsPaused( false ) }
 			>
 				<Tabs.Group
 					activeItem={ activeSlug }
@@ -195,8 +226,8 @@ const PremiumFeatures = () => {
 					{ /* Keyed by slug so the divider resets when the tab changes. */ }
 					<BeforeAfterSlider
 						key={ activeTab.slug }
-						before={ ADDON_COMPARISONS[ activeTab.slug ].free }
-						after={ ADDON_COMPARISONS[ activeTab.slug ].pro }
+						before={ comparison.free }
+						after={ comparison.pro }
 						initial={ 20 }
 						label={ sprintf(
 							/* translators: %s: add-on name, e.g. Multistep Forms. */
@@ -242,9 +273,13 @@ const PremiumFeatures = () => {
 					color="primary"
 					className="px-1"
 				>
-					{ __(
-						'Selected features require SureForms Business - use code ONB10 to get 10% off on any plan.',
-						'sureforms'
+					{ sprintf(
+						/* translators: %s: coupon code, e.g. ONB10. */
+						__(
+							'Upgrade to SureForms Business - use code %1$s to get 10%% off on any plan.',
+							'sureforms'
+						),
+						COUPON_CODE
 					) }
 				</Text>
 				<Button variant="link" size="xs" onClick={ handleCopy }>

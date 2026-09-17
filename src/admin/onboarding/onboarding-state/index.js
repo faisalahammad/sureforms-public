@@ -3,7 +3,6 @@ import { createContext, useContext, useReducer } from '@wordpress/element';
 const leadDetails = srfm_admin?.website_lead_details || {};
 
 // Session storage key for onboarding state
-export const ONBOARDING_SESSION_STORAGE_KEY = 'sureforms_onboarding_state';
 
 // localStorage keys written during onboarding and cleared on exit/finish.
 export const ONBOARDING_STORAGE_KEYS = [ 'srfm_suremail_installation_started' ];
@@ -31,7 +30,11 @@ const initialState = {
 		// in admin/analytics.php.
 		premiumFeatures: {
 			viewedTabs: [],
-			upgradeClicked: false,
+			// null until the step renders, then false/true -- the same shape as
+			// cacheConflictAcknowledged below, and for the same reason. The step
+			// is hidden on Pro installs, so a plain false would report
+			// premium_upgrade_clicked='no' for someone who never saw it.
+			upgradeClicked: null,
 		},
 		suremailInstalled: false,
 		accountConnected: false,
@@ -211,13 +214,6 @@ const onboardingReducer = ( state, action ) => {
 
 // Function to clear all onboarding localStorage data
 export const clearOnboardingStorage = () => {
-	// Clear session storage
-	try {
-		sessionStorage.removeItem( ONBOARDING_SESSION_STORAGE_KEY );
-	} catch ( error ) {
-		console.error( `Error clearing session storage:`, error );
-	}
-
 	// Clear local storage keys
 	ONBOARDING_STORAGE_KEYS.forEach( ( key ) => {
 		try {

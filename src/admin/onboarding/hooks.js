@@ -68,7 +68,7 @@ export const useOnboardingNavigation = () => {
 			//
 			// While the probe is in-flight (`migrationDetectionLoaded === false`)
 			// we keep the step visible so that linear navigation past
-			// `user-details` doesn't race past it into `/done`. The step
+			// `premium-features` doesn't race past it into `cache-conflict`. The step
 			// itself renders a short loader and a clean "nothing to
 			// import" hint if the probe ultimately finds nothing.
 			if ( route.url === '/onboarding/import-forms' ) {

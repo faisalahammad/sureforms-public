@@ -1011,14 +1011,21 @@ class Analytics {
 					$onboarding_props['exited_early'] = (bool) $onboarding_analytics['exitedEarly'] ? 'yes' : 'no';
 				}
 
-				// Add-ons step (2.13.0): the wizard shows one feature tab at a time
+				// Add-ons step: the wizard shows one feature tab at a time
 				// instead of a checkbox list, so we report which tabs were opened and
 				// whether Upgrade was clicked. Blobs written by older wizards carry
 				// neither key and emit neither property.
 				if ( ! empty( $onboarding_analytics['premiumFeatures']['viewedTabs'] ) && is_array( $onboarding_analytics['premiumFeatures']['viewedTabs'] ) ) {
-					// The blob is whatever the wizard POSTed, so drop anything that
-					// is not a scalar slug before imploding.
-					$viewed_tabs                             = array_map( 'strval', array_filter( $onboarding_analytics['premiumFeatures']['viewedTabs'], 'is_scalar' ) );
+					// The blob is whatever the wizard POSTed. The tabs are a closed
+					// set of four, so intersect against it rather than filtering on
+					// type: that drops anything unrecognised and caps both the
+					// content and the length of the property in one step.
+					$viewed_tabs                             = array_values(
+						array_intersect(
+							array_map( 'strval', array_filter( (array) $onboarding_analytics['premiumFeatures']['viewedTabs'], 'is_scalar' ) ),
+							[ 'multistep', 'conditional', 'calculation', 'conversational' ]
+						)
+					);
 					$onboarding_props['viewed_premium_tabs'] = implode( ',', $viewed_tabs );
 				}
 
@@ -1026,7 +1033,7 @@ class Analytics {
 					$onboarding_props['premium_upgrade_clicked'] = (bool) $onboarding_analytics['premiumFeatures']['upgradeClicked'] ? 'yes' : 'no';
 				}
 
-				// Cache-conflict step (2.13.0): shown only when a recognised caching
+				// Cache-conflict step: shown only when a recognised caching
 				// plugin is active; "yes" means the user pressed "I've fixed this".
 				if ( isset( $onboarding_analytics['cacheConflictAcknowledged'] ) ) {
 					$onboarding_props['cache_conflict_acknowledged'] = (bool) $onboarding_analytics['cacheConflictAcknowledged'] ? 'yes' : 'no';
