@@ -9,12 +9,9 @@ import { initiateAuth } from '@Utils/Helpers';
 import describeFormIllustration from '@Image/onboarding/connect-describe-form.gif';
 
 const features = [
-	__(
-		'Type a simple description and get a fully built form instantly',
-		'sureforms'
-	),
-	__( 'AI picks the right fields, labels, and layout for you', 'sureforms' ),
-	__( 'Generate up to 10 forms with AI, completely free', 'sureforms' ),
+	__( 'Create complete forms from a simple description', 'sureforms' ),
+	__( 'Get the right fields, labels, and layout added for you', 'sureforms' ),
+	__( 'Get 10 AI form generations for free', 'sureforms' ),
 ];
 
 const Connect = () => {
@@ -61,14 +58,14 @@ const Connect = () => {
 					'sureforms'
 				) }
 				description={ __(
-					'Describe what you need in a few words. AI builds the entire form for you, ready to publish.',
+					'Describe the form you need, and SureForms will create the fields, labels, and layout for you.',
 					'sureforms'
 				) }
 			/>
 
 			<FeatureList
 				heading={ __(
-					'Connect your free account to get started.',
+					'Connect this website to your free SureForms account to activate AI form creation and get 10 free AI generations.',
 					'sureforms'
 				) }
 				items={ features }
@@ -83,11 +80,11 @@ const Connect = () => {
 					onClick: handleConnect,
 					text: isRegistered
 						? __( 'Continue', 'sureforms' )
-						: __( 'Connect', 'sureforms' ),
+						: __( 'Connect and Activate AI', 'sureforms' ),
 				} }
 				skipProps={ {
 					onClick: handleSkip,
-					text: __( 'Skip', 'sureforms' ),
+					text: __( 'Skip for now', 'sureforms' ),
 				} }
 			/>
 		</div>

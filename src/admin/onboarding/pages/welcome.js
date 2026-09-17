@@ -7,8 +7,8 @@ import NavigationButtons from '../components/navigation-buttons';
 import { getWelcomeSlides } from '../illustrations/welcome-slides';
 
 const trustItems = [
-	__( 'Gutenberg Native', 'sureforms' ),
-	__( 'No Code Required', 'sureforms' ),
+	__( 'Built for WordPress', 'sureforms' ),
+	__( 'No Coding Required', 'sureforms' ),
 	__( 'Works With Any Theme', 'sureforms' ),
 ];
 
@@ -27,7 +27,7 @@ const Welcome = () => {
 				>
 					{ createInterpolateElement(
 						__(
-							'Welcome to <brand>SureForms</brand> <wave>👋</wave>',
+							'Welcome to <brand>SureForms</brand>! <wave>👋</wave>',
 							'sureforms'
 						),
 						{
@@ -38,12 +38,12 @@ const Welcome = () => {
 				</Text>
 				<Text as="p" size={ 16 } color="secondary">
 					{ __(
-						'Build WordPress forms that actually convert.',
+						'Create beautiful WordPress forms that convert.',
 						'sureforms'
 					) }
 					<br />
 					{ __(
-						"Let's get you set up in under a minute.",
+						'Get started in less than a minute.',
 						'sureforms'
 					) }
 				</Text>
@@ -55,7 +55,7 @@ const Welcome = () => {
 				containerProps={ { justify: 'center' } }
 				continueProps={ {
 					onClick: navigateToNextRoute,
-					text: __( 'Set Up SureForms Now', 'sureforms' ),
+					text: __( 'Get Started', 'sureforms' ),
 				} }
 			/>
 

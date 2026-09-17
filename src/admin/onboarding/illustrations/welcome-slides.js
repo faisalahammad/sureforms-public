@@ -34,7 +34,7 @@ const ALL_SLIDES = [
 	slide( __( 'AI Form Builder', 'sureforms' ), aiFormBuilder ),
 	slide( __( 'Drag & Drop Fields', 'sureforms' ), dragDropFields ),
 	slide( __( 'Payment Forms', 'sureforms' ), paymentForms ),
-	slide( __( 'Entries', 'sureforms' ), entries ),
+	slide( __( 'Manage Form Entries', 'sureforms' ), entries ),
 	slide( __( 'Conditional Logic', 'sureforms' ), conditionalLogic, true ),
 	slide(
 		__( 'Conversational Forms', 'sureforms' ),
