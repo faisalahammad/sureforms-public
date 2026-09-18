@@ -133,7 +133,8 @@ class Front_End {
 				);
 			}
 
-			$license_key = Stripe_Helper::get_license_key();
+			// Public checkout request - never block the visitor on a SureCart license call.
+			$license_key = Stripe_Helper::get_license_key( false );
 
 			// Create payment intent with confirm: true for immediate processing.
 			$payment_intent_data = [
@@ -359,7 +360,8 @@ class Front_End {
 				throw new \Exception( __( 'Failed to create customer for subscription.', 'sureforms' ) );
 			}
 
-			$license_key = Stripe_Helper::get_license_key();
+			// Public checkout request - never block the visitor on a SureCart license call.
+			$license_key = Stripe_Helper::get_license_key( false );
 			// Prepare subscription data for middleware.
 			$subscription_data = apply_filters(
 				'srfm_create_subscription_data',
