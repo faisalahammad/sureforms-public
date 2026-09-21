@@ -238,6 +238,54 @@ class Test_Analytics extends TestCase {
 		);
 	}
 
+	/**
+	 * Which wizard produced the blob. Every onboarding_completed event must carry
+	 * it, so old and new onboarding can be split with one filter instead of
+	 * inferred from which properties happen to be present -- a v2 run on a Pro
+	 * install with no caching plugin emits none of the new properties and would
+	 * otherwise be indistinguishable from a v1 run.
+	 *
+	 * Three tests rather than three calls in one: track() dedupes per event name
+	 * and only setUp() resets that, so a second detect in the same test would
+	 * hand back the first call's properties.
+	 */
+	public function test_onboarding_completed_reports_onboarding_v2_yes() {
+		$props = $this->detect_onboarding_completed_props(
+			[
+				'onboardingV2' => true,
+				'completed'    => true,
+			]
+		);
+
+		$this->assertSame( 'yes', $props['onboarding_v2'] );
+	}
+
+	/**
+	 * A blob from the old wizard has no onboardingV2 key. Deliberately not the
+	 * isset() shape the other flags use: absence IS the legacy case, so it has to
+	 * produce a value rather than nothing.
+	 */
+	public function test_onboarding_completed_reports_onboarding_v2_no_for_a_legacy_blob() {
+		$props = $this->detect_onboarding_completed_props(
+			[
+				'premiumFeatures' => [ 'selectedFeatures' => [ 'multistep' ] ],
+				'completed'       => true,
+			]
+		);
+
+		$this->assertSame( 'no', $props['onboarding_v2'] );
+	}
+
+	/**
+	 * No blob at all: onboarding was completed before analytics were captured.
+	 * The other properties are all inside the non-empty guard; this one must not be.
+	 */
+	public function test_onboarding_completed_reports_onboarding_v2_no_without_a_blob() {
+		$props = $this->detect_onboarding_completed_props( [] );
+
+		$this->assertSame( 'no', $props['onboarding_v2'] );
+	}
+
 	// ─── embed_styling_gutenberg_count ────────────────────────────
 
 	/**

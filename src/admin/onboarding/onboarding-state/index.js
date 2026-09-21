@@ -24,6 +24,10 @@ const initialState = {
 	migrationDetectionLoaded: false,
 	// Analytics data
 	analytics: {
+		// Which wizard wrote the blob. Constant on purpose: admin/analytics.php
+		// maps it to onboarding_v2 and reports 'no' when the key is missing,
+		// which is how a blob from the old wizard is told apart from this one.
+		onboardingV2: true,
 		skippedSteps: [],
 		// Add-ons step: which feature tabs were opened and whether Upgrade
 		// was clicked. Mapped to viewed_premium_tabs / premium_upgrade_clicked

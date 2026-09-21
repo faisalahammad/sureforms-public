@@ -990,6 +990,14 @@ class Analytics {
 			$onboarding_props     = [];
 			$onboarding_analytics = Helper::get_srfm_option( 'onboarding_analytics', [] );
 
+			// Which wizard produced the blob. Outside the non-empty guard and not
+			// isset()-gated like the flags below, because absence IS the answer: a
+			// blob from the old wizard, or no blob at all, must still report 'no'.
+			// Without this the two wizards share one event name and can only be
+			// told apart by which properties happen to be present -- and a v2 run
+			// on Pro with no caching plugin emits none of the new ones.
+			$onboarding_props['onboarding_v2'] = ! empty( $onboarding_analytics['onboardingV2'] ) ? 'yes' : 'no';
+
 			if ( ! empty( $onboarding_analytics ) && is_array( $onboarding_analytics ) ) {
 				if ( ! empty( $onboarding_analytics['skippedSteps'] ) && is_array( $onboarding_analytics['skippedSteps'] ) ) {
 					$onboarding_props['skipped_steps'] = implode( ',', $onboarding_analytics['skippedSteps'] );
