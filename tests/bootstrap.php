@@ -90,3 +90,5 @@ add_filter(
  * so let the children inherit this and reuse the same tables.
  */
 putenv( 'WP_TESTS_SKIP_INSTALL=1' );
+
+require_once __DIR__ . '/includes/class-srfm-unit-test-case.php';

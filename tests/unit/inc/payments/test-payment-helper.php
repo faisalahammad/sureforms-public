@@ -8,7 +8,7 @@
 use Yoast\PHPUnitPolyfills\TestCases\TestCase;
 use SRFM\Inc\Payments\Payment_Helper;
 
-class Test_Payment_Helper extends TestCase {
+class Test_Payment_Helper extends SRFM_Unit_Test_Case {
 
 	protected function setUp(): void {
 		parent::setUp();

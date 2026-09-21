@@ -13,7 +13,7 @@ use SRFM\Inc\Submit_Token;
  *
  * @since 2.6.0
  */
-class Test_Submit_Token extends TestCase {
+class Test_Submit_Token extends SRFM_Unit_Test_Case {
 
 	/**
 	 * A valid form ID for testing.

@@ -2373,7 +2373,9 @@ class Test_Helper extends TestCase {
      * Test sanitize_by_type strips HTML tags from strings.
      */
     public function test_sanitize_by_type_strips_html() {
-        $this->assertSame( 'alert("xss")test', Helper::sanitize_by_type( '<script>alert("xss")</script>test' ) );
+        // sanitize_text_field() drops a <script> element wholesale - tags and the
+        // code between them - rather than unwrapping it, so the payload is gone.
+        $this->assertSame( 'test', Helper::sanitize_by_type( '<script>alert("xss")</script>test' ) );
     }
 
     /**
@@ -2454,8 +2456,12 @@ class Test_Helper extends TestCase {
 
         $result = Helper::sanitize_by_type( $input );
 
-        $this->assertArrayHasKey( 'key', $result );
-        $this->assertSame( 'value', $result['key'] );
+        // Keys go through sanitize_text_field() too, and a whole <script> element
+        // sanitizes to '' - so the hostile key survives as an empty one, never as
+        // the markup that was submitted.
+        $this->assertArrayNotHasKey( '<script>key</script>', $result );
+        $this->assertArrayHasKey( '', $result );
+        $this->assertSame( 'value', $result[''] );
     }
 
     /**
@@ -2470,15 +2476,18 @@ class Test_Helper extends TestCase {
 
         $result = Helper::sanitize_by_type( $value );
 
-        // Traverse 10 levels — should still be an array.
+        // The guard is `$depth > 10`, and the outermost array is handled at depth 0,
+        // so levels 0-10 survive as arrays - 11 of them - and the twelfth is cut.
         $current = $result;
-        for ( $i = 0; $i < 10; $i++ ) {
-            $this->assertIsArray( $current, "Expected array at depth {$i}" );
+        $levels  = 0;
+        while ( is_array( $current ) ) {
+            $this->assertArrayHasKey( 'nested', $current, "Expected 'nested' at depth {$levels}" );
             $current = $current['nested'];
+            $levels++;
         }
 
-        // At depth 11+, the value should be truncated to empty string.
-        $this->assertSame( '', $current );
+        $this->assertSame( 11, $levels, 'Nesting should be truncated after 11 array levels.' );
+        $this->assertSame( '', $current, 'The truncated tail should be an empty string.' );
     }
 
     /**
@@ -2527,8 +2536,10 @@ class Test_Helper extends TestCase {
             'blockName' => 'srfm/email',
             'attrs'     => [ 'label' => '' ],
         ];
+        // With no label the block name is the slug source, and sanitize_title()
+        // turns the namespace separator into a hyphen.
         $slug = Helper::generate_unique_block_slug( $block, [], '' );
-        $this->assertEquals( 'srfmemail', $slug );
+        $this->assertEquals( 'srfm-email', $slug );
     }
 
     /**

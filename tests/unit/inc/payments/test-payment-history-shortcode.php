@@ -393,29 +393,44 @@ class Test_Payment_History_Shortcode extends TestCase {
 	// ajax_cancel_subscription
 	// ──────────────────────────────────────────────
 
+	/**
+	 * Run an AJAX handler and return what it sent to the browser.
+	 *
+	 * wp_send_json_error() echoes the payload and then wp_die()s with an empty
+	 * message, so the text under test is in the output buffer - never in the
+	 * exception. Asserting on getMessage() only ever saw ''.
+	 *
+	 * @param callable $call The handler invocation.
+	 * @return string
+	 */
+	private function capture_json_response( callable $call ) {
+		ob_start();
+
+		try {
+			$call();
+		} catch ( \WPDieException $e ) { // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedCatch
+			// Expected - the handler terminates the request.
+		}
+
+		return (string) ob_get_clean();
+	}
+
 	public function test_ajax_cancel_subscription_fails_without_nonce() {
 		// Simulate AJAX call without nonce — should trigger wp_send_json_error.
 		$_POST = [];
-		try {
-			$this->shortcode->ajax_cancel_subscription();
-		} catch ( \WPDieException $e ) {
-			$this->assertStringContainsString( 'Security check failed', $e->getMessage() );
-			return;
-		}
-		// If wp_send_json_error calls wp_die in test env, we get here.
-		$this->assertTrue( true );
+
+		$output = $this->capture_json_response( [ $this->shortcode, 'ajax_cancel_subscription' ] );
+
+		$this->assertStringContainsString( 'Security check failed', $output );
 	}
 
 	public function test_ajax_cancel_subscription_fails_when_logged_out() {
 		wp_set_current_user( 0 );
 		$_POST['nonce'] = wp_create_nonce( 'srfm_frontend_payment_nonce' );
-		try {
-			$this->shortcode->ajax_cancel_subscription();
-		} catch ( \WPDieException $e ) {
-			$this->assertStringContainsString( 'logged in', $e->getMessage() );
-			return;
-		}
-		$this->assertTrue( true );
+
+		$output = $this->capture_json_response( [ $this->shortcode, 'ajax_cancel_subscription' ] );
+
+		$this->assertStringContainsString( 'logged in', $output );
 	}
 
 	public function test_ajax_cancel_subscription_fails_with_empty_payment_id() {
@@ -427,15 +442,12 @@ class Test_Payment_History_Shortcode extends TestCase {
 		wp_set_current_user( $user_id );
 		$_POST['nonce']      = wp_create_nonce( 'srfm_frontend_payment_nonce' );
 		$_POST['payment_id'] = 0;
-		try {
-			$this->shortcode->ajax_cancel_subscription();
-		} catch ( \WPDieException $e ) {
-			$this->assertStringContainsString( 'Invalid payment data', $e->getMessage() );
-			wp_delete_user( $user_id );
-			return;
-		}
+
+		$output = $this->capture_json_response( [ $this->shortcode, 'ajax_cancel_subscription' ] );
+
 		wp_delete_user( $user_id );
-		$this->assertTrue( true );
+
+		$this->assertStringContainsString( 'Invalid payment data', $output );
 	}
 
 	// ──────────────────────────────────────────────
@@ -869,7 +881,11 @@ class Test_Payment_History_Shortcode extends TestCase {
 		$default = [ 'success' => false, 'message' => 'default' ];
 		$payment = [];
 		$result  = $handler->process_stripe_subscription_cancellation( $default, $payment );
-		$this->assertSame( $default, $result );
+
+		// An empty gateway is Stripe here - the payments row's `gateway` column
+		// defaults to '' for legacy records and Stripe is the only free gateway.
+		$this->assertFalse( $result['success'] );
+		$this->assertStringContainsString( 'Subscription ID not found', $result['message'] );
 	}
 
 	public function test_stripe_subscription_cancellation_missing_subscription_id() {

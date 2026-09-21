@@ -527,7 +527,7 @@ class Test_Stripe_Helper extends TestCase {
 		// The boolean must reflect the actual row state of the payments table:
 		// true only when at least one transaction row exists, false when the table
 		// is empty or absent. Computed from a direct count here (read-only, no mutation).
-		$table    = \SRFM\Inc\Payments\Payments::get_instance()->get_tablename();
+		$table    = \SRFM\Inc\Database\Tables\Payments::get_instance()->get_tablename();
 		$expected = false;
 		if ( is_string( $table ) && '' !== $table ) {
 			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching

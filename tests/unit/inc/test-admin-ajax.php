@@ -10,7 +10,7 @@ use Yoast\PHPUnitPolyfills\TestCases\TestCase;
 use SRFM\Inc\Admin_Ajax;
 use SRFM\Inc\Client_Logger;
 
-class Test_Admin_Ajax extends TestCase {
+class Test_Admin_Ajax extends SRFM_Unit_Test_Case {
 
 	protected $admin_ajax;
 
