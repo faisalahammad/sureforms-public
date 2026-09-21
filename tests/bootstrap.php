@@ -81,3 +81,12 @@ add_filter(
 		};
 	}
 );
+
+/*
+ * Tests marked @runInSeparateProcess re-enter this bootstrap in a child process, and
+ * the WP test bootstrap drops and recreates every table when it runs. That wiped the
+ * database out from under the parent run, so later DB-backed tests failed for reasons
+ * that had nothing to do with them. The parent has already installed by this point,
+ * so let the children inherit this and reuse the same tables.
+ */
+putenv( 'WP_TESTS_SKIP_INSTALL=1' );
