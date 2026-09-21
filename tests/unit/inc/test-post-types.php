@@ -290,9 +290,10 @@ class Test_Post_Types extends TestCase {
 		$this->assertSame( '', $result['site_logo'] );
 
 		// ...but for markup it strips the tags and prepends a scheme rather than
-		// returning empty. What matters is that nothing executable survives.
+		// returning empty. Assert the whole value so any future change to what
+		// survives has to be made deliberately.
+		$this->assertSame( 'http://scriptxss/script', $result['cover_image'] );
 		$this->assertStringNotContainsString( '<', $result['cover_image'] );
-		$this->assertStringNotContainsString( 'script>', $result['cover_image'] );
 	}
 
 	public function test_register_post_metas_instant_form_returns_empty_for_non_array() {
