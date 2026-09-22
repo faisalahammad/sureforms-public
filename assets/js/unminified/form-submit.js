@@ -814,8 +814,12 @@ async function afterSubmit( formStatus, form ) {
 		await parseRestResponse( response );
 
 		if ( ! response.ok ) {
+			// Its own type, not 'network'. The entry is already saved by the time
+			// this runs, so a failure here is the after-submission process --
+			// integrations and webhooks -- not the submission. Recorded server-side
+			// against the integration category for that reason.
 			srfmLog.add( {
-				type: 'network',
+				type: 'after_submission',
 				status,
 				duration_ms: durationMs,
 				message: `After-submission step responded ${ status }`,
@@ -832,8 +836,17 @@ async function afterSubmit( formStatus, form ) {
 
 		// The submission itself succeeded, so nothing is shown to the visitor and
 		// this would otherwise be invisible outside the console.
+		//
+		// Logged without a status, which is what keeps it out of is_fault(). We
+		// caught the browser abandoning the request -- the page unloading behind a
+		// redirect confirmation is the usual cause, and it is what keepalive above
+		// exists to survive -- and that says nothing about whether the server ran
+		// the work. It is guarded by is_after_submission_process_triggered and
+		// usually has. Safari spells this abort "TypeError: Load failed", and
+		// raising a non-dismissible "their entries were not saved" notice off it
+		// reported healthy sites as broken.
 		srfmLog.add( {
-			type: 'error',
+			type: 'after_submission',
 			duration_ms: Math.round( performance.now() - startedAt ),
 			message: `After-submission step failed: ${
 				error?.name ?? 'Error'

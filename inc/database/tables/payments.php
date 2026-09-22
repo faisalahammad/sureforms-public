@@ -1295,7 +1295,7 @@ class Payments extends Base {
 					_doing_it_wrong(
 						__METHOD__,
 						esc_html( "{$operator} requires an array value, received " . gettype( $condition['value'] ) . '.' ),
-						'x.x.x'
+						'2.12.7'
 					);
 					continue;
 				}

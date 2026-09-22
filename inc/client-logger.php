@@ -110,7 +110,7 @@ class Client_Logger {
 	 * tail must not be handed the tail from before the write.
 	 *
 	 * @var array<string,array{text:string,shown:int,total:int}>
-	 * @since x.x.x
+	 * @since 2.12.7
 	 */
 	private static $tail_memo = [];
 
@@ -169,7 +169,14 @@ class Client_Logger {
 			return true;
 		}
 
-		if ( 'network' !== $type ) {
+		// 'after_submission' runs after the entry is already saved, so it is only a
+		// fault when the server said so. A browser-side failure there -- an aborted
+		// fetch as the page unloads, which is what a redirect confirmation does and
+		// what `keepalive` exists to survive -- tells us nothing about whether the
+		// work ran: the endpoint is guarded by is_after_submission_process_triggered
+		// and usually has. Safari spells that abort "TypeError: Load failed", and
+		// alarming on it reported healthy sites as broken.
+		if ( ! in_array( $type, [ 'network', 'after_submission' ], true ) ) {
 			return false;
 		}
 
@@ -193,6 +200,25 @@ class Client_Logger {
 	 * @return void
 	 */
 	public static function record_failure( $category, $form_id = 0, $form_title = '' ) {
+		// Logging off means nothing is recorded, not merely nothing displayed.
+		//
+		// The display side was already gated -- get_action_items() skips the
+		// first-party items and has_action_item_warnings() returns false -- but the
+		// counter kept being written, from the two call sites in form-submit.php
+		// that sit beside an append() the enabled check does stop. So a site with
+		// logging switched off still accumulated failure state, and switching
+		// logging on surfaced every fault recorded while it was off, behind a View
+		// details report whose debug log is empty because nothing was written.
+		//
+		// Gated here rather than at the call sites, for the reason append() states:
+		// the guard belongs on the function that writes, not on today's callers.
+		// clear_category() and the acknowledge helpers are deliberately left
+		// ungated -- they only remove state, and must keep working so nothing is
+		// stranded by the toggle.
+		if ( ! self::is_enabled() ) {
+			return;
+		}
+
 		if ( ! in_array( $category, self::CATEGORIES, true ) ) {
 			return;
 		}
@@ -449,9 +475,18 @@ class Client_Logger {
 		// on a badly broken site those are exactly the conditions that occur.
 		// A notification or integration failure records its own category at the call
 		// site; everything else reaching here is the submission itself.
-		if ( self::is_fault( $entry ) && 'message' !== ( $entry['type'] ?? '' ) ) {
+		$type = Helper::get_string_value( $entry['type'] ?? '' );
+
+		if ( self::is_fault( $entry ) && 'message' !== $type ) {
+			// The after-submission step runs on an entry that is already saved and
+			// fires srfm_after_submission_process, which is where integrations and
+			// webhooks hook in. Calling that a submission failure told the site owner
+			// "their entries were not saved" about entries that were -- the wrong
+			// message on the one notice that cannot be dismissed. The category is
+			// derived here rather than taken from the entry: the client names what
+			// happened, the server decides what it means.
 			self::record_failure(
-				'submission',
+				'after_submission' === $type ? 'integration' : 'submission',
 				Helper::get_integer_value( $entry['form_id'] ?? 0 ),
 				Helper::get_string_value( $entry['form_title'] ?? '' )
 			);
@@ -626,7 +661,7 @@ class Client_Logger {
 	 * @return array<string,mixed> Empty when nothing usable survived.
 	 */
 	public static function sanitize_entry( array $raw ) {
-		$allowed_types = [ 'network', 'response', 'error', 'message', 'blocked' ];
+		$allowed_types = [ 'network', 'response', 'error', 'message', 'blocked', 'after_submission' ];
 		$type          = isset( $raw['type'] ) ? sanitize_key( Helper::get_string_value( $raw['type'] ) ) : '';
 
 		if ( ! in_array( $type, $allowed_types, true ) ) {
@@ -752,10 +787,23 @@ class Client_Logger {
 		// error.stack.split( "\n" )[1] -- so truncating our own paths deletes the
 		// filename, the line and column, and which plugin threw, which is the
 		// whole diagnosis. A third-party credential is never same-origin.
+		//
+		// The port is stripped before comparing. The pattern captures the whole
+		// authority, so a site served on a non-default port produced frames reading
+		// `example.test:8443`, while $site_host is PHP_URL_HOST and never carries a
+		// port -- every own frame failed the check and was truncated to /[path],
+		// which is the case this exemption exists for. Same host, different port is
+		// treated as ours: on a WordPress install that is the same site behind a dev
+		// server or a proxy, and the alternative is deleting the diagnosis.
 		$text = (string) preg_replace_callback(
 			'#(https?://)([^\s/]+)((?:/[^\s/]*)?)/[^\s"\'<>,;)\]}]+#i',
 			static function ( $matches ) use ( $site_host ) {
-				if ( '' !== $site_host && 0 === strcasecmp( $matches[2], $site_host ) ) {
+				// Trailing :digits only, so an IPv6 literal keeps its brackets and
+				// its own colons -- [::1]:8080 becomes [::1], which is the form
+				// wp_parse_url() returns for one.
+				$host = (string) preg_replace( '/:\d+$/', '', $matches[2] );
+
+				if ( '' !== $site_host && 0 === strcasecmp( $host, $site_host ) ) {
 					return $matches[0];
 				}
 

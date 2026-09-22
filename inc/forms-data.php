@@ -41,7 +41,7 @@ class Forms_Data {
 	 * something invalidated it, and there is no natural invalidation point.
 	 *
 	 * @var array<int,array<int,int>>|null
-	 * @since x.x.x
+	 * @since 2.12.7
 	 */
 	private static $editing_user_ids = null;
 
@@ -496,7 +496,7 @@ class Forms_Data {
 	 * change within a request.
 	 *
 	 * @param int $window_start Unix timestamp the view window opened at.
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return array<int,int>
 	 */
 	private static function get_editing_submitter_ids( $window_start ) {
@@ -530,7 +530,7 @@ class Forms_Data {
 		 * budget -- harmless for the count, but it brings the ceiling closer.
 		 *
 		 * @param int $limit Maximum submitters to test. Default 500.
-		 * @since x.x.x
+		 * @since 2.12.7
 		 */
 		$limit = Helper::get_integer_value( apply_filters( 'srfm_forms_metric_submitter_limit', 500 ) );
 
@@ -571,7 +571,7 @@ class Forms_Data {
 			 *
 			 * @param int $count Number of distinct submitters found, capped at $limit + 1.
 			 * @param int $limit The ceiling in force.
-			 * @since x.x.x
+			 * @since 2.12.7
 			 */
 			do_action( 'srfm_forms_metric_submitter_limit_exceeded', count( $submitters ), $limit );
 
@@ -625,7 +625,7 @@ class Forms_Data {
 	 *
 	 * @param int $form_id Form post ID.
 	 * @return array{views:int,conversion_rate:float|null}
-	 * @since x.x.x -- Signature reduced to $form_id.
+	 * @since 2.12.7 -- Signature reduced to $form_id.
 	 * @since 2.12.6
 	 */
 	private function calculate_form_metrics( $form_id ) {
