@@ -235,7 +235,6 @@ class Admin {
 		add_action( 'wp_ajax_sureforms_dismiss_pointer', [ $this, 'pointer_dismissed' ] );
 		add_action( 'wp_ajax_sureforms_accept_cta', [ $this, 'pointer_accepted_cta' ] );
 		add_action( 'wp_ajax_srfm_notice_response', [ $this, 'handle_notice_response' ] );
-		add_action( 'wp_ajax_srfm_action_item_details', [ $this, 'handle_action_item_details' ] );
 		add_action( 'wp_ajax_srfm_dismiss_action_item', [ $this, 'handle_dismiss_action_item' ] );
 		add_action( 'admin_post_srfm_dismiss_action_item_link', [ $this, 'handle_dismiss_action_item_link' ] );
 		add_action( 'wp_ajax_srfm_ai_widget_usage', [ $this, 'track_ai_widget_usage' ] );
@@ -1821,14 +1820,6 @@ JS;
 			'ajax_url'                     => admin_url( 'admin-ajax.php' ),
 			'client_logs_nonce'            => Helper::current_user_can() ? wp_create_nonce( 'srfm_client_logs' ) : '',
 			'action_items'                 => $this->get_action_items(),
-			'details_dialog'               => $this->get_details_dialog_labels(),
-			// Where Contact Support goes when the details fetch fails and there is
-			// no category-tagged URL to use. Untagged, because at that point we do
-			// not know which check sent them -- but still a way out: these notices
-			// are not dismissible and Contact Support is the only action that
-			// retires them.
-			'support_url'                  => $this->get_support_contact_url( '' ),
-			'action_item_details_nonce'    => Helper::current_user_can() ? wp_create_nonce( 'srfm_action_item_details' ) : '',
 			'notice_response_nonce'        => Helper::current_user_can() ? wp_create_nonce( 'srfm_notice_response' ) : '',
 			'dismiss_action_item_nonce'    => Helper::current_user_can() ? wp_create_nonce( 'srfm_dismiss_action_item' ) : '',
 			'sf_plugin_manager_nonce'      => wp_create_nonce( 'sf_plugin_manager_nonce' ),
@@ -2820,89 +2811,18 @@ JS;
 			'srfm-notice-response',
 			'srfmNoticeResponse',
 			[
-				'ajaxurl'      => admin_url( 'admin-ajax.php' ),
-				'nonce'        => wp_create_nonce( 'srfm_notice_response' ),
-				// The diagnostics are fetched when the dialog opens rather than
-				// shipped with every page, so the dialog needs its own nonce.
-				'detailsNonce' => wp_create_nonce( 'srfm_action_item_details' ),
+				'ajaxurl'  => admin_url( 'admin-ajax.php' ),
+				'nonce'    => wp_create_nonce( 'srfm_notice_response' ),
 				// Carousel chrome. Built in the browser rather than printed here so
 				// that with JavaScript off every notice simply stays visible, which
 				// is the behaviour this replaced -- controls that cannot work must
 				// not be what hides a warning.
-				'carousel'     => [
+				'carousel' => [
 					'previous' => __( 'Previous notice', 'sureforms' ),
 					'next'     => __( 'Next notice', 'sureforms' ),
 					/* translators: 1: current position, 2: total notices. */
 					'counter'  => __( '%1$d of %2$d', 'sureforms' ),
 				],
-				// Details modal chrome, translated here so the script carries no
-				// user-facing English of its own.
-				'details'      => $this->get_details_dialog_labels(),
-				// Where Contact Support goes when the fetch fails and there is no
-				// category-tagged URL to use. Untagged, because at that point we do
-				// not know which check sent them -- but still a way out: these
-				// notices are not dismissible and Contact Support is the only action
-				// that retires them.
-				'supportUrl'   => $this->get_support_contact_url( '' ),
-			]
-		);
-	}
-
-	/**
-	 * Serve one failure category's diagnostics, on demand.
-	 *
-	 * Hooked - wp_ajax_srfm_action_item_details.
-	 *
-	 * The report is built here rather than shipped with the page. Its content
-	 * comes from the client error log, and that log is filled through a public
-	 * REST route gated on a submit token any visitor can obtain from a form page
-	 * rather than on a capability -- so the text is attacker-authored, and putting
-	 * it in the localisation JSON and a hidden div on every admin screen exposed
-	 * it far beyond the one admin who opens the dialog.
-	 *
-	 * Capability first, then nonce, then the category, matching the ordering of
-	 * the sibling handlers in this class.
-	 *
-	 * @since 2.12.7
-	 * @return void
-	 */
-	public function handle_action_item_details() {
-		if ( ! Helper::current_user_can() ) {
-			wp_send_json_error( [ 'message' => __( 'Unauthorized user.', 'sureforms' ) ], 403 );
-			return;
-		}
-
-		if ( ! check_ajax_referer( 'srfm_action_item_details', 'nonce', false ) ) {
-			wp_send_json_error( [ 'message' => __( 'Invalid nonce.', 'sureforms' ) ], 403 );
-			return;
-		}
-
-		// sanitize_key() returns '' for anything non-scalar (formatting.php:2194), so
-		// a category[]= in the body arrives here as the empty string and falls into
-		// the refusal below rather than needing a type branch of its own.
-		$category = isset( $_POST['category'] ) ? sanitize_key( wp_unslash( $_POST['category'] ) ) : '';
-
-		// The only check the category needs, and the reason there is no separate
-		// allowlist above it: get_open_failures() returns nothing but keys in
-		// Client_Logger::CATEGORIES, so an absent category, an unrecognised one and
-		// a recognised one with nothing wrong all land here. Asking for a category
-		// with no fault must not mint a report describing one.
-		$open = Client_Logger::get_open_failures();
-
-		if ( ! isset( $open[ $category ] ) ) {
-			wp_send_json_error( [ 'message' => __( 'Nothing to report.', 'sureforms' ) ], 404 );
-			return;
-		}
-
-		$form_title = Helper::get_string_value( $open[ $category ]['form_title'] ?? '' );
-
-		wp_send_json_success(
-			[
-				'details'     => $this->get_support_message( $category, $form_title )
-					. "\n\n" . $this->get_support_log_block( 8000 ),
-				// The form title too, so the subject and the body name the form
-				// rather than making support ask which one.
-				'support_url' => $this->get_support_contact_url( $category, $form_title ),
 			]
 		);
 	}
@@ -2951,21 +2871,15 @@ JS;
 			],
 			// The "Finish setting up" prompt (#3030): three CTAs, plus the ✕.
 			'form_submission_error'       => [
-				'view_details'    => 'submission_failure_notice_view',
-				'copy_details'    => 'submission_failure_notice_copy',
 				'contact_support' => 'submission_failure_notice_cta',
 				'dismissed'       => 'submission_failure_notice_dismiss',
 			],
 			'notification_error'          => [
-				'view_details'    => 'notification_failure_notice_view',
-				'copy_details'    => 'notification_failure_notice_copy',
 				'contact_support' => 'notification_failure_notice_cta',
 				'help_me_fix'     => 'notification_failure_notice_guide',
 				'dismissed'       => 'notification_failure_notice_dismiss',
 			],
 			'integration_error'           => [
-				'view_details'    => 'integration_failure_notice_view',
-				'copy_details'    => 'integration_failure_notice_copy',
 				'contact_support' => 'integration_failure_notice_cta',
 				'dismissed'       => 'integration_failure_notice_dismiss',
 			],
@@ -3631,17 +3545,10 @@ JS;
 							data-srfm-notice-id="<?php echo esc_attr( Helper::get_string_value( $item['id'] ) ); ?>"
 							data-srfm-button="<?php echo esc_attr( Helper::get_string_value( $item['cta_action'] ?? '' ) ); ?>"
 							<?php
-							// With details to fetch, the click opens them here instead
-							// of following the href. The href stays as the no-JS
-							// path: it goes to the dashboard, where the same details
-							// are readable.
-							if ( ! empty( $item['has_details'] ) ) {
-								printf(
-									'data-srfm-details-for="%1$s" data-srfm-category="%2$s"',
-									esc_attr( Helper::get_string_value( $item['id'] ) ),
-									esc_attr( Helper::get_string_value( $item['category'] ?? '' ) )
-								);
-							} elseif ( 0 !== strpos( Helper::get_string_value( $item['cta_url'] ), 'mailto:' ) ) {
+							// A mailto: must reach the mail client, not a new tab --
+							// there is no document to open, so _blank leaves a blank
+							// one behind.
+							if ( 0 !== strpos( Helper::get_string_value( $item['cta_url'] ), 'mailto:' ) ) {
 								echo 'target="_blank" rel="noopener noreferrer"';
 							}
 							?>
@@ -4064,42 +3971,6 @@ CSS;
 	}
 
 	/**
-	 * The details dialog's strings.
-	 *
-	 * One array, two consumers: the classic wp-admin dialog in
-	 * notice-response.js, and the dashboard's force-ui one. Declared here rather
-	 * than inline in each, because the same sentence written as `__()` in PHP and
-	 * again in JSX looks identical to translators until the first edit to either,
-	 * after which one surface silently reverts to English.
-	 *
-	 * @since 2.12.7
-	 * @return array<string,string>
-	 */
-	private function get_details_dialog_labels() {
-		return [
-			'title'       => __( 'Details', 'sureforms' ),
-			'description' => __( 'What we recorded about this problem. Contact Support writes it into an email for you, so you can send it as it is — or copy it if you would rather report it somewhere else.', 'sureforms' ),
-			'copy'        => __( 'Copy details', 'sureforms' ),
-			'copied'      => __( 'Copied', 'sureforms' ),
-			'contact'     => __( 'Contact Support', 'sureforms' ),
-			'close'       => __( 'Close', 'sureforms' ),
-			// copyFirst and unlocked are gone with the gate they described. They
-			// existed because the troubleshooting form could not carry the report,
-			// so the button stayed inert until the diagnostics had been copied by
-			// hand. The email carries them, so there is nothing to wait for.
-			'copyFailed'  => __( 'Your browser would not let us copy. Select the text above and copy it by hand.', 'sureforms' ),
-			// The scrollable diagnostics block is focusable, so it needs a name of
-			// its own.
-			'logRegion'   => __( 'Recorded diagnostics', 'sureforms' ),
-			// The dialog opens before its payload arrives -- see
-			// handle_action_item_details() for why the report is not shipped with
-			// the page.
-			'loading'     => __( 'Collecting the details…', 'sureforms' ),
-			'unavailable' => __( 'We could not collect the details. Contact Support and describe what happened, and we will take it from there.', 'sureforms' ),
-		];
-	}
-
-	/**
 	 * SureForms' own action items, before the filter.
 	 *
 	 * Split out so the Enable Logs gate in get_action_items() can sit above this
@@ -4168,30 +4039,20 @@ CSS;
 					? sprintf( $copy['title'], $form_title )
 					: $copy['generic'],
 				'message'     => $copy['message'],
-				// Shows what would be sent before anything is sent. Someone reporting
-				// a fault on their own site is entitled to read the diagnostics and
-				// the log first, and a support agent gets a cleaner paste than a
-				// screenshot of a notice.
-				'cta_label'   => __( 'View details', 'sureforms' ),
-				// Where the classic wp-admin notice sends people, since it cannot open
-				// the panel's dialog. The dashboard is where the details are readable.
-				'cta_url'     => admin_url( 'admin.php?page=sureforms_menu' ),
-				'cta_action'  => 'view_details',
-				// Not the payload itself, only that one exists. The diagnostics are
-				// fetched when the dialog opens -- see handle_action_item_details().
+				// Straight to a composed email, as 2.12.6 did. The subject, the
+				// diagnostics and the log tail are already in it, so reporting a
+				// fault is one click and a send.
 				//
-				// They used to ride along in the localisation JSON and in a hidden
-				// div on every admin page. The content is authored by whoever
-				// triggered the failure, and the client-error-log route is a public
-				// endpoint gated on a submit token rather than a capability, so an
-				// anonymous visitor can fill that excerpt. Broadcasting it to every
-				// admin screen -- read or not -- put attacker-authored text in page
-				// source site-wide and made any future escaping slip a
-				// manage_options-context problem. On demand, it reaches only the
-				// admin who asked for it.
-				'has_details' => true,
-				// Which record to fetch. Not the payload, just the key.
-				'category'    => $category,
+				// The report is built per click rather than shipped with the page.
+				// Its content comes from the client error log, which is filled
+				// through a public REST route gated on a submit token any visitor
+				// can obtain from a form page rather than on a capability -- so the
+				// text is attacker-authored. It reaches only this href, on a screen
+				// only a capable user sees, rather than a hidden div on every admin
+				// page.
+				'cta_label'   => __( 'Contact Support', 'sureforms' ),
+				'cta_url'     => $this->get_support_contact_url( $category, $form_title ),
+				'cta_action'  => 'contact_support',
 				'dismissible' => false,
 			];
 
