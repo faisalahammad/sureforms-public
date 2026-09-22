@@ -516,13 +516,15 @@ class Test_Client_Logger extends TestCase {
 	}
 
 	/**
-	 * A captcha stop is the visitor's to clear, and raises nothing.
+	 * A visitor-correctable stop is not written to the log at all.
 	 *
-	 * Pinned because it is the precedent the after-submission rule above follows, and
-	 * because "Please verify that you are not a robot" is among the most common lines
-	 * in a real log -- counting it would tell healthy sites to contact support.
+	 * "This field is required" and "Please verify that you are not a robot" were
+	 * the most common lines in a real log, and every one of them was pasted into
+	 * a support report about some other failure. They are dropped at the shape
+	 * gate, so no caller -- the REST route or a future server-side one -- can
+	 * write them.
 	 */
-	public function test_a_blocked_entry_is_not_a_fault() {
+	public function test_sanitize_entry_drops_a_blocked_entry() {
 		$entry = Client_Logger::sanitize_entry(
 			[
 				'type'    => 'blocked',
@@ -531,8 +533,7 @@ class Test_Client_Logger extends TestCase {
 			]
 		);
 
-		$this->assertNotEmpty( $entry );
-		$this->assertFalse( Client_Logger::is_fault( $entry ) );
+		$this->assertSame( [], $entry );
 	}
 
 	/**

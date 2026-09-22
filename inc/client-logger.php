@@ -163,8 +163,8 @@ class Client_Logger {
 		$type = $entry['type'] ?? '';
 
 		// Allowlist, so an unrecognised or new category is not a fault by default.
-		// 'blocked' is deliberately absent: it is the label the browser puts on a
-		// stop the visitor can clear themselves.
+		// A visitor-correctable stop never reaches here: sanitize_entry() drops the
+		// browser's 'blocked' type before anything is written.
 		if ( in_array( $type, [ 'error', 'response', 'message' ], true ) ) {
 			return true;
 		}
@@ -661,7 +661,14 @@ class Client_Logger {
 	 * @return array<string,mixed> Empty when nothing usable survived.
 	 */
 	public static function sanitize_entry( array $raw ) {
-		$allowed_types = [ 'network', 'response', 'error', 'message', 'blocked', 'after_submission' ];
+		// 'blocked' is deliberately absent. It is the browser's label for a stop the
+		// visitor can clear themselves -- a required field left empty, an expired
+		// captcha, a declined card, a rejection naming the field to fix -- and those
+		// were the most common lines in a real log. Every one of them was pasted into
+		// support reports about some other failure and consumed budget the log does
+		// not give back, because it stops at its cap rather than rotating. Dropped at
+		// the shape gate so no caller, present or future, can write one.
+		$allowed_types = [ 'network', 'response', 'error', 'message', 'after_submission' ];
 		$type          = isset( $raw['type'] ) ? sanitize_key( Helper::get_string_value( $raw['type'] ) ) : '';
 
 		if ( ! in_array( $type, $allowed_types, true ) ) {
