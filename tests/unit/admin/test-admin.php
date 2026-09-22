@@ -1531,7 +1531,7 @@ class Test_Admin extends TestCase {
 		$this->assertTrue( $payload['success'] ?? false );
 		$this->assertNotEmpty( $payload['data']['details'] ?? '' );
 		$this->assertStringStartsWith(
-			'https://sureforms.com/form/troubleshooting-form/',
+			'mailto:support@sureforms.com?',
 			$payload['data']['support_url'] ?? '',
 			'The dialog gets its Contact Support destination from here too.'
 		);
@@ -1954,94 +1954,85 @@ class Test_Admin extends TestCase {
 	}
 
 	/**
-	 * Contact Support carries UTM attribution and can be redirected by a filter.
+	 * Contact Support opens a pre-addressed email, and can be redirected.
 	 *
-	 * utm_content is the one part that differs per button, and the reason for
-	 * tagging at all: the report can say which check drives the tickets rather than
-	 * only how many arrive. The filter replaces srfm_support_email_address, which
-	 * pointed at an inbox and has no destination left to change.
+	 * The 2.12.6 behaviour, restored. A mailto: is the only destination that can
+	 * carry the report, which is why the web form it replaced had to gate the
+	 * button behind copying the diagnostics by hand.
 	 */
-	public function test_get_support_contact_url_is_tagged_and_filterable() {
-		// An address of its own: make_user() does not set one, and an admin with no
-		// email is exactly the case the empty fallback exists for.
-		$admin = $this->make_user( 'administrator' );
-		wp_update_user(
-			[
-				'ID'         => $admin,
-				'user_email' => 'owner@example.org',
-			]
-		);
-		wp_set_current_user( $admin );
-
+	public function test_get_support_contact_url_is_a_prefilled_mailto() {
 		$method = new ReflectionMethod( Admin::class, 'get_support_contact_url' );
 		$method->setAccessible( true );
 
 		$url = $method->invoke( Admin::get_instance(), 'notification' );
 
-		$this->assertStringStartsWith( 'https://sureforms.com/form/troubleshooting-form/', $url );
-		$this->assertStringContainsString( 'utm_content=notification', $url );
-		$this->assertStringContainsString( 'utm_campaign=contact_support', $url );
+		$this->assertStringStartsWith( 'mailto:support@sureforms.com?', $url );
 
 		parse_str( (string) wp_parse_url( $url, PHP_URL_QUERY ), $query );
 
-		// Prefilled, so the person reporting a fault does not retype what SureForms
-		// already knows.
-		$this->assertSame( 'Email notification failure', $query['subject'] ?? '' );
+		$host = Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) );
+
+		// One subject per category, so the inbox can route on it without opening
+		// the mail. The host is in it because "emails are not sending" says nothing
+		// on its own.
 		$this->assertSame(
-			Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) ),
-			$query['site_url'] ?? ''
-		);
-		$this->assertSame( 'owner@example.org', $query['mail'] ?? '', 'The admin address prefills the form.' );
-
-		// An admin with no usable address still gets a working link, with the field
-		// left empty rather than carrying a broken value into the form.
-		$no_email = $this->make_user( 'administrator' );
-		wp_set_current_user( $no_email );
-
-		parse_str(
-			(string) wp_parse_url( $method->invoke( Admin::get_instance(), 'notification' ), PHP_URL_QUERY ),
-			$without
+			sprintf( 'SureForms: notification emails are not being sent on %s', $host ),
+			$query['subject'] ?? ''
 		);
 
-		$this->assertSame( '', $without['mail'] ?? 'missing' );
-		$this->assertSame( 'Email notification failure', $without['subject'] ?? '' );
+		// The whole report, written for them. This is the point of the revert: what
+		// the web form could not carry.
+		$this->assertStringContainsString( 'Hello SureForms support,', $query['body'] ?? '' );
+		$this->assertStringContainsString( 'Site: ' . home_url(), $query['body'] ?? '' );
+		$this->assertStringContainsString( 'SureForms: ' . SRFM_VER, $query['body'] ?? '' );
 
-		wp_set_current_user( $admin );
+		// CRLF, because Outlook renders a bare LF body as one run-on line.
+		$this->assertStringContainsString( "\r\n", $query['body'] ?? '' );
 
-		// One subject per category, matched against the form's own options -- so
-		// these are machine values and must not be translated.
-		$subject = static function ( $category ) use ( $method ) {
-			parse_str(
-				(string) wp_parse_url( $method->invoke( Admin::get_instance(), $category ), PHP_URL_QUERY ),
-				$parsed
-			);
-			return $parsed['subject'] ?? '';
-		};
+		// RFC 3986, so a space is %20. A client decodes a mailto: body as a URI,
+		// not as form data, and + would arrive as a literal plus in every word gap.
+		$this->assertStringNotContainsString( '+', (string) wp_parse_url( $url, PHP_URL_QUERY ) );
 
-		$this->assertSame( 'Form submission failure', $subject( 'submission' ) );
-		$this->assertSame( 'Integration failure', $subject( 'integration' ) );
-		// srfm_action_items is public, so an item can carry any category or none.
-		$this->assertSame( 'Other', $subject( 'something-else' ) );
-		$this->assertSame( 'Other', $subject( '' ) );
-
-		// Different check, different tag -- otherwise the parameter says nothing.
+		// Named, so support does not have to ask which form.
 		$this->assertStringContainsString(
-			'utm_content=integration',
-			$method->invoke( Admin::get_instance(), 'integration' )
+			'Form: Contact us',
+			(string) ( $this->mailto_body( $method->invoke( Admin::get_instance(), 'notification', 'Contact us' ) ) )
 		);
 
-		$filter = static function () {
-			return 'https://reseller.example.com/help/';
-		};
+		// A category SureForms does not define gets neutral wording rather than a
+		// specific claim -- srfm_action_items is public, so an item can carry any
+		// category or none.
+		foreach ( [ 'something-else', '' ] as $unknown ) {
+			parse_str(
+				(string) wp_parse_url( $method->invoke( Admin::get_instance(), $unknown ), PHP_URL_QUERY ),
+				$neutral
+			);
+			$this->assertSame(
+				sprintf( 'SureForms: a problem with the forms on %s', $host ),
+				$neutral['subject'] ?? ''
+			);
+		}
 
-		add_filter( 'srfm_support_contact_url', $filter );
-		$filtered = $method->invoke( Admin::get_instance(), 'notification' );
-		remove_filter( 'srfm_support_contact_url', $filter );
+		// Different category, different subject -- otherwise routing on it is
+		// pointless.
+		parse_str(
+			(string) wp_parse_url( $method->invoke( Admin::get_instance(), 'submission' ), PHP_URL_QUERY ),
+			$submission
+		);
+		$this->assertSame(
+			sprintf( 'SureForms: form submissions are failing on %s', $host ),
+			$submission['subject'] ?? ''
+		);
+	}
 
-		$this->assertSame( 'https://reseller.example.com/help/', $filtered );
+	/**
+	 * A white-label install can point Contact Support at its own destination.
+	 */
+	public function test_get_support_contact_url_is_filterable() {
+		$method = new ReflectionMethod( Admin::class, 'get_support_contact_url' );
+		$method->setAccessible( true );
 
-		// An inbox is a legitimate destination for a white-label support contact,
-		// and the sibling item URLs already allow it.
+		// Their own inbox.
 		$inbox = static function () {
 			return 'mailto:help@reseller.example.com';
 		};
@@ -2051,6 +2042,32 @@ class Test_Admin extends TestCase {
 		remove_filter( 'srfm_support_contact_url', $inbox );
 
 		$this->assertSame( 'mailto:help@reseller.example.com', $mailto );
+
+		// Or their own page. Supported, and it drops the body -- a web form cannot
+		// carry one -- which is what the Copy details button covers.
+		$page = static function () {
+			return 'https://reseller.example.com/help/';
+		};
+
+		add_filter( 'srfm_support_contact_url', $page );
+		$filtered = $method->invoke( Admin::get_instance(), 'notification' );
+		remove_filter( 'srfm_support_contact_url', $page );
+
+		$this->assertSame( 'https://reseller.example.com/help/', $filtered );
+
+		// The filter is told which failure and which form, so a reseller can route
+		// on them rather than sending everything to one place.
+		$seen = [];
+		$spy  = static function ( $url, $category, $form_title ) use ( &$seen ) {
+			$seen = [ $category, $form_title ];
+			return $url;
+		};
+
+		add_filter( 'srfm_support_contact_url', $spy, 10, 3 );
+		$method->invoke( Admin::get_instance(), 'integration', 'Contact us' );
+		remove_filter( 'srfm_support_contact_url', $spy, 10 );
+
+		$this->assertSame( [ 'integration', 'Contact us' ], $seen );
 
 		// Escaped after the filter, so neither renderer has to trust what came
 		// back -- but never down to ''. Contact Support is the only action that
@@ -2068,11 +2085,23 @@ class Test_Admin extends TestCase {
 			remove_filter( 'srfm_support_contact_url', $bad );
 
 			$this->assertStringStartsWith(
-				'https://sureforms.com/form/troubleshooting-form/',
+				'mailto:support@sureforms.com?',
 				$blocked,
 				'A filter value that cannot survive escaping must fall back, not blank the only working action.'
 			);
 		}
+	}
+
+	/**
+	 * The decoded body of a mailto: URL.
+	 *
+	 * @param string $url A mailto: URL built by get_support_contact_url().
+	 * @return string
+	 */
+	private function mailto_body( $url ) {
+		parse_str( (string) wp_parse_url( $url, PHP_URL_QUERY ), $query );
+
+		return Helper::get_string_value( $query['body'] ?? '' );
 	}
 
 	/**

@@ -455,14 +455,6 @@
 		const opener = overlay.ownerDocument.activeElement;
 		const previousOverflow = document.body.style.overflow;
 
-		// Whether copying is even possible here. On a plain-HTTP admin
-		// navigator.clipboard does not exist, so the copy step cannot be a
-		// precondition for anything -- see the unlock reasoning below.
-		const canCopy = !! (
-			navigator.clipboard &&
-			( navigator.clipboard.write || navigator.clipboard.writeText )
-		);
-
 		const ids = 'srfm-details-' + Math.random().toString( 36 ).slice( 2, 10 );
 
 		const panel = document.createElement( 'div' );
@@ -504,17 +496,14 @@
 		const actions = document.createElement( 'p' );
 		actions.className = 'srfm-details-actions';
 
-		// Visible, not a title attribute. pointer-events:none suppresses the native
-		// tooltip, a title never fires on keyboard focus, and screen readers
-		// commonly drop it on an unavailable control -- so the sentence explaining
-		// why the button is inert could not be read by anyone.
+		// Visible, not a title attribute, so a screen reader can reach it. Empty
+		// until there is something to say: the only message left is a copy that was
+		// refused, now that Contact Support is never inert.
 		const hint = document.createElement( 'span' );
 		hint.className = 'srfm-details-hint';
-		hint.textContent = canCopy ? labels.copyFirst || '' : '';
+		hint.textContent = '';
 
-		// Doubles as the live region for the unlock. Copying changes three things at
-		// once -- the label, the icon and whether Contact Support works -- and none
-		// of them was announced.
+		// A live region for the copy result.
 		hint.setAttribute( 'role', 'status' );
 
 		const copy = document.createElement( 'button' );
@@ -522,50 +511,20 @@
 		copy.className = 'button srfm-details-copy';
 		copy.textContent = labels.copy || 'Copy details';
 
-		// Locked until the details are on the clipboard. The support form asks for
-		// them, and arriving with nothing to paste means describing the failure
-		// from memory.
+		// No longer locked behind a copy. The mailto: carries the diagnostics and
+		// the log in the body, so there is nothing for the person to paste -- the
+		// 2.12.6 behaviour, restored.
 		//
-		// No href while it is locked, and a click guard behind that: `disabled` on
-		// an <a> does nothing at all -- it still navigates -- so removing the
-		// destination is what actually locks it.
-		//
-		// Hidden, not merely href-less, until there is a destination. An empty href
-		// resolves to the current document, so the click used to open a duplicate
-		// of the admin page and still acknowledge the failure -- standing the
-		// notice down without anything having been reported. The destination now
-		// arrives with the fetched payload, so the element is built up front and
-		// revealed by setSupportUrl().
+		// Still hidden until there is a destination. An empty href resolves to the
+		// current document, so the click used to open a duplicate of the admin page
+		// and still acknowledge the failure -- standing the notice down without
+		// anything having been reported. The destination arrives with the fetched
+		// payload, so the element is built up front and revealed by
+		// setSupportUrl().
 		const contact = document.createElement( 'a' );
 		contact.className = 'button button-primary srfm-details-contact';
 		contact.textContent = labels.contact || 'Contact Support';
 		contact.hidden = ! supportUrl;
-
-		function lockContact() {
-			// The dimming and the pointer-events block hang off aria-disabled in the
-			// stylesheet, so the state is declared once rather than in two places.
-			contact.removeAttribute( 'href' );
-			contact.setAttribute( 'aria-disabled', 'true' );
-		}
-
-		function unlockContact() {
-			if ( ! supportUrl ) {
-				return;
-			}
-
-			contact.href = supportUrl;
-			contact.removeAttribute( 'aria-disabled' );
-		}
-
-		// Locked only where copying can actually happen. Where it cannot, the copy
-		// step is not a step the user can take, and Contact Support is the only
-		// route that acknowledges the failure -- these items are not dismissible,
-		// and only a submission failure ever clears itself. Keeping it locked
-		// behind an unavailable clipboard would leave an undismissable notice with
-		// no working action on it.
-		if ( canCopy ) {
-			lockContact();
-		}
 
 		// Nothing to copy yet. Left focusable-but-disabled rather than hidden, so
 		// the control does not appear from nowhere once the payload lands.
@@ -644,19 +603,16 @@
 						copy.textContent = labels.copy || 'Copy details';
 					}, 2000 );
 
-					unlockContact();
-					hint.textContent = labels.unlocked || '';
-
 					// On success only, so the event means a copy happened rather
 					// than a copy was attempted.
 					sendResponse( noticeId, 'copy_details' );
 				},
 				function () {
 					// Refused: an insecure origin, a permission policy, a user
-					// decision. Do not claim success -- but release Contact Support
-					// for the reason above, and say why the text was not copied.
+					// decision. Say why rather than claiming success. Contact
+					// Support is unaffected -- it carries the report in the email
+					// body, not from the clipboard.
 					hint.textContent = labels.copyFailed || '';
-					unlockContact();
 				}
 			);
 		} );
@@ -723,13 +679,11 @@
 				pre.removeAttribute( 'aria-busy' );
 
 				if ( false === copyable ) {
-					// No report to paste, so the copy-first gate has nothing to gate
-					// on. Contact Support is the only route that retires the notice,
-					// and these items are not dismissible -- leaving it locked would
-					// be an undismissable notice with no working action on it.
+					// Nothing to copy, so the button has nothing to do. Contact
+					// Support still works: the report it carries is built server
+					// side, not read from this pane.
 					copy.hidden = true;
 					hint.textContent = '';
-					unlockContact();
 					return;
 				}
 
@@ -762,7 +716,7 @@
 					contact.rel = 'noopener noreferrer';
 				}
 
-				if ( supportUrl && ! contact.hasAttribute( 'aria-disabled' ) ) {
+				if ( supportUrl ) {
 					contact.href = supportUrl;
 				}
 			},

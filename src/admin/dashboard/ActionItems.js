@@ -70,13 +70,9 @@ export default () => {
 	// The item whose details are being read, or null.
 	const [ details, setDetails ] = useState( null );
 	const [ copied, setCopied ] = useState( false );
-	// Separate from `copied`, which reverts after a couple of seconds so the button
-	// stops claiming "Copied". This one does not revert: the support form is only
-	// useful to someone holding the diagnostics, and that stays true after the
-	// label has gone back.
-	const [ copiedOnce, setCopiedOnce ] = useState( false );
-	// What the hint line says. Doubles as the live region for the unlock, which
-	// changes the label, the icon and whether Contact Support works at once.
+	// What the hint line says. A live region for the copy result. It no longer
+	// announces an unlock, because Contact Support is never locked: the mailto:
+	// carries the report, so there is nothing to copy first.
 	const [ hint, setHint ] = useState( '' );
 
 	// force-ui's Dialog.Panel renders FloatingOverlay in place in the React tree
@@ -294,8 +290,6 @@ export default () => {
 			}
 
 			setCopied( true );
-			setCopiedOnce( true );
-			setHint( dialogLabels.unlocked || '' );
 			// Reverts on its own: a button stuck on "Copied" says nothing about the
 			// next click.
 			window.clearTimeout( revertRef.current );
@@ -308,14 +302,11 @@ export default () => {
 				button: 'copy_details',
 			} );
 		} catch ( e ) {
-			// Refused outright, or no clipboard API at all. Do not claim it was
-			// copied -- but do release Contact Support. It is the only route that
-			// acknowledges the failure, these items are not dismissible, and only a
-			// submission failure ever clears itself, so keeping it locked behind a
-			// clipboard that cannot work leaves an undismissable notice with no
-			// working action. The text is on screen and selectable either way.
+			// Refused outright, or no clipboard API at all. Say so rather than
+			// claiming it was copied. Contact Support is unaffected -- it carries
+			// the report in the email body, not from the clipboard -- and the text
+			// is on screen and selectable either way.
 			setCopied( false );
-			setCopiedOnce( true );
 			setHint( dialogLabels.copyFailed || '' );
 		}
 	};
@@ -348,11 +339,6 @@ export default () => {
 		} );
 
 		const fail = () => {
-			// No report to paste, so the copy-first gate has nothing to gate on.
-			// Contact Support is the only action that retires these notices, and
-			// they are not dismissible -- leaving it locked would be an
-			// undismissable notice with no working action on it.
-			setCopiedOnce( true );
 			setHint( '' );
 
 			setDetails( ( prev ) =>
@@ -548,19 +534,9 @@ export default () => {
 													// Each failure is its own
 													// report, so the copy has to
 													// be made again for this one.
-													// Pre-unlocked where the
-													// clipboard does not exist,
-													// matching the vanilla dialog:
-													// otherwise a plain-HTTP admin
-													// gets a dead button whose
-													// only explanation is revealed
-													// by clicking a Copy that
-													// cannot work.
-													setCopiedOnce( ! canCopy );
 													setHint(
 														canCopy
-															? dialogLabels.copyFirst ||
-																	''
+															? ''
 															: dialogLabels.copyFailed ||
 																	''
 													);
@@ -755,65 +731,53 @@ export default () => {
 							     through srfm_action_items for an item carrying
 							     details but no support_url.
 
-							     Not an anchor while it is locked either: `disabled`
-							     on an <a> does nothing at all, so the href only
-							     exists once the copy has been made. */ }
-									{ !! safeUrl( details?.support_url ) &&
-										( copiedOnce ? (
-											<Button
-												variant="primary"
-												size="sm"
-												tag="a"
-												href={ safeUrl(
-													details.support_url
+							     No longer gated on a copy. The mailto: carries the
+							     diagnostics and the log in the body, so there is
+							     nothing for the person to paste and nothing to wait
+							     for -- the 2.12.6 behaviour, restored. */ }
+									{ !! safeUrl( details?.support_url ) && (
+										<Button
+											variant="primary"
+											size="sm"
+											tag="a"
+											href={ safeUrl(
+												details.support_url
+											) }
+											// Not on a mailto: -- it has no
+											// document to open, so _blank
+											// leaves a blank tab behind. This
+											// is now the usual case rather
+											// than the exception, and
+											// srfm_support_contact_url can
+											// still return an http(s) page.
+											{ ...( ! /^mailto:/i.test(
+												details.support_url || ''
+											) && {
+												target: '_blank',
+												rel: 'noopener noreferrer',
+											} ) }
+											onClick={ () => {
+												// Records the click, which is also
+												// what stands the notice down until
+												// something new fails.
+												handleFix(
+													details,
+													'contact_support'
+												)();
+												// The composer takes over from
+												// here, so the dialog has nothing
+												// left to show.
+												closeDetails();
+											} }
+											className="no-underline hover:no-underline"
+										>
+											{ dialogLabels.contact ||
+												__(
+													'Contact Support',
+													'sureforms'
 												) }
-												// Not on a mailto: -- it has no
-												// document to open, so _blank
-												// leaves a blank tab behind.
-												// srfm_support_contact_url can
-												// return one, and the sibling
-												// item links already match on
-												// this.
-												{ ...( ! /^mailto:/i.test(
-													details.support_url || ''
-												) && {
-													target: '_blank',
-													rel: 'noopener noreferrer',
-												} ) }
-												onClick={ () => {
-													// Records the click, which is also
-													// what stands the notice down until
-													// something new fails.
-													handleFix(
-														details,
-														'contact_support'
-													)();
-													// The form opens in its own tab, so
-													// the dialog has nothing left to
-													// show.
-													closeDetails();
-												} }
-												className="no-underline hover:no-underline"
-											>
-												{ dialogLabels.contact ||
-													__(
-														'Contact Support',
-														'sureforms'
-													) }
-											</Button>
-										) : (
-											<Button
-												variant="primary"
-												size="sm"
-												disabled
-											>
-												{ dialogLabels.contact ||
-													__(
-														'Contact Support',
-														'sureforms'
-													) }
-											</Button>
-										) ) }
+										</Button>
+									) }
 								</div>
 							</Dialog.Footer>
 						</Dialog.Panel>

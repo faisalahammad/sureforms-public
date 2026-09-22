@@ -89,15 +89,17 @@ class Admin {
 	public const THANKYOU_PROMPT_NOTICE_ID = 'srfm-thankyou-prompt';
 
 	/**
-	 * Where the dialog's Contact Support button goes.
+	 * Where the dialog's Contact Support button writes to.
 	 *
-	 * A form rather than an inbox: it collects the licence and site details support
-	 * would otherwise have to ask for, and the diagnostics are already on the
-	 * clipboard by the time someone gets here.
+	 * An inbox rather than a form, restoring the 2.12.6 behaviour. A mailto: opens
+	 * the composer the person already has open with the subject and the whole
+	 * report in the body, so reporting a fault is one click and a send. The
+	 * troubleshooting form could carry neither, which is why 2.12.7 had to gate the
+	 * button behind copying the diagnostics by hand first.
 	 *
-	 * @since 2.12.7
+	 * @since 2.12.8
 	 */
-	private const SUPPORT_CONTACT_URL = 'https://sureforms.com/form/troubleshooting-form/';
+	private const SUPPORT_EMAIL = 'support@sureforms.com';
 
 	/**
 	 * Dashboard widget entries data.
@@ -2898,7 +2900,9 @@ JS;
 			[
 				'details'     => $this->get_support_message( $category, $form_title )
 					. "\n\n" . $this->get_support_log_block( 8000 ),
-				'support_url' => $this->get_support_contact_url( $category ),
+				// The form title too, so the subject and the body name the form
+				// rather than making support ask which one.
+				'support_url' => $this->get_support_contact_url( $category, $form_title ),
 			]
 		);
 	}
@@ -4074,21 +4078,15 @@ CSS;
 	private function get_details_dialog_labels() {
 		return [
 			'title'       => __( 'Details', 'sureforms' ),
-			'description' => __( 'What we recorded about this problem. Copy it into your support request so we can start from the cause rather than a description of it.', 'sureforms' ),
+			'description' => __( 'What we recorded about this problem. Contact Support writes it into an email for you, so you can send it as it is — or copy it if you would rather report it somewhere else.', 'sureforms' ),
 			'copy'        => __( 'Copy details', 'sureforms' ),
 			'copied'      => __( 'Copied', 'sureforms' ),
 			'contact'     => __( 'Contact Support', 'sureforms' ),
 			'close'       => __( 'Close', 'sureforms' ),
-			// Shown beside the buttons rather than as a title attribute:
-			// pointer-events:none suppresses the native tooltip, a title
-			// never fires on keyboard focus, and screen readers commonly
-			// drop it on an unavailable control -- so the sentence saying
-			// why the button is inert could not be read by anyone.
-			'copyFirst'   => __( 'Copy the details first, so you have them to paste.', 'sureforms' ),
-			// The unlock changes the label, the icon and whether Contact
-			// Support works, none of which was announced. This goes in a
-			// role="status" node so it is.
-			'unlocked'    => __( 'Copied. Contact Support is now available.', 'sureforms' ),
+			// copyFirst and unlocked are gone with the gate they described. They
+			// existed because the troubleshooting form could not carry the report,
+			// so the button stayed inert until the diagnostics had been copied by
+			// hand. The email carries them, so there is nothing to wait for.
 			'copyFailed'  => __( 'Your browser would not let us copy. Select the text above and copy it by hand.', 'sureforms' ),
 			// The scrollable diagnostics block is focusable, so it needs a name of
 			// its own.
@@ -4899,89 +4897,84 @@ CSS;
 	}
 
 	/**
-	 * The contact form's address, tagged with where the click came from.
+	 * A pre-addressed support email for the failure being reported.
 	 *
-	 * One campaign, tagged per failure, so the report answers which check actually
-	 * sends people to support rather than only how many arrive. A submission
-	 * failure and a caching advisory are different problems and it is worth knowing
-	 * which one drives the tickets.
+	 * Restores the 2.12.6 behaviour: the button opens the composer the person
+	 * already uses, with the subject and the whole report written for them. What
+	 * 2.12.7 replaced it with -- a web form -- could carry neither the diagnostics
+	 * nor the log, so the button had to be gated behind copying them by hand and
+	 * pasting them into a field on the far side. That is three deliberate steps to
+	 * report a fault the plugin had already written up.
 	 *
-	 * Prefilled with what SureForms already knows -- the admin's address, which
-	 * failure it is, and the site host -- so the person reporting a fault does not
-	 * retype it. Worth knowing that the address travels in the query string, so it
-	 * reaches browser history and any referrer along the way; it is the site
-	 * owner's own address going to SureForms' own form, which is the flow this
-	 * button exists for.
+	 * The log is pasted into the body rather than attached because mailto has no
+	 * attachment parameter -- browsers drop any attempt to add one -- and it is a
+	 * tail rather than the whole file because a megabyte of JSON would exceed the
+	 * URL length every mail client enforces. That cap is why $max_chars below is
+	 * the small budget and not the 8000 the dialog reads on screen.
 	 *
-	 * Built with add_query_arg rather than string concatenation, so it stays
-	 * correct if the constant ever gains a query string of its own.
-	 *
-	 * @param string $category One of Client_Logger::CATEGORIES, naming the failure
-	 *                         the visitor is reporting.
-	 * @since 2.12.7
+	 * @param string $category   One of Client_Logger::CATEGORIES, naming the failure
+	 *                           being reported. An unknown or absent one gets
+	 *                           deliberately neutral wording via get_support_copy().
+	 * @param string $form_title Form the failure was recorded against, when known.
+	 * @since 2.12.8
 	 * @return string
 	 */
-	private function get_support_contact_url( $category ) {
-		// Deliberately not translated. These are matched against the options on the
-		// troubleshooting form, so they are machine values, not copy -- a German
-		// site sending "E-Mail-Benachrichtigungsfehler" would arrive as an
-		// unrecognised subject and land in the wrong queue.
-		$subjects = [
-			'submission'   => 'Form submission failure',
-			'notification' => 'Email notification failure',
-			'integration'  => 'Integration failure',
-		];
+	private function get_support_contact_url( $category, $form_title = '' ) {
+		$copy = $this->get_support_copy( $category );
+		$host = Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) );
 
-		$user = wp_get_current_user();
+		// CRLF, not "\n". RFC 6068 leaves the line ending to the client and the
+		// major composers normalise either, but Outlook renders a bare LF body as a
+		// single run-on line -- which is exactly the report a support agent has to
+		// read.
+		$body = str_replace( "\n", "\r\n", $this->get_support_message( $category, $form_title ) );
 
-		$url = add_query_arg(
+		// The small budget. The dialog on screen reads 8000 because a clipboard has
+		// no length limit worth designing around; a mailto: is a URL and every client
+		// enforces one. Overrunning it does not truncate politely -- it drops the
+		// body, or the whole link.
+		$body .= "\r\n\r\n" . str_replace( "\n", "\r\n", $this->get_support_log_block( 1200 ) );
+
+		$url = 'mailto:' . self::SUPPORT_EMAIL . '?' . http_build_query(
 			[
-				// Prefills the form, so the person reporting a fault does not retype
-				// what SureForms already knows. Empty rather than absent when the
-				// address is unusable, so the form still opens.
-				'mail'         => is_email( $user->user_email ) ? $user->user_email : '',
-				// Falls back to "Other" for a category SureForms does not define --
-				// srfm_action_items is public, so an item can carry any category or
-				// none.
-				'subject'      => $subjects[ $category ] ?? 'Other',
-				'site_url'     => Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) ),
-				'utm_source'   => 'sureforms',
-				'utm_medium'   => 'form_checks',
-				'utm_campaign' => 'contact_support',
-				// Which check sent them. The one part that differs per button, and
-				// the reason for tagging at all.
-				'utm_content'  => $category,
+				'subject' => sprintf( $copy['subject'], $host ),
+				'body'    => $body,
 			],
-			self::SUPPORT_CONTACT_URL
+			'',
+			'&',
+			// RFC 3986, so a space is %20 rather than +. A mail client reading a
+			// mailto: body decodes it as a URI, not as form data, so + arrives as a
+			// literal plus in every word gap.
+			PHP_QUERY_RFC3986
 		);
 
 		/**
 		 * Filter where the Contact Support action sends people.
 		 *
-		 * Replaces the `srfm_support_email_address` filter, which pointed at an
-		 * inbox and has no destination left to change now that the action opens a
-		 * form. A white-label install wants to point this at its own support page.
+		 * A white-label install wants its own inbox or its own support page, so both
+		 * are accepted. Returning an http(s) URL is supported and drops the body --
+		 * a web form cannot carry it -- so a filter doing that should expect the
+		 * person to arrive without the diagnostics, and the Copy details button in
+		 * the dialog is what covers them.
 		 *
 		 * @since 2.12.7
 		 *
-		 * @param string $url      Contact form URL, already UTM-tagged.
-		 * @param string $category The failure being reported.
+		 * @param string $url        The pre-addressed mailto: URL.
+		 * @param string $category   The failure being reported.
+		 * @param string $form_title Form the failure was recorded against, or ''.
 		 */
-		$filtered = Helper::get_string_value( apply_filters( 'srfm_support_contact_url', $url, $category ) );
+		$filtered = Helper::get_string_value( apply_filters( 'srfm_support_contact_url', $url, $category, $form_title ) );
 
 		// Escaped after the filter, not before: the point of escaping here is that
-		// neither renderer has to trust what comes back. mailto: is allowed because
-		// an inbox is a legitimate destination for a white-label support contact,
-		// and get_action_items() already allows it on the sibling item URLs.
+		// neither renderer has to trust what comes back.
 		$safe = esc_url_raw( $filtered, [ 'http', 'https', 'mailto' ] );
 
 		// Never empty. Contact Support is the only action that retires these
 		// notices and they are dismissible => false, so returning '' for a filter
 		// value that cannot survive escaping leaves an undismissable notice with
-		// nothing on it that works. Falling back to SureForms' own form is worse
-		// for a white-label than their own URL and better than a dead end, and the
-		// unfiltered URL is built here rather than supplied, so it always escapes.
-		return '' !== $safe ? $safe : esc_url_raw( $url, [ 'http', 'https' ] );
+		// nothing on it that works. The unfiltered URL is built here rather than
+		// supplied, so it always escapes.
+		return '' !== $safe ? $safe : esc_url_raw( $url, [ 'mailto' ] );
 	}
 
 	/**
