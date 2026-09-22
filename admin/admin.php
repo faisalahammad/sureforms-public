@@ -95,7 +95,7 @@ class Admin {
 	 * would otherwise have to ask for, and the diagnostics are already on the
 	 * clipboard by the time someone gets here.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.7
 	 */
 	private const SUPPORT_CONTACT_URL = 'https://sureforms.com/form/troubleshooting-form/';
 
@@ -162,7 +162,7 @@ class Admin {
 	 * records a failure and then asks again is testing the memo.
 	 *
 	 * @var array<int,array<string,mixed>>|null
-	 * @since x.x.x
+	 * @since 2.12.7
 	 */
 	private static $action_items_cache = null;
 
@@ -486,7 +486,7 @@ class Admin {
 	 * Anything that records or clears a failure inside one process has to call
 	 * this, or it reads the answer from before the change.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return void
 	 */
 	public static function reset_action_items_cache() {
@@ -2861,7 +2861,7 @@ JS;
 	 * Capability first, then nonce, then the category, matching the ordering of
 	 * the sibling handlers in this class.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return void
 	 */
 	public function handle_action_item_details() {
@@ -3682,18 +3682,33 @@ JS;
 	}
 
 	/**
-	 * Whether anything is currently wrong enough to warrant a notice.
+	 * Whether a first-party warning is currently on screen.
 	 *
-	 * Deliberately re-derives rather than calling get_action_items(), which
-	 * records an impression as a side effect and must not run from a show_if
-	 * callback. It re-derives the two first-party conditions only -- a persistent
-	 * failure and an active caching plugin -- so an item contributed through
-	 * `srfm_action_items` does not suppress the notices this gates.
+	 * Asked from the show_if of the rating, Getting Started and Thank You notices,
+	 * all of which are gated on nothing being wrong. "Wrong" has to mean the same
+	 * thing here as it does to the person looking at the screen.
 	 *
-	 * Returns false with logging disabled, which is what makes the rating,
-	 * getting-started and Thank-You notices eligible again on a site that has
-	 * turned this surface off. Intended: those notices are gated on nothing being
-	 * wrong, and with the surface off there is nothing being reported.
+	 * It used to re-state the conditions instead of reading them, and the
+	 * restatement was narrower than the display: has_persistent_failures() reads
+	 * the `submission` counter alone, while the notices and the Form Checks panel
+	 * warn on any open failure in any of the three categories. So an open
+	 * notification or integration failure left this false, and the review ask
+	 * appeared directly beneath "We noticed a notification failure on Contact
+	 * Form". Submission was covered only incidentally, by FAULT_THRESHOLD being 1 --
+	 * raise that and it would have joined them.
+	 *
+	 * Derived from get_first_party_action_items() now, which is the thing that
+	 * builds those warnings, so the gate cannot drift from the display again.
+	 *
+	 * Two constraints kept from the previous version. It must not call
+	 * get_action_items(): that records an impression as a side effect and must
+	 * never run from a show_if. And it reads the first-party set specifically, so
+	 * an item contributed through `srfm_action_items` cannot suppress notices that
+	 * have nothing to do with it.
+	 *
+	 * Returns false with logging disabled, which is what makes those notices
+	 * eligible again on a site that has turned this surface off. Intended: with the
+	 * surface off there is nothing being reported.
 	 *
 	 * @since 2.12.6
 	 * @return bool
@@ -3703,17 +3718,21 @@ JS;
 			return false;
 		}
 
-		if ( Client_Logger::has_persistent_failures() ) {
-			return true;
+		foreach ( $this->get_first_party_action_items() as $item ) {
+			if ( ! is_array( $item ) ) {
+				continue;
+			}
+
+			$status = Helper::get_string_value( $item['status'] ?? '' );
+
+			// Matches the renderers: 'success' is a passing check and an empty
+			// status is not a warning either, so neither suppresses anything.
+			if ( 'success' !== $status && '' !== $status ) {
+				return true;
+			}
 		}
 
-		if ( '' === Helper::get_active_caching_plugin() ) {
-			return false;
-		}
-
-		$dismissed = Helper::get_array_value( Helper::get_srfm_option( 'dismissed_action_items', [] ) );
-
-		return ! in_array( 'caching_plugin', $dismissed, true );
+		return false;
 	}
 
 	/**
@@ -3887,7 +3906,7 @@ JS;
 	 * blue, on a SureForms panel that is otherwise entirely brand orange. Same
 	 * approach and same values as print_srfm_notice_styles().
 	 *
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return void
 	 */
 	public function enqueue_action_item_styles() {
@@ -4049,7 +4068,7 @@ CSS;
 	 * again in JSX looks identical to translators until the first edit to either,
 	 * after which one surface silently reverts to English.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return array<string,string>
 	 */
 	private function get_details_dialog_labels() {
@@ -4090,7 +4109,7 @@ CSS;
 	 * filter has nothing to do with SureForms' logging toggle, and was being
 	 * silenced by it.
 	 *
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return array<int,array<string,mixed>>
 	 */
 	private function get_first_party_action_items() {
@@ -4866,7 +4885,7 @@ CSS;
 	 * track_action_item_impressions().
 	 *
 	 * @param string $event_name Analytics key from the allowlist.
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return void
 	 */
 	private function track_notice_event( $event_name ) {
@@ -4899,7 +4918,7 @@ CSS;
 	 *
 	 * @param string $category One of Client_Logger::CATEGORIES, naming the failure
 	 *                         the visitor is reporting.
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return string
 	 */
 	private function get_support_contact_url( $category ) {
@@ -4943,7 +4962,7 @@ CSS;
 		 * inbox and has no destination left to change now that the action opens a
 		 * form. A white-label install wants to point this at its own support page.
 		 *
-		 * @since x.x.x
+		 * @since 2.12.7
 		 *
 		 * @param string $url      Contact form URL, already UTM-tagged.
 		 * @param string $category The failure being reported.
@@ -4979,7 +4998,7 @@ CSS;
 	 * that is not in this flow.
 	 *
 	 * @param int $max_chars Characters of log to include.
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return string
 	 */
 	private function get_support_log_block( $max_chars = 1200 ) {
@@ -5022,7 +5041,7 @@ CSS;
 	 * category at all.
 	 *
 	 * @param string $category One of Client_Logger::CATEGORIES.
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return array{subject:string,anon:string}
 	 */
 	private function get_support_copy( $category ) {
@@ -5072,7 +5091,7 @@ CSS;
 	 * @param string $category One of Client_Logger::CATEGORIES. Unknown or absent
 	 *                         gets neutral wording rather than a specific claim.
 	 * @param int    $count    Failures recorded for that category.
-	 * @since x.x.x
+	 * @since 2.12.7
 	 * @return string
 	 */
 	private function get_support_count_sentence( $category, $count ) {
@@ -5180,13 +5199,33 @@ CSS;
 				'',
 				'---',
 				__( 'Site details', 'sureforms' ),
-				'Site: ' . home_url(),
-				'SureForms: ' . SRFM_VER,
-				'SureForms Pro: ' . ( Helper::has_pro() && defined( 'SRFM_PRO_VER' ) ? SRFM_PRO_VER : __( 'not active', 'sureforms' ) ),
-				'WordPress: ' . Helper::get_string_value( $wp_version ),
-				'PHP: ' . PHP_VERSION,
-				'Caching: ' . ( '' !== $caching ? $caching : __( 'none detected', 'sureforms' ) ),
-				'Recorded failures: ' . ( $count > 0 ? $count : __( 'none recorded', 'sureforms' ) ),
+				// Labels translated, values not. The site owner reads this on screen
+				// before sending it, so the labels are copy; the values are machine
+				// data -- a version, a URL, a plugin name -- and stay verbatim. The
+				// debug log below is left alone entirely for the same reason.
+				/* translators: %s: site address. */
+				sprintf( __( 'Site: %s', 'sureforms' ), home_url() ),
+				/* translators: %s: SureForms version. */
+				sprintf( __( 'SureForms: %s', 'sureforms' ), SRFM_VER ),
+				sprintf(
+					/* translators: %s: SureForms Pro version, or a note that it is not active. */
+					__( 'SureForms Pro: %s', 'sureforms' ),
+					Helper::has_pro() && defined( 'SRFM_PRO_VER' ) ? SRFM_PRO_VER : __( 'not active', 'sureforms' )
+				),
+				/* translators: %s: WordPress version. */
+				sprintf( __( 'WordPress: %s', 'sureforms' ), Helper::get_string_value( $wp_version ) ),
+				/* translators: %s: PHP version. */
+				sprintf( __( 'PHP: %s', 'sureforms' ), PHP_VERSION ),
+				sprintf(
+					/* translators: %s: caching plugin name, or a note that none was detected. */
+					__( 'Caching: %s', 'sureforms' ),
+					'' !== $caching ? $caching : __( 'none detected', 'sureforms' )
+				),
+				sprintf(
+					/* translators: %s: number of recorded failures, or a note that none were. */
+					__( 'Recorded failures: %s', 'sureforms' ),
+					$count > 0 ? Helper::get_string_value( $count ) : __( 'none recorded', 'sureforms' )
+				),
 			]
 		);
 

@@ -35,6 +35,10 @@ const EmailSummariesContent = ( { emailTabOptions, updateGlobalSettings } ) => {
 			<Switch
 				label={ {
 					heading: __( 'Enable email summaries', 'sureforms' ),
+					description: __(
+						'Receive a scheduled digest of form submissions straight to your inbox.',
+						'sureforms'
+					),
 				} }
 				value={ emailTabOptions.srfm_email_summary }
 				onChange={ ( value ) =>
@@ -256,6 +260,16 @@ const FormViewsTrackingContent = ( {
 								'Views and submissions by anyone who can edit the site are normally left out, so testing your own forms does not change these figures.',
 								'sureforms'
 							) }
+						</span>
+						<span className="block mt-1">
+							<a
+								href="https://sureforms.com/docs/show-views-and-conversion-rate/"
+								target="_blank"
+								rel="noopener noreferrer"
+								className="text-field-helper"
+							>
+								{ __( 'Learn More', 'sureforms' ) }
+							</a>
 						</span>
 					</span>
 				),
