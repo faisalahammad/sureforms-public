@@ -47,14 +47,14 @@ const UserDetails = () => {
 
 		if ( ! firstName ) {
 			validationErrors.firstName = __(
-				'First name is required.',
+				'Please enter your first name.',
 				'sureforms'
 			);
 		}
 
 		if ( ! email ) {
 			validationErrors.email = __(
-				'Email address is required.',
+				'Please enter your email address.',
 				'sureforms'
 			);
 		} else if ( ! emailRegex.test( email ) ) {
@@ -65,7 +65,10 @@ const UserDetails = () => {
 		}
 
 		if ( ! formData.consent ) {
-			validationErrors.consent = __( 'This is required.', 'sureforms' );
+			validationErrors.consent = __(
+				'Please check this box to continue.',
+				'sureforms'
+			);
 		}
 
 		setErrors( validationErrors );
