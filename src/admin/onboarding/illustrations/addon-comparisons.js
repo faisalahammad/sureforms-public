@@ -1,5 +1,6 @@
 import { __ } from '@wordpress/i18n';
 import conversationalPro from '@Image/onboarding/addon-conversational-pro.svg';
+import multistepFree from '@Image/onboarding/addon-multistep-free.svg';
 
 /*
  * Free vs Pro mock cards for the add-ons step, one pair per tab. Copy and
@@ -114,23 +115,17 @@ const Progress = ( { segments, filled } ) => (
 
 /* ---------- Multistep ---------- */
 
+// Designed artwork (283x246) rather than a hand-built card. The mock has the
+// seven fields QA asked for; the free/pro pair is drifting to exported SVGs one
+// card at a time, so Card/Field/Row below still serve the rest.
 const MultistepFree = () => (
-	<Card
-		title={ __( 'Personal Details', 'sureforms' ) }
-		chip={ __( '8 fields', 'sureforms' ) }
-	>
-		<Row>
-			<Field label={ __( 'Full name', 'sureforms' ) } />
-			<Field label={ __( 'Email address', 'sureforms' ) } />
-		</Row>
-		<Row>
-			<Field label={ __( 'Company name', 'sureforms' ) } />
-			<Field label={ __( 'Phone number', 'sureforms' ) } />
-		</Row>
-		<Field label={ __( 'Company size', 'sureforms' ) } />
-		<Field label={ __( 'Services needed', 'sureforms' ) } />
-		<Field label={ __( 'Project timeline', 'sureforms' ) } />
-	</Card>
+	<img
+		src={ multistepFree }
+		alt=""
+		width={ 283 }
+		height={ 246 }
+		className="block h-[246px] w-[283px]"
+	/>
 );
 
 const MultistepPro = () => (
