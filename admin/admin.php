@@ -4696,34 +4696,23 @@ CSS;
 
 		$subject = sprintf( $copy['subject'], $host );
 
-		// CRLF, not "\n". RFC 6068 leaves the line ending to the client and the
-		// major composers normalise either, but Outlook renders a bare LF body as a
-		// single run-on line -- which is exactly the report a support agent has to
-		// read.
-		$message = str_replace( "\n", "\r\n", $this->get_support_message( $category, $form_title ) );
+		$url = $this->build_support_mailto_within_limit( $category, $form_title, $subject );
 
-		// A mailto: is a URL and every client enforces a length limit on it.
-		// Overrunning it does not truncate politely -- it drops the body, or the
-		// whole link -- while the click still retires the notice. So the cap is on
-		// the encoded URL, not the raw log: JSON-escaped non-ASCII text grows about
-		// eight times once percent-encoded. The log is shrunk first, because the
-		// site details are the part support cannot do without, and the subject alone
-		// is the last resort, since it still names the problem and the site.
-		$url = '';
-
-		foreach ( [ 1200, 800, 400, 0 ] as $budget ) {
-			$log = 0 < $budget
-				? $this->get_support_log_block( $budget )
-				: '---' . "\n" . __( 'Debug log left out to keep this email short enough to send. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
-
-			$url = $this->build_support_mailto( $subject, $message . "\r\n\r\n" . str_replace( "\n", "\r\n", $log ) );
-
-			if ( strlen( $url ) <= self::SUPPORT_MAILTO_MAX_LENGTH ) {
-				break;
-			}
+		// Translated labels in a non-Latin script are two to three UTF-8 bytes a
+		// character, six to nine once percent-encoded, so on a Cyrillic, CJK or
+		// Arabic site the body alone runs past the cap before any log is added.
+		// The body goes to SureForms' own inbox, which reads English, so it is
+		// rebuilt in English before settling for the subject. The subject stays in
+		// the site's language: it is short, and it is what the person sees first.
+		// switch_to_locale() returns false when the site is already in English,
+		// where a retry would build the same URL again.
+		if ( '' === $url && switch_to_locale( 'en_US' ) ) {
+			$url = $this->build_support_mailto_within_limit( $category, $form_title, $subject );
+			restore_previous_locale();
 		}
 
-		if ( strlen( $url ) > self::SUPPORT_MAILTO_MAX_LENGTH ) {
+		// The last resort: the subject alone still names the problem and the site.
+		if ( '' === $url ) {
 			$url = $this->build_support_mailto( $subject );
 		}
 
@@ -4755,6 +4744,47 @@ CSS;
 		// nothing on it that works. The unfiltered URL is built here rather than
 		// supplied, so it always escapes.
 		return '' !== $safe ? $safe : esc_url_raw( $url, [ 'mailto' ] );
+	}
+
+	/**
+	 * The fullest support mailto: that fits SUPPORT_MAILTO_MAX_LENGTH.
+	 *
+	 * A mailto: is a URL and every client enforces a length limit on it.
+	 * Overrunning it does not truncate politely -- it drops the body, or the
+	 * whole link -- while the click still retires the notice. So the cap is on
+	 * the encoded URL, not the raw log: JSON-escaped non-ASCII text grows about
+	 * eight times once percent-encoded. The log gives way first, because the
+	 * site details are the part support cannot do without.
+	 *
+	 * The body is built here rather than passed in, so a caller that has switched
+	 * locale gets it in that locale.
+	 *
+	 * @param string $category   The failure being reported.
+	 * @param string $form_title Form the failure was recorded against, or ''.
+	 * @param string $subject    Subject line.
+	 * @since 2.12.8
+	 * @return string The URL, or '' when even the body without a log is too long.
+	 */
+	private function build_support_mailto_within_limit( $category, $form_title, $subject ) {
+		// CRLF, not "\n". RFC 6068 leaves the line ending to the client and the
+		// major composers normalise either, but Outlook renders a bare LF body as a
+		// single run-on line -- which is exactly the report a support agent has to
+		// read.
+		$message = str_replace( "\n", "\r\n", $this->get_support_message( $category, $form_title ) );
+
+		foreach ( [ 1200, 800, 400, 0 ] as $budget ) {
+			$log = 0 < $budget
+				? $this->get_support_log_block( $budget )
+				: '---' . "\n" . __( 'Debug log left out to keep this email short enough to send. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
+
+			$url = $this->build_support_mailto( $subject, $message . "\r\n\r\n" . str_replace( "\n", "\r\n", $log ) );
+
+			if ( strlen( $url ) <= self::SUPPORT_MAILTO_MAX_LENGTH ) {
+				return $url;
+			}
+		}
+
+		return '';
 	}
 
 	/**

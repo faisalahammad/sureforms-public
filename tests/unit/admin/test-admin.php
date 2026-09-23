@@ -1952,6 +1952,74 @@ class Test_Admin extends TestCase {
 	}
 
 	/**
+	 * A non-Latin translation still sends the site details, in English.
+	 *
+	 * Each character of Cyrillic, CJK or Arabic is two to three UTF-8 bytes, so
+	 * six to nine once percent-encoded. The translated body alone runs past the
+	 * cap before any log is added, and every report would fall through to the
+	 * subject alone. The body goes to SureForms' own inbox, so it is rebuilt in
+	 * English before that happens.
+	 */
+	public function test_get_support_contact_url_keeps_the_body_for_a_non_latin_locale() {
+		$method = new ReflectionMethod( Admin::class, 'get_support_contact_url' );
+		$method->setAccessible( true );
+
+		Client_Logger::clear();
+		for ( $i = 1; $i <= 3; $i++ ) {
+			Client_Logger::append( [ 'type' => 'error', 'message' => 'failure number ' . $i ] );
+		}
+
+		// The site runs in Russian. Priority 5, so the locale switcher's own
+		// filter still runs after this one and can report en_US while switched.
+		$locale = static function () {
+			return 'ru_RU';
+		};
+
+		// Every SureForms string becomes Cyrillic of the same length while the
+		// Russian locale is active, with the placeholders left intact.
+		$cyrillic = static function ( $translation, ...$args ) {
+			if ( 'sureforms' !== end( $args ) || 'en_US' === determine_locale() ) {
+				return $translation;
+			}
+
+			return preg_replace_callback(
+				'/%(?:\d+\$)?[sd]|[A-Za-z]/',
+				static function ( $match ) {
+					return '%' === $match[0][0] ? $match[0] : 'ж';
+				},
+				$translation
+			);
+		};
+
+		add_filter( 'locale', $locale, 5 );
+		add_filter( 'gettext', $cyrillic, 10, 3 );
+		add_filter( 'ngettext', $cyrillic, 10, 5 );
+
+		$url = $method->invoke( Admin::get_instance(), 'notification', 'Contact us' );
+
+		remove_filter( 'locale', $locale, 5 );
+		remove_filter( 'gettext', $cyrillic, 10 );
+		remove_filter( 'ngettext', $cyrillic, 10 );
+
+		$this->assertLessThanOrEqual( 1800, strlen( $url ) );
+
+		parse_str( (string) wp_parse_url( $url, PHP_URL_QUERY ), $query );
+
+		// The subject stays in the site's language: it is short, and it is what
+		// the person sees first in their composer.
+		$this->assertStringContainsString( 'ж', $query['subject'] ?? '' );
+
+		// The body is there, in English, with what support cannot do without.
+		$this->assertStringContainsString( 'Site: ' . home_url(), $query['body'] ?? '', 'The body must survive a non-Latin translation.' );
+		$this->assertStringContainsString( 'Form: Contact us', $query['body'] ?? '' );
+
+		// And the switch was undone.
+		$this->assertSame( 'en_US', determine_locale() );
+
+		Client_Logger::clear();
+	}
+
+	/**
 	 * Contact Support retires the failure it reports.
 	 *
 	 * These notices are dismissible => false, so this click is the only thing that
