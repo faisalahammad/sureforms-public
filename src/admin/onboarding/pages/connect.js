@@ -54,7 +54,7 @@ const Connect = () => {
 
 			<Header
 				title={ __(
-					'From Your Idea to a Publish-Ready Form in Seconds',
+					'From Idea to a Ready-to-Publish Form in Seconds',
 					'sureforms'
 				) }
 				description={ __(
@@ -82,10 +82,7 @@ const Connect = () => {
 						? __( 'Continue', 'sureforms' )
 						: __( 'Connect and Activate AI', 'sureforms' ),
 				} }
-				skipProps={ {
-					onClick: handleSkip,
-					text: __( 'Skip for now', 'sureforms' ),
-				} }
+				skipProps={ { onClick: handleSkip } }
 			/>
 		</div>
 	);

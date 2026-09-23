@@ -1,5 +1,10 @@
 import { __, sprintf } from '@wordpress/i18n';
-import { useState, useEffect, useRef } from '@wordpress/element';
+import {
+	createInterpolateElement,
+	useState,
+	useEffect,
+	useRef,
+} from '@wordpress/element';
 import { Text, Badge, Button, Tabs } from '@bsf/force-ui';
 import { ExternalLink } from 'lucide-react';
 import { useOnboardingNavigation } from '../hooks';
@@ -20,7 +25,7 @@ const TABS = [
 		tab: __( 'Multistep', 'sureforms' ),
 		title: __( 'Multistep Forms', 'sureforms' ),
 		description: __(
-			'Break complex forms into simple steps, reducing overwhelm and boosting completion. Guide users smoothly through the process.',
+			'Break long forms into short steps. Fewer drop-offs, more completions.',
 			'sureforms'
 		),
 	},
@@ -29,7 +34,7 @@ const TABS = [
 		tab: __( 'Conditional', 'sureforms' ),
 		title: __( 'Conditional Fields', 'sureforms' ),
 		description: __(
-			"Show or hide fields based on user answers. Ask the right questions and display only what's needed to keep forms clean and relevant.",
+			"Show fields only when they're relevant. Cleaner forms, better answers.",
 			'sureforms'
 		),
 	},
@@ -38,7 +43,7 @@ const TABS = [
 		tab: __( 'Calculation', 'sureforms' ),
 		title: __( 'Calculation Forms', 'sureforms' ),
 		description: __(
-			'Add interactive calculators to your forms for instant estimates, quotes, and calculations for your users.',
+			'Give instant estimates, quotes, and totals as users fill things in.',
 			'sureforms'
 		),
 	},
@@ -47,7 +52,7 @@ const TABS = [
 		tab: __( 'Conversational', 'sureforms' ),
 		title: __( 'Conversational Forms', 'sureforms' ),
 		description: __(
-			'Create forms that feel like a conversation. One question at a time keeps users engaged and makes form completion easy.',
+			'One question at a time. Feels like a chat — completes like one too.',
 			'sureforms'
 		),
 	},
@@ -273,13 +278,16 @@ const PremiumFeatures = () => {
 					color="primary"
 					className="px-1"
 				>
-					{ sprintf(
-						/* translators: %s: coupon code, e.g. ONB10. */
-						__(
-							'Upgrade to SureForms Business - use code %1$s to get 10%% off on any plan.',
-							'sureforms'
+					{ createInterpolateElement(
+						sprintf(
+							/* translators: %1$s: coupon code, e.g. ONB10. */
+							__(
+								'Use code <code>%1$s</code> for 10%% off any SureForms Business plan.',
+								'sureforms'
+							),
+							COUPON_CODE
 						),
-						COUPON_CODE
+						{ code: <strong className="font-semibold" /> }
 					) }
 				</Text>
 				<Button variant="link" size="xs" onClick={ handleCopy }>
@@ -291,10 +299,7 @@ const PremiumFeatures = () => {
 
 			<NavigationButtons
 				backProps={ { onClick: navigateToPreviousRoute } }
-				skipProps={ {
-					onClick: handleSkip,
-					text: __( 'Skip', 'sureforms' ),
-				} }
+				skipProps={ { onClick: handleSkip } }
 				continueProps={ {
 					onClick: handleUpgradeAndContinue,
 					text: __( 'Upgrade', 'sureforms' ),

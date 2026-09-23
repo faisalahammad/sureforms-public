@@ -266,10 +266,7 @@ const EmailDelivery = () => {
 						? __( 'Continue', 'sureforms' )
 						: __( 'Get SureMail', 'sureforms' ),
 				} }
-				skipProps={ {
-					onClick: handleSkip,
-					text: __( 'Skip', 'sureforms' ),
-				} }
+				skipProps={ { onClick: handleSkip } }
 			/>
 		</div>
 	);

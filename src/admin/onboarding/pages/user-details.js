@@ -224,10 +224,7 @@ const UserDetails = () => {
 					onClick: handleContinue,
 					text: __( 'Finish', 'sureforms' ),
 				} }
-				skipProps={ {
-					onClick: handleSkip,
-					text: __( 'Skip', 'sureforms' ),
-				} }
+				skipProps={ { onClick: handleSkip } }
 			/>
 		</div>
 	);
