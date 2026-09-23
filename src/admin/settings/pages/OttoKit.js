@@ -6,7 +6,7 @@ import { Dot, Plus } from 'lucide-react';
 import ottoKitImage from '@Image/ottokit-integration.svg';
 import LoadingSkeleton from '@Admin/components/LoadingSkeleton';
 import apiFetch from '@wordpress/api-fetch';
-import { useState, useEffect } from '@wordpress/element';
+import { useState, useEffect, useRef } from '@wordpress/element';
 
 const OttoKitPage = ( {
 	loading,
@@ -28,14 +28,56 @@ const OttoKitPage = ( {
 	];
 	const plugin = srfm_admin?.integrations?.sure_triggers;
 
-	// Add state management for connection functionality (reused from integrations/index.js)
+	// State backing the connect/install/activate button.
 	const [ btnDisabled, setBtnDisabled ] = useState( false );
 	const [ buttonText, setButtonText ] = useState( '' );
 	const [ action, setAction ] = useState( '' );
 	const [ CTA, setCTA ] = useState( '' );
 	const [ loadingData, setLoadingData ] = useState( false );
 
-	// Reuse the connection logic from integrations/index.js
+	// The OAuth poll outlives the render that starts it, so its interval and popup
+	// live in a ref that the unmount cleanup below can still reach.
+	const authPollRef = useRef( { interval: null, popup: null } );
+	const isMountedRef = useRef( true );
+
+	// Stop the OAuth poll and close the popup it was watching. For the paths that
+	// own the popup's lifetime: success, timeout/user-closed, and replacing a poll
+	// that is still in flight.
+	const stopAuthPoll = () => {
+		const { interval, popup } = authPollRef.current;
+
+		if ( interval ) {
+			clearInterval( interval );
+		}
+
+		if ( popup && ! popup.closed ) {
+			popup.close();
+		}
+
+		authPollRef.current = { interval: null, popup: null };
+	};
+
+	// Drop the poll on unmount, but deliberately leave the popup open: the user may
+	// still be logging in, and OttoKit completes that server-side. force-ui renders
+	// its dialog as `{ open && ... }`, so closing the form dialog unmounts this
+	// component -- closing the window here would kill a login in progress just
+	// because a dialog closed or a settings tab changed.
+	useEffect( () => {
+		isMountedRef.current = true;
+
+		return () => {
+			isMountedRef.current = false;
+
+			if ( authPollRef.current.interval ) {
+				clearInterval( authPollRef.current.interval );
+			}
+
+			authPollRef.current = { interval: null, popup: null };
+		};
+	}, [] );
+
+	// Connect this site to OttoKit, opening the OAuth popup when the stored
+	// secret key is missing or stale.
 	const integrateWithSureTriggers = () => {
 		const formData = new window.FormData();
 		formData.append( 'action', 'sureforms_integration' );
@@ -48,13 +90,28 @@ const OttoKitPage = ( {
 			body: formData,
 		} ).then( ( response ) => {
 			if ( response.success ) {
+				// Process-wide state rather than this component's, so it is written
+				// even when the response lands after unmount.
 				window.SureTriggersConfig = response.data.data;
+			}
+
+			// Everything past here either touches a still-mounted parent's state or
+			// opens a popup nothing would be left to clean up.
+			if ( ! isMountedRef.current ) {
+				return;
+			}
+
+			if ( response.success ) {
 				if ( setSelectedTab ) {
 					setSelectedTab( 'suretriggers' );
 				}
 			} else {
 				if ( response.data.code ) {
 					if ( 'invalid_secret_key' === response.data.code ) {
+						// Callers can invoke this while a poll is in flight, so
+						// drop the old one rather than stacking another on top.
+						stopAuthPoll();
+
 						const windowDimension = { width: 800, height: 720 };
 						const positioning = {
 							left: ( screen.width - windowDimension.width ) / 2,
@@ -65,6 +122,28 @@ const OttoKitPage = ( {
 							'',
 							`width=${ windowDimension.width },height=${ windowDimension.height },top=${ positioning.top },left=${ positioning.left },scrollbars=0`
 						);
+
+						// window.open runs from a promise continuation, so it has
+						// no user activation left and browsers routinely block it.
+						// Bail out here: polling on a null handle throws on every
+						// tick, before the clearInterval that would stop it.
+						if ( ! sureTriggersAuthenticationWindow ) {
+							setBtnDisabled( false );
+							setButtonText(
+								getButtonText(
+									'Activated',
+									pluginConnected || plugin.connected
+								)
+							);
+							setCTA( getCTA( 'Activated' ) );
+							alert(
+								__(
+									'Could not open the OttoKit connection window. Please allow popups for this site and try again.',
+									'sureforms'
+								)
+							);
+							return;
+						}
 
 						let iterations = 0;
 
@@ -80,8 +159,16 @@ const OttoKitPage = ( {
 								if ( authResponse.success ) {
 									window.SureTriggersConfig =
 										authResponse.data.data;
-									sureTriggersAuthenticationWindow.close();
-									clearInterval( suretriggersAuthInterval );
+									stopAuthPoll();
+
+									// This request can land after unmount, and the
+									// setters below belong to a parent that is
+									// still mounted -- setSelectedTab would move
+									// the user's tab out from under them.
+									if ( ! isMountedRef.current ) {
+										return;
+									}
+
 									setPluginConnected( true );
 									setLocalPluginStatus( 'Activated' );
 									if ( setSelectedTab ) {
@@ -100,12 +187,7 @@ const OttoKitPage = ( {
 								iterations >= 240 ||
 								sureTriggersAuthenticationWindow.closed
 							) {
-								if (
-									! sureTriggersAuthenticationWindow.closed
-								) {
-									sureTriggersAuthenticationWindow.close();
-								}
-								clearInterval( suretriggersAuthInterval );
+								stopAuthPoll();
 								setButtonText(
 									getButtonText(
 										'Activated',
@@ -116,6 +198,11 @@ const OttoKitPage = ( {
 								setBtnDisabled( false );
 							}
 						}, 500 );
+
+						authPollRef.current = {
+							interval: suretriggersAuthInterval,
+							popup: sureTriggersAuthenticationWindow,
+						};
 					}
 				}
 				console.error( response.data.message );
@@ -123,7 +210,7 @@ const OttoKitPage = ( {
 		} );
 	};
 
-	// Complete plugin lifecycle management from integrations/index.js
+	// Complete plugin lifecycle management: install, activate, then connect.
 	const handlePluginActionTrigger = () => {
 		// For global settings: use internal methods so React state updates trigger re-render
 		if ( ! isFormSettings ) {
@@ -263,7 +350,7 @@ const OttoKitPage = ( {
 		return __( 'Install & Activate', 'sureforms' );
 	};
 
-	// Optimized button text logic from integrations/index.js
+	// Button label for the current plugin status and connection state.
 	const getButtonText = ( status, connected = false ) => {
 		if ( status === 'Activated' ) {
 			if ( isFormSettings ) {

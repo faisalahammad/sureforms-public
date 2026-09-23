@@ -1330,6 +1330,88 @@ class Test_Admin extends TestCase {
 	}
 
 	/**
+	 * The report's prose translates; the debug log does not.
+	 *
+	 * The site owner reads this on screen before sending it, so every label in it is
+	 * copy and belongs in the catalogue. The values beside those labels are machine
+	 * data -- a version, a URL, a plugin name -- and the JSON log below them is the
+	 * raw record support greps, so neither is touched.
+	 *
+	 * Driven through a gettext filter rather than a real locale, because the suite
+	 * has no translations loaded and an untranslated string is indistinguishable
+	 * from a translated one that happens to match.
+	 */
+	public function test_support_message_translates_its_labels_but_not_the_log() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::clear();
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
+		Client_Logger::append(
+			Client_Logger::sanitize_entry(
+				[
+					'type'    => 'network',
+					'status'  => 500,
+					'form_id' => 42,
+					'message' => 'Submission responded 500',
+				]
+			)
+		);
+		Admin::reset_action_items_cache();
+
+		// Marks anything that reached the catalogue, so a label that was never
+		// wrapped simply will not carry the marker.
+		$translate = static function ( $translated ) {
+			return '[t]' . $translated;
+		};
+
+		add_filter( 'gettext', $translate, 99 );
+
+		$method = new ReflectionMethod( Admin::class, 'get_support_message' );
+		$method->setAccessible( true );
+		$message = Helper::get_string_value( $method->invoke( Admin::get_instance(), 'notification', 'Contact Form' ) );
+
+		$log = Helper::get_string_value(
+			( new ReflectionMethod( Admin::class, 'get_support_log_block' ) )->getClosure( Admin::get_instance() )( 8000 )
+		);
+
+		remove_filter( 'gettext', $translate, 99 );
+
+		// Every label a reader sees, including the six that shipped as bare English
+		// while the values beside them were already translated.
+		foreach (
+			[
+				'Hello SureForms support,',
+				'Site details',
+				'Site: ',
+				'SureForms: ',
+				'SureForms Pro: ',
+				'WordPress: ',
+				'PHP: ',
+				'Caching: ',
+				'Recorded failures: ',
+			] as $label
+		) {
+			$this->assertStringContainsString(
+				'[t]' . $label,
+				$message,
+				sprintf( '"%s" is copy the site owner reads, so it must go through the catalogue.', trim( $label ) )
+			);
+		}
+
+		// The values are not copy, so they must arrive verbatim.
+		$this->assertStringContainsString( '[t]SureForms: ' . SRFM_VER, $message, 'The version itself is machine data.' );
+		$this->assertStringContainsString( '[t]Site: ' . home_url(), $message, 'So is the site address.' );
+
+		// And the log is the raw record support greps. Nothing in it may be rewritten.
+		$this->assertStringContainsString( '"type":"network"', $log, 'The JSON must survive verbatim.' );
+		$this->assertStringNotContainsString( '[t]{', $log, 'No entry line may be translated.' );
+		$this->assertStringNotContainsString( '[t]"type"', $log );
+
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::clear();
+	}
+
+	/**
 	 * The served details payload keeps its line breaks.
 	 *
 	 * The text is several lines of diagnostics and a fenced log; one long line is
@@ -2287,6 +2369,77 @@ class Test_Admin extends TestCase {
 		$this->assertTrue( Admin::get_instance()->has_action_item_warnings() );
 		remove_filter( 'pre_option_active_plugins', $quiet );
 
+	}
+
+	/**
+	 * Every category that puts a warning on screen also silences the review ask.
+	 *
+	 * The gate used to re-state its conditions rather than read them, and the
+	 * restatement was narrower than the display: has_persistent_failures() reads the
+	 * `submission` counter alone, while the notices warn on any open failure in any
+	 * of the three categories. So "Rate SureForms 5 stars" rendered directly beneath
+	 * "We noticed a notification failure on Contact Form".
+	 *
+	 * Submission passed before this fix, but only because FAULT_THRESHOLD is 1. It is
+	 * covered here anyway so raising that threshold cannot quietly reopen the hole.
+	 *
+	 * Asserted against get_action_items() in the same breath, because the defect was
+	 * the gate and the display disagreeing -- checking the gate alone is what let it
+	 * through.
+	 */
+	public function test_every_warning_category_suppresses_the_engagement_notices() {
+		wp_set_current_user( $this->make_user( 'administrator' ) );
+
+		// Caching advice out of the way, so the fault is the only thing in play.
+		Helper::update_srfm_option( 'dismissed_action_items', [ 'caching_plugin' ] );
+
+		$quiet = static function () {
+			return [ 'akismet/akismet.php' ];
+		};
+
+		add_filter( 'pre_option_active_plugins', $quiet );
+
+		foreach ( [ 'notification', 'integration', 'submission' ] as $category ) {
+			delete_option( Client_Logger::FAILURES_OPTION );
+			Client_Logger::record_failure( $category, 42, 'Contact Form' );
+			Admin::reset_action_items_cache();
+
+			$on_screen = 0;
+
+			foreach ( Admin::get_instance()->get_action_items() as $item ) {
+				$status = Helper::get_string_value( is_array( $item ) ? $item['status'] ?? '' : '' );
+
+				if ( 'success' !== $status && '' !== $status ) {
+					$on_screen++;
+				}
+			}
+
+			$this->assertGreaterThan(
+				0,
+				$on_screen,
+				sprintf( 'Fixture check: a %s failure must actually render a warning.', $category )
+			);
+
+			$this->assertTrue(
+				Admin::get_instance()->has_action_item_warnings(),
+				sprintf( 'A %s failure is on screen, so the review ask must stand down.', $category )
+			);
+		}
+
+		// A healthy site still gets asked, so the gate is not simply stuck on.
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Admin::reset_action_items_cache();
+
+		$this->assertFalse(
+			Admin::get_instance()->has_action_item_warnings(),
+			'With nothing wrong the engagement notices must still be eligible.'
+		);
+
+		remove_filter( 'pre_option_active_plugins', $quiet );
+
+		Helper::update_srfm_option( 'dismissed_action_items', [] );
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Admin::reset_action_items_cache();
 	}
 
 	/**
