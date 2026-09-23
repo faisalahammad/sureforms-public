@@ -122,6 +122,7 @@ const UserDetails = () => {
 							id="srfm-onboarding-first-name"
 							size="md"
 							label={ __( 'First Name', 'sureforms' ) }
+							required
 							placeholder={ __(
 								'Enter your first name',
 								'sureforms'
@@ -141,7 +142,7 @@ const UserDetails = () => {
 						<Input
 							id="srfm-onboarding-last-name"
 							size="md"
-							label={ __( 'Last Name', 'sureforms' ) }
+							label={ __( 'Last Name (optional)', 'sureforms' ) }
 							placeholder={ __(
 								'Enter your last name',
 								'sureforms'
@@ -158,6 +159,7 @@ const UserDetails = () => {
 						size="md"
 						type="email"
 						label={ __( 'Email Address', 'sureforms' ) }
+						required
 						placeholder={ __(
 							'Enter your email address',
 							'sureforms'
