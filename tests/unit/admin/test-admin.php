@@ -971,7 +971,6 @@ class Test_Admin extends TestCase {
 	 */
 	private function post_notice_response( $notice_id, $button ) {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
-		delete_option( Client_Logger::FAILURES_OPTION );
 
 		$_POST['nonce']     = wp_create_nonce( 'srfm_notice_response' );
 		$_POST['notice_id'] = $notice_id;
@@ -1273,9 +1272,8 @@ class Test_Admin extends TestCase {
 	 * read from the submission counter -- often zero, and always about something
 	 * else. Wrong at a glance, and routed to the wrong queue.
 	 *
-	 * Asserted against get_support_copy() and get_support_message() rather than a
-	 * composed URL: the dialog reads the message and the webhook reads the subject,
-	 * and there is no mail URL left to build.
+	 * Asserted against get_support_copy() and get_support_message() directly, so a
+	 * wording bug fails here rather than behind the URL encoding.
 	 */
 	public function test_support_copy_describes_the_failure_that_happened() {
 		delete_option( Client_Logger::FAILURES_OPTION );
@@ -1453,8 +1451,7 @@ class Test_Admin extends TestCase {
 			'The oldest entries are what the bound drops.'
 		);
 
-		// The dialog gets a wider excerpt than any URL could have carried, because
-		// a clipboard and a <pre> have no length limit worth designing around.
+		// The budget is honoured in both directions: a larger one includes more.
 		$wide = $method->invoke( Admin::get_instance(), 8000 );
 
 		$this->assertGreaterThan(
@@ -1480,7 +1477,7 @@ class Test_Admin extends TestCase {
 	 * here, because a swap that only reorders would leave the secondary styling on
 	 * the leading action.
 	 */
-	public function test_render_action_item_notices_puts_the_guide_before_the_details_action() {
+	public function test_render_action_item_notices_puts_the_guide_before_contact_support() {
 		wp_set_current_user( $this->make_user( 'administrator' ) );
 		delete_option( Client_Logger::FAILURES_OPTION );
 		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
@@ -1592,7 +1589,7 @@ class Test_Admin extends TestCase {
 	}
 
 	/**
-	 * The carousel and dialog CSS reaches the head, and only when it is needed.
+	 * The carousel CSS reaches the head, and only when it is needed.
 	 *
 	 * The rules have to be in the head, not the footer. admin_notices fires from
 	 * admin-header.php after admin_print_styles has flushed, so enqueuing from the
@@ -1656,8 +1653,8 @@ class Test_Admin extends TestCase {
 		// Logical properties, so an RTL sheet can override rather than fight it.
 		$this->assertStringContainsString( 'inset-inline-end', $css );
 		$this->assertStringContainsString( 'padding-inline-end', $css );
-		// Brand, not the admin colour scheme.
-		$this->assertStringContainsString( '#D54407', $css );
+		// The dialog it used to style is gone, and so are its rules.
+		$this->assertStringNotContainsString( 'srfm-details', $css );
 
 		wp_dequeue_style( 'srfm-action-items' );
 		wp_deregister_style( 'srfm-action-items' );
@@ -1861,7 +1858,7 @@ class Test_Admin extends TestCase {
 		$this->assertSame( 'mailto:help@reseller.example.com', $mailto );
 
 		// Or their own page. Supported, and it drops the body -- a web form cannot
-		// carry one -- which is what the Copy details button covers.
+		// carry one -- so the person arrives without the diagnostics.
 		$page = static function () {
 			return 'https://reseller.example.com/help/';
 		};
@@ -1907,6 +1904,75 @@ class Test_Admin extends TestCase {
 				'A filter value that cannot survive escaping must fall back, not blank the only working action.'
 			);
 		}
+	}
+
+	/**
+	 * The mailto: fits a mail client's URL limit whatever the log holds.
+	 *
+	 * A client given a longer link drops the body or the whole link, and the click
+	 * still retires the notice -- so the report is lost and the one notice that
+	 * cannot be dismissed goes away. The cap is on the encoded URL, because
+	 * JSON-escaped non-ASCII text grows about eight times once percent-encoded.
+	 */
+	public function test_get_support_contact_url_stays_within_the_mailto_limit() {
+		$method = new ReflectionMethod( Admin::class, 'get_support_contact_url' );
+		$method->setAccessible( true );
+		$host = Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) );
+
+		// An ordinary log: the report still carries it.
+		Client_Logger::clear();
+		for ( $i = 1; $i <= 3; $i++ ) {
+			Client_Logger::append( [ 'type' => 'error', 'message' => 'failure number ' . $i ] );
+		}
+
+		$url = $method->invoke( Admin::get_instance(), 'notification', 'Contact us' );
+
+		$this->assertLessThanOrEqual( 1800, strlen( $url ) );
+		$this->assertStringContainsString( 'failure number 3', $this->mailto_body( $url ), 'A log that fits is sent.' );
+
+		// One entry far over any budget, in text that escapes to \uXXXX.
+		Client_Logger::append( [ 'type' => 'error', 'message' => str_repeat( 'é', 3000 ) ] );
+
+		$url = $method->invoke( Admin::get_instance(), 'notification', 'Contact us' );
+
+		$this->assertLessThanOrEqual( 1800, strlen( $url ), 'The encoded URL is capped, not the raw log.' );
+		$this->assertStringStartsWith( 'mailto:support@sureforms.com?', $url );
+
+		parse_str( (string) wp_parse_url( $url, PHP_URL_QUERY ), $query );
+
+		// Still a usable report: the problem, the form and the site.
+		$this->assertSame(
+			sprintf( 'SureForms: notification emails are not being sent on %s', $host ),
+			$query['subject'] ?? ''
+		);
+		$this->assertStringContainsString( 'Form: Contact us', $query['body'] ?? '' );
+		$this->assertStringContainsString( 'Site: ' . home_url(), $query['body'] ?? '' );
+
+		Client_Logger::clear();
+	}
+
+	/**
+	 * Contact Support retires the failure it reports.
+	 *
+	 * These notices are dismissible => false, so this click is the only thing that
+	 * stands one down. A different button, or a different notice, must not.
+	 */
+	public function test_handle_notice_response_contact_support_retires_the_category() {
+		delete_option( Client_Logger::FAILURES_OPTION );
+		Client_Logger::record_failure( 'notification', 42, 'Contact Form' );
+		Client_Logger::record_failure( 'integration', 42, 'Contact Form' );
+
+		// The guide button on the same notice leaves it open.
+		$this->assertTrue( $this->post_notice_response( 'notification_error', 'help_me_fix' ) );
+		$this->assertArrayHasKey( 'notification', Client_Logger::get_open_failures() );
+
+		$this->assertTrue( $this->post_notice_response( 'notification_error', 'contact_support' ) );
+
+		$open = Client_Logger::get_open_failures();
+		$this->assertArrayNotHasKey( 'notification', $open, 'The reported category is retired.' );
+		$this->assertArrayHasKey( 'integration', $open, 'Only the one reported.' );
+
+		delete_option( Client_Logger::FAILURES_OPTION );
 	}
 
 	/**

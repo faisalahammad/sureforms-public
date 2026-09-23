@@ -701,6 +701,29 @@ class Test_Client_Logger extends TestCase {
 	}
 
 	/**
+	 * The budget is a ceiling even when the newest entry alone is over it.
+	 *
+	 * An empty excerpt is worse than a long one, so the newest entry is always kept
+	 * -- but trimmed to the budget, because the caller is building a mailto: and a
+	 * URL past the client's limit loses the whole body.
+	 */
+	public function test_get_tail_trims_a_single_oversized_entry() {
+		Client_Logger::clear();
+		Client_Logger::append( [ 'type' => 'error', 'message' => 'failure number 1' ] );
+		Client_Logger::append( [ 'type' => 'error', 'message' => str_repeat( 'x', 5000 ) ] );
+
+		$tail = Client_Logger::get_tail( 400 );
+
+		$this->assertSame( 1, $tail['shown'], 'Only the newest entry fits.' );
+		$this->assertSame( 2, $tail['total'] );
+		$this->assertLessThanOrEqual( 400, strlen( $tail['text'] ), 'The budget holds for a single entry too.' );
+		$this->assertStringStartsWith( '{"type":"error"', $tail['text'], 'The start of the entry says what failed, so it is the part kept.' );
+		$this->assertStringEndsWith( '[truncated]', $tail['text'] );
+
+		Client_Logger::clear();
+	}
+
+	/**
 	 * An empty or absent log must not produce a broken excerpt.
 	 */
 	public function test_get_tail_handles_an_empty_log() {

@@ -89,7 +89,7 @@ class Admin {
 	public const THANKYOU_PROMPT_NOTICE_ID = 'srfm-thankyou-prompt';
 
 	/**
-	 * Where the dialog's Contact Support button writes to.
+	 * Where the Contact Support button writes to.
 	 *
 	 * An inbox rather than a form, restoring the 2.12.6 behaviour. A mailto: opens
 	 * the composer the person already has open with the subject and the whole
@@ -100,6 +100,16 @@ class Admin {
 	 * @since 2.12.8
 	 */
 	private const SUPPORT_EMAIL = 'support@sureforms.com';
+
+	/**
+	 * Longest Contact Support mailto: URL we hand to a mail client.
+	 *
+	 * Below the roughly 2000-character limit the strictest common clients and
+	 * browsers apply to a link, with room to spare.
+	 *
+	 * @since 2.12.8
+	 */
+	private const SUPPORT_MAILTO_MAX_LENGTH = 1800;
 
 	/**
 	 * Dashboard widget entries data.
@@ -2906,8 +2916,10 @@ JS;
 		$this->track_notice_event( $valid[ $notice_id ][ $button ] );
 
 		// Reporting the failures retires the notice until something new fails.
-		// Handled here rather than in the browser so it holds for the classic
-		// wp-admin notice too, which is a plain link with no JavaScript.
+		// Handled here rather than in the browser so both surfaces share it. The
+		// click still reaches here only through JavaScript -- notice-response.js
+		// on the classic notice, ActionItems.js on the dashboard -- so with
+		// JavaScript off the link opens the email but the notice stays.
 		$categories = [
 			'form_submission_error' => 'submission',
 			'notification_error'    => 'notification',
@@ -3697,10 +3709,9 @@ JS;
 		 * handle_dismiss_action_item()'s allowlist can actually be dismissed, so
 		 * adding a dismissible item here also needs a line there.
 		 *
-		 * The details dialog is not available here: it is served by
-		 * handle_action_item_details(), which reads SureForms' own client error log
-		 * and knows nothing about a third-party item. Such an item's cta_url is
-		 * followed as a link, which is what it does with JavaScript off anyway.
+		 * A third-party item's cta_url is followed as a plain link. The prefilled
+		 * support email is built only for SureForms' own failure items, from its own
+		 * client error log.
 		 *
 		 * @since 2.12.6
 		 *
@@ -3741,11 +3752,12 @@ JS;
 				);
 			}
 
-			// The id ends up in a data attribute the dialog matches on with an
-			// attribute selector, and in the dismiss allowlist. sanitize_key() is
-			// what both dismiss paths already apply, so applying it once here means
-			// the value that renders is the value they compare against -- and a
-			// filter-contributed id carrying a quote cannot break the selector.
+			// The id ends up in the notice's data-srfm-notice-id attribute, which
+			// notice-response.js matches on, and in the dismiss allowlist.
+			// sanitize_key() is what both dismiss paths already apply, so applying
+			// it once here means the value that renders is the value they compare
+			// against -- and a filter-contributed id carrying a quote cannot break
+			// the selector.
 			if ( isset( $item['id'] ) ) {
 				$items[ $index ]['id'] = sanitize_key( Helper::get_string_value( $item['id'] ) );
 			}
@@ -3789,15 +3801,14 @@ JS;
 	}
 
 	/**
-	 * The stylesheet for the notice carousel and the details dialog.
+	 * The stylesheet for the notice carousel.
 	 *
 	 * In a stylesheet rather than inline style assignments in
-	 * notice-response.js, so the rules use logical properties, an RTL sheet can
-	 * override them, and a site can restyle the dialog without patching a script.
+	 * notice-response.js, so the rules use logical properties and an RTL sheet can
+	 * override them.
 	 *
-	 * Only the classic wp-admin surface needs these. The SureForms dashboard's
-	 * dialog is force-ui's, styled by the Tailwind build, so nothing here reaches
-	 * it -- the two surfaces share their strings, not their markup.
+	 * Only the classic wp-admin surface needs these. The SureForms dashboard is
+	 * styled by the Tailwind build, so nothing here reaches it.
 	 *
 	 * Attached to a registered handle with no file of its own, which is the WP way
 	 * to ship CSS tied to one script.
@@ -3809,13 +3820,6 @@ JS;
 	 * rendered expanded before collapsing to one, the carousel controls overlapped
 	 * the notice text, and the defensive `display: none` on the hidden payload was
 	 * inert, which is the exact window that rule exists for.
-	 *
-	 * The buttons are painted explicitly. They carry core's `button` classes for
-	 * their shape and focus behaviour, and core paints those with
-	 * `var(--wp-admin-theme-color)` -- so without this the dialog renders in
-	 * whichever admin colour scheme the user picked, which on a default install is
-	 * blue, on a SureForms panel that is otherwise entirely brand orange. Same
-	 * approach and same values as print_srfm_notice_styles().
 	 *
 	 * @since 2.12.7
 	 * @return void
@@ -3866,104 +3870,6 @@ JS;
 	display: flex;
 	align-items: center;
 	gap: 8px;
-}
-.srfm-details-overlay {
-	position: fixed;
-	inset: 0;
-	z-index: 999999;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	background: rgba(0, 0, 0, .5);
-	padding: 16px;
-}
-.srfm-details-panel {
-	background: #fff;
-	border-radius: 8px;
-	padding: 16px;
-	width: 100%;
-	max-width: 800px;
-	box-shadow: 0 10px 30px rgba(0, 0, 0, .2);
-}
-.srfm-details-panel h2 { margin: 0 0 4px; font-size: 14px; }
-.srfm-details-panel .srfm-details-description { margin: 0 0 12px; color: #50575e; }
-.srfm-details-panel pre {
-	margin: 0;
-	max-height: 320px;
-	overflow: auto;
-	white-space: pre-wrap;
-	word-break: break-word;
-	background: #f6f7f7;
-	padding: 12px;
-	border-radius: 6px;
-	font-size: 12px;
-}
-.srfm-details-actions {
-	display: flex;
-	gap: 8px;
-	align-items: center;
-	flex-wrap: wrap;
-	justify-content: flex-end;
-	margin: 12px 0 0;
-}
-.srfm-details-hint {
-	margin-inline-end: auto;
-	font-size: 12px;
-	color: #4b5563;
-}
-/* Core paints .button with the admin colour scheme, so these say what they are
-   rather than inheriting whichever scheme the user picked. */
-.srfm-details-panel .srfm-details-close.button-link {
-	color: #50575e;
-	text-decoration: none;
-}
-.srfm-details-panel .srfm-details-close.button-link:hover,
-.srfm-details-panel .srfm-details-close.button-link:focus {
-	color: #1e1e1e;
-}
-.srfm-details-panel .srfm-details-copy.button {
-	background: #fff;
-	border-color: #c3c4c7;
-	color: #1e1e1e;
-}
-.srfm-details-panel .srfm-details-copy.button:hover,
-.srfm-details-panel .srfm-details-copy.button:focus {
-	background: #f6f7f7;
-	border-color: #8c8f94;
-	color: #1e1e1e;
-}
-.srfm-details-panel .srfm-details-contact.button-primary,
-.srfm-details-panel .srfm-details-contact.button-primary:hover,
-.srfm-details-panel .srfm-details-contact.button-primary:focus {
-	background: #D54407;
-	border-color: #D54407;
-	color: #fff;
-	box-shadow: none;
-	text-shadow: none;
-	text-decoration: none;
-}
-.srfm-details-panel .srfm-details-contact.button-primary:hover,
-.srfm-details-panel .srfm-details-contact.button-primary:focus {
-	background: #C83B00;
-	border-color: #C83B00;
-}
-/* Grey rather than a dimmed orange fill. Core sets the disabled text colour with
-   !important, so an orange background here leaves grey on orange at 1.31:1 --
-   and a control that cannot be used should not wear the primary colour anyway.
-   This is what core gives every other disabled button, and what force-ui renders
-   for the same state on the dashboard, so the two surfaces agree. */
-.srfm-details-panel .srfm-details-contact.button-primary[aria-disabled="true"],
-.srfm-details-panel .srfm-details-contact.button-primary[aria-disabled="true"]:hover,
-.srfm-details-panel .srfm-details-contact.button-primary[aria-disabled="true"]:focus {
-	background: #f6f7f7;
-	border-color: #dcdcde;
-	pointer-events: none;
-	box-shadow: none;
-}
-.srfm-details-panel .button:focus {
-	outline: 2px solid #D54407;
-	outline-offset: 1px;
-	box-shadow: none;
 }
 CSS;
 
@@ -4043,13 +3949,17 @@ CSS;
 				// diagnostics and the log tail are already in it, so reporting a
 				// fault is one click and a send.
 				//
-				// The report is built per click rather than shipped with the page.
-				// Its content comes from the client error log, which is filled
-				// through a public REST route gated on a submit token any visitor
-				// can obtain from a form page rather than on a capability -- so the
-				// text is attacker-authored. It reaches only this href, on a screen
-				// only a capable user sees, rather than a hidden div on every admin
-				// page.
+				// Built when the page renders, so the report ships in the href of the
+				// classic notice on every admin screen and in srfm_admin.action_items
+				// on the dashboard, both for capable users only. Its log comes from
+				// the client error log, which any visitor with a form's submit token
+				// can write to, so treat it as untrusted text. It is inert here:
+				// http_build_query() percent-encodes all of it, so it cannot break
+				// out of the attribute or add &cc= / &bcc= to the mailto:, and the
+				// URL is length-capped. Building it on click instead would bring back
+				// an AJAX round trip and a nonce to open an email -- the 2.12.7
+				// dialog's machinery -- for text the person reads in the composer
+				// before anything is sent.
 				'cta_label'   => __( 'Contact Support', 'sureforms' ),
 				'cta_url'     => $this->get_support_contact_url( $category, $form_title ),
 				'cta_action'  => 'contact_support',
@@ -4770,8 +4680,8 @@ CSS;
 	 * The log is pasted into the body rather than attached because mailto has no
 	 * attachment parameter -- browsers drop any attempt to add one -- and it is a
 	 * tail rather than the whole file because a megabyte of JSON would exceed the
-	 * URL length every mail client enforces. That cap is why $max_chars below is
-	 * the small budget and not the 8000 the dialog reads on screen.
+	 * URL length every mail client enforces. The finished URL is capped at
+	 * SUPPORT_MAILTO_MAX_LENGTH, and the log is what gives way to meet it.
 	 *
 	 * @param string $category   One of Client_Logger::CATEGORIES, naming the failure
 	 *                           being reported. An unknown or absent one gets
@@ -4784,39 +4694,48 @@ CSS;
 		$copy = $this->get_support_copy( $category );
 		$host = Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) );
 
+		$subject = sprintf( $copy['subject'], $host );
+
 		// CRLF, not "\n". RFC 6068 leaves the line ending to the client and the
 		// major composers normalise either, but Outlook renders a bare LF body as a
 		// single run-on line -- which is exactly the report a support agent has to
 		// read.
-		$body = str_replace( "\n", "\r\n", $this->get_support_message( $category, $form_title ) );
+		$message = str_replace( "\n", "\r\n", $this->get_support_message( $category, $form_title ) );
 
-		// The small budget. The dialog on screen reads 8000 because a clipboard has
-		// no length limit worth designing around; a mailto: is a URL and every client
-		// enforces one. Overrunning it does not truncate politely -- it drops the
-		// body, or the whole link.
-		$body .= "\r\n\r\n" . str_replace( "\n", "\r\n", $this->get_support_log_block( 1200 ) );
+		// A mailto: is a URL and every client enforces a length limit on it.
+		// Overrunning it does not truncate politely -- it drops the body, or the
+		// whole link -- while the click still retires the notice. So the cap is on
+		// the encoded URL, not the raw log: JSON-escaped non-ASCII text grows about
+		// eight times once percent-encoded. The log is shrunk first, because the
+		// site details are the part support cannot do without, and the subject alone
+		// is the last resort, since it still names the problem and the site.
+		$url = '';
 
-		$url = 'mailto:' . self::SUPPORT_EMAIL . '?' . http_build_query(
-			[
-				'subject' => sprintf( $copy['subject'], $host ),
-				'body'    => $body,
-			],
-			'',
-			'&',
-			// RFC 3986, so a space is %20 rather than +. A mail client reading a
-			// mailto: body decodes it as a URI, not as form data, so + arrives as a
-			// literal plus in every word gap.
-			PHP_QUERY_RFC3986
-		);
+		foreach ( [ 1200, 800, 400, 0 ] as $budget ) {
+			$log = 0 < $budget
+				? $this->get_support_log_block( $budget )
+				: '---' . "\n" . __( 'Debug log left out to keep this email short enough to send. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
+
+			$url = $this->build_support_mailto( $subject, $message . "\r\n\r\n" . str_replace( "\n", "\r\n", $log ) );
+
+			if ( strlen( $url ) <= self::SUPPORT_MAILTO_MAX_LENGTH ) {
+				break;
+			}
+		}
+
+		if ( strlen( $url ) > self::SUPPORT_MAILTO_MAX_LENGTH ) {
+			$url = $this->build_support_mailto( $subject );
+		}
 
 		/**
 		 * Filter where the Contact Support action sends people.
 		 *
 		 * A white-label install wants its own inbox or its own support page, so both
-		 * are accepted. Returning an http(s) URL is supported and drops the body --
-		 * a web form cannot carry it -- so a filter doing that should expect the
-		 * person to arrive without the diagnostics, and the Copy details button in
-		 * the dialog is what covers them.
+		 * are accepted. Returning an http(s) URL is supported but drops the body --
+		 * a web form cannot carry it -- so the person arrives without the site
+		 * details or the debug log. They can still download the log from SureForms →
+		 * Settings → General, but nothing prompts them to, so a filter returning a
+		 * page should ask for it there.
 		 *
 		 * @since 2.12.7
 		 *
@@ -4839,17 +4758,36 @@ CSS;
 	}
 
 	/**
+	 * A mailto: to the support inbox.
+	 *
+	 * @param string $subject Subject line.
+	 * @param string $body    Body, with CRLF line endings. Omitted when empty.
+	 * @since 2.12.8
+	 * @return string
+	 */
+	private function build_support_mailto( $subject, $body = '' ) {
+		$query = [ 'subject' => $subject ];
+
+		if ( '' !== $body ) {
+			$query['body'] = $body;
+		}
+
+		return 'mailto:' . self::SUPPORT_EMAIL . '?' . http_build_query(
+			$query,
+			'',
+			'&',
+			// RFC 3986, so a space is %20 rather than +. A mail client reading a
+			// mailto: body decodes it as a URI, not as form data, so + arrives as a
+			// literal plus in every word gap.
+			PHP_QUERY_RFC3986
+		);
+	}
+
+	/**
 	 * The log tail, formatted for pasting.
 	 *
-	 * One builder, so the text someone reads before sending is the text that gets
-	 * sent. They used to be built separately, which is how a "details" view drifts
-	 * from what it claims to show.
-	 *
-	 * The budget is a parameter because nothing here is going into a URL any more.
-	 * Client_Logger::get_tail()'s 1200-character default existed to fit a compose
-	 * URL; a clipboard and a <pre> have no such limit, so the dialog asks for more
-	 * and the note below describes the real constraint rather than a mail client
-	 * that is not in this flow.
+	 * The budget is a parameter because it goes into a mailto: URL, and
+	 * get_support_contact_url() lowers it until the encoded URL fits.
 	 *
 	 * @param int $max_chars Characters of log to include.
 	 * @since 2.12.7
