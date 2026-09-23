@@ -1,9 +1,13 @@
 import { __ } from '@wordpress/i18n';
 import { useState, useEffect } from '@wordpress/element';
+import { Text } from '@bsf/force-ui';
 import apiFetch from '@wordpress/api-fetch';
 import { useOnboardingNavigation } from '../hooks';
 import { useOnboardingState } from '../onboarding-state';
-import { handlePluginActionTrigger } from '@Utils/Helpers';
+import {
+	getPluginStatusText,
+	installAndActivatePlugin,
+} from '@Utils/Helpers';
 import { Divider, Header, FeatureList, HERO_PANEL_CLASS } from '../components';
 import NavigationButtons from '../components/navigation-buttons';
 // Rendered via <object>, not <img> or an inlined component: the artwork
@@ -91,10 +95,13 @@ const EmailDelivery = () => {
 		initialSuremailsPlugin
 	);
 
-	// Track if SureMail was already installed before onboarding
-	const [ wasAlreadyInstalled, setWasAlreadyInstalled ] = useState( false );
+	// Whether SureMail was already active before onboarding started. Only an
+	// install that happened *here* counts as one this wizard produced.
+	const [ wasAlreadyActive, setWasAlreadyActive ] = useState( false );
 
-	const pluginStatus = [ 'Activate', 'Activated', 'Installed' ];
+	// 'installing' | 'activating' while the button is working, '' otherwise.
+	const [ progress, setProgress ] = useState( '' );
+	const [ installError, setInstallError ] = useState( '' );
 
 	// Function to refresh plugin status
 	const refreshPluginStatus = async () => {
@@ -127,80 +134,73 @@ const EmailDelivery = () => {
 	// Refresh plugin status on component mount to ensure we have the latest status
 	useEffect( () => {
 		refreshPluginStatus().then( ( updatedPlugin ) => {
-			// Check if SureMail is already installed/activated
-			if (
-				updatedPlugin &&
-				pluginStatus.includes( updatedPlugin.status )
-			) {
-				// Mark as already installed, but don't track in analytics
-				setWasAlreadyInstalled( true );
+			if ( 'Activated' === updatedPlugin?.status ) {
+				// Already active before the wizard ran: not an install to
+				// report, so the analytics flag stays false.
+				setWasAlreadyActive( true );
 			}
 		} );
 	}, [] );
 
-	const handleInstallSureMail = () => {
-		// Check if the plugin exists
-		if ( suremailsPlugin ) {
-			if (
-				localStorage.getItem( 'srfm_suremail_installation_started' ) ===
-				'true'
-			) {
-				// Installation already started, just navigate to next step
-				navigateToNextRoute();
-				return;
-			}
-			// Check if the plugin is already activated or installed.
-			if ( pluginStatus.includes( suremailsPlugin.status ) ) {
-				// If the plugin was already installed before onboarding started,
-				// don't mark it as installed during onboarding - just navigate to next step
-				if ( wasAlreadyInstalled ) {
-					// Navigate to next step without marking as installed
-					navigateToNextRoute();
-				} else {
-					// Plugin was installed during onboarding, update analytics
-					actions.setSuremailInstalled( true );
-					// If email-delivery was previously skipped, remove it from skippedSteps
-					actions.unmarkStepSkipped( 'emailDelivery' );
-					// Navigate to next step
-					handleSkip( 'install' );
-				}
-				return;
-			}
+	const isActive = 'Activated' === suremailsPlugin?.status;
 
-			// Set a flag to indicate installation has started
-			localStorage.setItem(
-				'srfm_suremail_installation_started',
-				'true'
-			);
+	// The button says what will actually happen, using the same vocabulary as
+	// the dashboard's plugin card: "Install & Activate" when the plugin is
+	// absent, "Activate" when it is installed but off, and "Continue" once
+	// there is nothing left to do.
+	const continueText = () => {
+		if ( 'installing' === progress ) {
+			return __( 'Installing SureMail…', 'sureforms' );
+		}
+		if ( 'activating' === progress ) {
+			return __( 'Activating SureMail…', 'sureforms' );
+		}
+		if ( ! suremailsPlugin || isActive ) {
+			return __( 'Continue', 'sureforms' );
+		}
+		return getPluginStatusText( suremailsPlugin );
+	};
 
-			// Update analytics state before navigation
-			// This ensures the analytics are updated even if the component unmounts
+	const handleInstallSureMail = async () => {
+		// Nothing to install, or nothing to install it from: just move on.
+		if ( ! suremailsPlugin || isActive ) {
+			if ( isActive && ! wasAlreadyActive ) {
+				actions.setSuremailInstalled( true );
+				actions.unmarkStepSkipped( 'emailDelivery' );
+			}
+			handleSkip( 'install' );
+			return;
+		}
+
+		setInstallError( '' );
+
+		// Awaited rather than fired and forgotten, so the wizard only advances
+		// once SureMail is really active and a failure can be shown here
+		// instead of on a screen the user has already left. NavigationButtons
+		// shows its spinner for as long as this promise is pending.
+		try {
+			await installAndActivatePlugin( suremailsPlugin, setProgress );
+
+			setSuremailsPlugin( {
+				...suremailsPlugin,
+				status: 'Activated',
+			} );
 			actions.setSuremailInstalled( true );
 			actions.unmarkStepSkipped( 'emailDelivery' );
-
-			// Navigate to next step
 			handleSkip( 'install' );
-
-			// Start background installation (fire and forget)
-			handlePluginActionTrigger( {
-				plugin: suremailsPlugin,
-				event: { target: { innerText: '', style: { color: '' } } }, // Dummy event object.
-			} )
-				.then( () => {
-					// Installation completed successfully
-					localStorage.removeItem(
-						'srfm_suremail_installation_started'
-					);
-				} )
-				.catch( ( error ) => {
-					console.error( 'Plugin installation failed:', error );
-					localStorage.removeItem(
-						'srfm_suremail_installation_started'
-					);
-				} );
-		} else {
-			// No plugin info available, just navigate to next step
-			handleSkip( 'install' );
+		} catch ( error ) {
+			setInstallError(
+				error?.message ||
+					__(
+						'SureMail could not be installed. Please try again, or skip this step.',
+						'sureforms'
+					)
+			);
+			// Re-read rather than trust our own guess: the install may have
+			// landed and only the activation failed.
+			refreshPluginStatus();
+		} finally {
+			setProgress( '' );
 		}
 	};
 
@@ -254,6 +254,12 @@ const EmailDelivery = () => {
 				items={ features }
 			/>
 
+			{ installError && (
+				<Text size={ 14 } color="error" role="alert">
+					{ installError }
+				</Text>
+			) }
+
 			<Divider />
 
 			<NavigationButtons
@@ -262,9 +268,7 @@ const EmailDelivery = () => {
 				} }
 				continueProps={ {
 					onClick: handleInstallSureMail,
-					text: pluginStatus.includes( suremailsPlugin?.status )
-						? __( 'Continue', 'sureforms' )
-						: __( 'Get SureMail', 'sureforms' ),
+					text: continueText(),
 				} }
 				skipProps={ { onClick: handleSkip } }
 			/>

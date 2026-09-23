@@ -4,7 +4,10 @@ const leadDetails = srfm_admin?.website_lead_details || {};
 
 // Session storage key for onboarding state
 
-// localStorage keys written during onboarding and cleared on exit/finish.
+// localStorage keys cleared on exit/finish. Nothing writes this one any more --
+// the SureMail step awaits its install instead of handing it to a background
+// task and leaving a flag behind -- but installs that ran an earlier build can
+// still be holding it, so it stays on the cleanup list.
 export const ONBOARDING_STORAGE_KEYS = [ 'srfm_suremail_installation_started' ];
 
 // Initial state
