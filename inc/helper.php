@@ -2144,6 +2144,27 @@ class Helper {
 	}
 
 	/**
+	 * Whether SureForms promotional content should be hidden.
+	 *
+	 * Covers review requests, cross-sell banners and announcements. The free
+	 * plugin never hides them on its own; SureForms Pro's Distraction Free mode
+	 * turns this on through the filter.
+	 *
+	 * @since 2.12.8
+	 * @return bool
+	 */
+	public static function hide_promotions() {
+		/**
+		 * Filter whether SureForms hides its promotional content in wp-admin.
+		 *
+		 * @since 2.12.8
+		 *
+		 * @param bool $hide Default false.
+		 */
+		return (bool) apply_filters( 'srfm_hide_promotions', false );
+	}
+
+	/**
 	 * Verifies the request by checking the nonce and user capabilities.
 	 *
 	 * @param string $request_type The type of request, either 'rest' or 'ajax'.

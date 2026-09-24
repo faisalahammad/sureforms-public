@@ -1,6 +1,7 @@
 import { __ } from '@wordpress/i18n';
 import { useState, useEffect } from '@wordpress/element';
 import apiFetch from '@wordpress/api-fetch';
+import { applyFilters } from '@wordpress/hooks';
 import { Button, Input, Loader, Select, Switch, toast } from '@bsf/force-ui';
 import ContentSection from '../components/ContentSection';
 import LoadingSkeleton from '@Admin/components/LoadingSkeleton';
@@ -562,6 +563,13 @@ const GeneralPage = ( {
 					/>
 				}
 			/>
+			{ /* Extension slot for add-on sections, such as SureForms Pro's
+			     Distraction Free. Renders nothing on its own. */ }
+			{ applyFilters(
+				'srfm.settings.general.additionalSections',
+				null,
+				{ loading }
+			) }
 			{ /* Everything above is something SureForms does for this site.
 			     Analytics is the one setting that sends anything outward, so it
 			     sits last, behind a rule, rather than reading as one more form

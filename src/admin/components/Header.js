@@ -13,6 +13,7 @@ import Tooltip from './Tooltip';
 const {
 	site_url: siteURL = '',
 	is_pro_active: isProActive = false,
+	hide_promotions: hidePromotions = false,
 	additional_header_nav_items: additionalNavItems = [],
 } = srfm_admin;
 
@@ -75,6 +76,36 @@ const HeaderTooltipItem = ( { title, icon, onClick, children } ) => (
 );
 
 /**
+ * "What's New" announcements flyout. A separate component so it can be
+ * skipped while promotions are hidden without calling the RSS hook
+ * conditionally.
+ *
+ * @return {JSX.Element} What's New header item.
+ */
+const WhatsNew = () => {
+	useWhatsNewRSS( {
+		uniqueKey: 'sureforms',
+		rssFeedURL: 'https://sureforms.com/whats-new/feed/',
+		selector: '#srfm_whats_new',
+		icon: renderToString( <Megaphone className="size-4 m-1" /> ),
+		flyout: {
+			title: __( "What's New?", 'sureforms' ),
+		},
+		triggerButton: {
+			icon: renderToString(
+				<Megaphone className="size-4 m-1 text-text-primary" />
+			),
+		},
+	} );
+
+	return (
+		<HeaderTooltipItem title={ __( 'What’s New', 'sureforms' ) }>
+			<div id="srfm_whats_new" className="[&>a]:p-0.5 [&>a]:pl-0" />
+		</HeaderTooltipItem>
+	);
+};
+
+/**
  * Header Component
  *
  * @param {Object}                                       props            Component props
@@ -102,21 +133,6 @@ const Header = ( { breadCrumb } ) => {
 			NAV_ITEMS.find( ( item ) => item.slug === currentPage )
 		);
 	}, [] );
-
-	useWhatsNewRSS( {
-		uniqueKey: 'sureforms',
-		rssFeedURL: 'https://sureforms.com/whats-new/feed/',
-		selector: '#srfm_whats_new',
-		icon: renderToString( <Megaphone className="size-4 m-1" /> ),
-		flyout: {
-			title: __( "What's New?", 'sureforms' ),
-		},
-		triggerButton: {
-			icon: renderToString(
-				<Megaphone className="size-4 m-1 text-text-primary" />
-			),
-		},
-	} );
 
 	useEffect( () => {
 		const handleLicenseStatusUpdate = ( event ) => {
@@ -323,14 +339,7 @@ const Header = ( { breadCrumb } ) => {
 							)
 						}
 					/>
-					<HeaderTooltipItem
-						title={ __( 'What’s New', 'sureforms' ) }
-					>
-						<div
-							id="srfm_whats_new"
-							className="[&>a]:p-0.5 [&>a]:pl-0"
-						/>
-					</HeaderTooltipItem>
+					{ ! hidePromotions && <WhatsNew /> }
 				</Topbar.Right>
 			</Topbar>
 		</div>

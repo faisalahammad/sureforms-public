@@ -3328,4 +3328,22 @@ class Test_Helper extends TestCase {
 		$this->assertSame( '', $detected );
 	}
 
+    /**
+     * Promotions show by default and are hidden only through the filter.
+     */
+    public function test_hide_promotions() {
+        $this->assertFalse( Helper::hide_promotions(), 'Free never hides promotions on its own.' );
+
+        add_filter( 'srfm_hide_promotions', '__return_true' );
+        $this->assertTrue( Helper::hide_promotions() );
+        remove_filter( 'srfm_hide_promotions', '__return_true' );
+
+        $truthy = static function () {
+            return 1;
+        };
+        add_filter( 'srfm_hide_promotions', $truthy );
+        $this->assertTrue( Helper::hide_promotions(), 'A truthy filter value is cast to bool.' );
+        remove_filter( 'srfm_hide_promotions', $truthy );
+    }
+
 }

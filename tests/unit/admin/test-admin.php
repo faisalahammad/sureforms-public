@@ -2630,6 +2630,54 @@ class Test_Admin extends TestCase {
 
 		$this->assertSame( '', $output );
 	}
+
+	/**
+	 * The SMTP (SureMail cross-sell) submenu is not registered while promotions are hidden.
+	 */
+	public function test_add_suremail_page_not_registered_when_promotions_hidden() {
+		add_filter( 'srfm_hide_promotions', '__return_true' );
+		$admin = new Admin();
+		remove_filter( 'srfm_hide_promotions', '__return_true' );
+		$this->assertFalse( has_action( 'admin_menu', [ $admin, 'add_suremail_page' ] ) );
+
+		$admin = new Admin();
+		$this->assertNotFalse( has_action( 'admin_menu', [ $admin, 'add_suremail_page' ] ), 'Control: registered by default.' );
+	}
+
+
+	/**
+	 * The localized admin data carries the hide_promotions flag and drops the
+	 * rotating cross-sell banner, which is what the dashboard ExtendTab reads.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_enqueue_scripts_localizes_hide_promotions() {
+		wp_set_current_user( (int) wp_insert_user( [ 'user_login' => 'srfm_df_loc_' . wp_rand(), 'user_pass' => 'password', 'user_email' => 'srfm_df_loc_' . wp_rand() . '@example.com', 'role' => 'administrator' ] ) );
+		set_current_screen( 'toplevel_page_sureforms_menu' );
+		$_GET['page']     = 'sureforms_menu';
+		$_REQUEST['page'] = 'sureforms_menu';
+
+		$captured = [];
+		add_filter(
+			'srfm_admin_filter',
+			static function ( $data ) use ( &$captured ) {
+				$captured[] = $data;
+				return $data;
+			}
+		);
+
+		add_filter( 'srfm_hide_promotions', '__return_true' );
+		Admin::get_instance()->enqueue_scripts();
+		remove_filter( 'srfm_hide_promotions', '__return_true' );
+		$this->assertNotEmpty( $captured, 'The dashboard localization must run.' );
+		$this->assertTrue( $captured[0]['hide_promotions'] );
+		$this->assertNull( $captured[0]['rotating_plugin_banner'] );
+
+		$captured = [];
+		Admin::get_instance()->enqueue_scripts();
+		$this->assertFalse( $captured[0]['hide_promotions'], 'Control: off by default.' );
+	}
 }
 
 /**
@@ -2784,6 +2832,31 @@ class Test_Rating_Notice extends TestCase {
 				wp_delete_user( (int) $admin_user );
 			}
 		}
+	}
+
+	/**
+	 * No review request while promotions are hidden. The control run proves the
+	 * notice would otherwise be registered in this environment.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_display_srfm_rating_notice_skipped_when_promotions_hidden() {
+		if ( ! class_exists( '\\Astra_Notices' ) ) {
+			$this->markTestSkipped( 'Astra_Notices not available.' );
+		}
+
+		wp_set_current_user( (int) wp_insert_user( [ 'user_login' => 'srfm_df_' . wp_rand(), 'user_pass' => 'password', 'user_email' => 'srfm_df_' . wp_rand() . '@example.com', 'role' => 'administrator' ] ) );
+		$admin = Admin::get_instance();
+
+		add_filter( 'srfm_hide_promotions', '__return_true' );
+		$before = $this->get_astra_notices_count();
+		$admin->display_srfm_rating_notice();
+		remove_filter( 'srfm_hide_promotions', '__return_true' );
+		$this->assertSame( $before, $this->get_astra_notices_count(), 'No review notice while promotions are hidden.' );
+
+		$admin->display_srfm_rating_notice();
+		$this->assertSame( $before + 1, $this->get_astra_notices_count(), 'Control: the notice registers by default.' );
 	}
 }
 
@@ -3390,6 +3463,134 @@ class Test_Getting_Started_Notice extends TestCase {
 			$admin->render_form_setup_widget();
 			$this->assertSame( '', (string) ob_get_clean(), 'No card → the widget renders nothing.' );
 		} finally {
+			Admin::reset_form_setup_card_cache();
+			wp_delete_post( $form_id, true );
+			wp_set_current_user( 0 );
+			if ( ! is_wp_error( $admin_user ) ) {
+				wp_delete_user( (int) $admin_user );
+			}
+		}
+	}
+
+	/**
+	 * While promotions are hidden, neither the AI Quick Draft nor the recent-entries
+	 * widget is wired onto wp_dashboard_setup. The control run shows the AI widget
+	 * is wired otherwise.
+	 */
+	public function test_maybe_register_dashboard_widget_skipped_when_promotions_hidden() {
+		$admin   = Admin::get_instance();
+		$user_id = wp_insert_user(
+			[
+				'user_login' => 'srfm_df_widget_' . uniqid(),
+				'user_pass'  => 'password',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( $user_id );
+
+		try {
+			remove_action( 'wp_dashboard_setup', [ $admin, 'register_ai_dashboard_widget' ] );
+			remove_action( 'wp_dashboard_setup', [ $admin, 'register_dashboard_widget' ] );
+
+			add_filter( 'srfm_hide_promotions', '__return_true' );
+			$admin->maybe_register_dashboard_widget();
+			remove_filter( 'srfm_hide_promotions', '__return_true' );
+
+			$this->assertFalse( has_action( 'wp_dashboard_setup', [ $admin, 'register_ai_dashboard_widget' ] ), 'AI Quick Draft must not be wired.' );
+			$this->assertFalse( has_action( 'wp_dashboard_setup', [ $admin, 'register_dashboard_widget' ] ), 'Recent entries must not be wired.' );
+
+			$admin->maybe_register_dashboard_widget();
+			$this->assertNotFalse( has_action( 'wp_dashboard_setup', [ $admin, 'register_ai_dashboard_widget' ] ), 'Control: wired by default.' );
+		} finally {
+			remove_action( 'wp_dashboard_setup', [ $admin, 'register_ai_dashboard_widget' ] );
+			remove_action( 'wp_dashboard_setup', [ $admin, 'register_dashboard_widget' ] );
+			wp_set_current_user( 0 );
+		}
+	}
+
+	/**
+	 * While promotions are hidden, the AI Quick Draft script is not enqueued.
+	 */
+	public function test_enqueue_ai_dashboard_widget_assets_skipped_when_promotions_hidden() {
+		$admin   = Admin::get_instance();
+		$user_id = wp_insert_user(
+			[
+				'user_login' => 'srfm_df_ai_' . uniqid(),
+				'user_pass'  => 'password',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( $user_id );
+
+		try {
+			wp_dequeue_script( 'srfm-ai-dashboard-widget' );
+			wp_deregister_script( 'srfm-ai-dashboard-widget' );
+
+			add_filter( 'srfm_hide_promotions', '__return_true' );
+			$admin->enqueue_ai_dashboard_widget_assets( 'index.php' );
+			remove_filter( 'srfm_hide_promotions', '__return_true' );
+			$this->assertFalse( wp_script_is( 'srfm-ai-dashboard-widget', 'enqueued' ) );
+
+			$admin->enqueue_ai_dashboard_widget_assets( 'index.php' );
+			$this->assertTrue( wp_script_is( 'srfm-ai-dashboard-widget', 'enqueued' ), 'Control: enqueued by default.' );
+		} finally {
+			wp_dequeue_script( 'srfm-ai-dashboard-widget' );
+			wp_deregister_script( 'srfm-ai-dashboard-widget' );
+			wp_set_current_user( 0 );
+		}
+	}
+
+	/**
+	 * While promotions are hidden, the "Finish setting up" checklist widget is not
+	 * registered and its assets do not load, even with a form that qualifies. The
+	 * control runs show both happen otherwise.
+	 */
+	public function test_register_form_setup_widget_skipped_when_promotions_hidden() {
+		if ( ! defined( 'SRFM_FORMS_POST_TYPE' ) ) {
+			$this->markTestSkipped( 'SRFM_FORMS_POST_TYPE not defined' );
+		}
+		require_once ABSPATH . 'wp-admin/includes/template.php';
+		require_once ABSPATH . 'wp-admin/includes/dashboard.php';
+		remove_all_actions( 'wp_insert_post_data' );
+
+		global $wp_meta_boxes;
+		$admin      = Admin::get_instance();
+		$admin_user = wp_insert_user(
+			[
+				'user_login' => 'srfm_df_setup_' . wp_rand(),
+				'user_pass'  => 'password',
+				'user_email' => 'srfm_df_setup_' . wp_rand() . '@example.com',
+				'role'       => 'administrator',
+			]
+		);
+		wp_set_current_user( is_wp_error( $admin_user ) ? 0 : (int) $admin_user );
+		set_current_screen( 'dashboard' );
+
+		$form_id = wp_insert_post( [ 'post_type' => SRFM_FORMS_POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Setup Widget Form' ] );
+		update_post_meta( $form_id, Admin::ASTRA_SITES_IMPORT_META, 1 );
+		delete_transient( Admin::NO_IMPORTED_FORMS_TRANSIENT );
+
+		try {
+			Admin::reset_form_setup_card_cache();
+			unset( $wp_meta_boxes['dashboard']['normal']['high']['srfm_form_setup_checklist'] );
+			wp_dequeue_style( 'srfm-setup-checklist-widget' );
+			wp_deregister_style( 'srfm-setup-checklist-widget' );
+
+			add_filter( 'srfm_hide_promotions', '__return_true' );
+			$admin->register_form_setup_widget();
+			$admin->enqueue_form_setup_widget_assets( 'index.php' );
+			remove_filter( 'srfm_hide_promotions', '__return_true' );
+
+			$this->assertArrayNotHasKey( 'srfm_form_setup_checklist', $wp_meta_boxes['dashboard']['normal']['high'] ?? [], 'Checklist widget must not register.' );
+			$this->assertFalse( wp_style_is( 'srfm-setup-checklist-widget', 'enqueued' ), 'Checklist assets must not load.' );
+
+			$admin->register_form_setup_widget();
+			$admin->enqueue_form_setup_widget_assets( 'index.php' );
+			$this->assertArrayHasKey( 'srfm_form_setup_checklist', $wp_meta_boxes['dashboard']['normal']['high'], 'Control: registers by default.' );
+			$this->assertTrue( wp_style_is( 'srfm-setup-checklist-widget', 'enqueued' ), 'Control: assets load by default.' );
+		} finally {
+			unset( $wp_meta_boxes['dashboard']['normal']['high']['srfm_form_setup_checklist'] );
+			wp_dequeue_style( 'srfm-setup-checklist-widget' );
 			Admin::reset_form_setup_card_cache();
 			wp_delete_post( $form_id, true );
 			wp_set_current_user( 0 );
