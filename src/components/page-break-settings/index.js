@@ -2,14 +2,54 @@
  * Shared Page Break Settings controls.
  *
  * Reads and writes `_srfm_page_break_settings` post meta via the
- * 'core/editor' store. Renders the same control set whether mounted in the
- * Form Options document panel (GeneralSettings) or the Page Break block's
- * own Inspector Controls.
+ * 'core/editor' store. Rendered in Form > Page Break (GeneralSettings); the
+ * Page Break block itself only points here.
  */
 import { __ } from '@wordpress/i18n';
 import { useDispatch, useSelect } from '@wordpress/data';
 import { SelectControl, ToggleControl } from '@wordpress/components';
+import { Tooltip } from '@bsf/force-ui';
+import { Info } from 'lucide-react';
 import SRFMTextControl from '@Components/text-control';
+
+/**
+ * Toggle label with its explanation in an info tooltip.
+ *
+ * Same Tooltip and icon as the Post Meta label in the custom post type
+ * settings. Tailwind only applies inside the containers listed in
+ * tailwind.config.js, and the block editor sidebar is not one of them, so the
+ * tooltip portals into #srfm-dialog-root -- always present in the editor and
+ * inside that scope -- and the icon takes the icon-secondary colour directly.
+ *
+ * @param {Object} props
+ * @param {string} props.label Toggle label.
+ * @param {string} props.help  Explanation shown in the tooltip.
+ */
+const LabelWithTooltip = ( { label, help } ) => (
+	<span style={ { display: 'inline-flex', alignItems: 'center', gap: 4 } }>
+		{ label }
+		<Tooltip
+			tooltipPortalId="srfm-dialog-root"
+			// Above the Instant Form popover (z-index 1000000). Important
+			// because `#srfm-dialog-root > div[data-floating-ui-portal] > div`
+			// pins portaled content to 999999 with higher specificity.
+			className="!z-[1000001]"
+			arrow
+			content={ <span>{ help }</span> }
+			placement="top"
+			triggers={ [ 'hover', 'focus' ] }
+			variant="dark"
+		>
+			{ /* The icon sits inside the toggle's <label>; without this a click
+			meant to read the tooltip would flip the setting. */ }
+			<Info
+				size={ 16 }
+				color="#6B7280"
+				onClick={ ( event ) => event.preventDefault() }
+			/>
+		</Tooltip>
+	</span>
+);
 
 const PageBreakSettings = () => {
 	const pageBreakSettings = useSelect( ( select ) => {
@@ -119,6 +159,49 @@ const PageBreakSettings = () => {
 				}
 				isFormSpecific={ true }
 			/>
+			<ToggleControl
+				label={
+					<LabelWithTooltip
+						label={ __(
+							'Auto-Advance to Next Step',
+							'sureforms'
+						) }
+						help={ __(
+							'Go to the next step as soon as someone picks an option. Works on steps with a single Multiple Choice or Dropdown field. The last step always shows Submit.',
+							'sureforms'
+						) }
+					/>
+				}
+				checked={ !! pageBreakSettings?.auto_advance }
+				onChange={ ( value ) =>
+					updatePageBreakSettings( 'auto_advance', value )
+				}
+			/>
+			{ pageBreakSettings?.auto_advance && (
+				<ToggleControl
+					label={
+						<LabelWithTooltip
+							label={ __(
+								'Hide Next Button',
+								'sureforms'
+							) }
+							help={ __(
+								'Hide the Next button on steps that auto-advance. It reappears when reached with the keyboard.',
+								'sureforms'
+							) }
+						/>
+					}
+					checked={
+						!! pageBreakSettings?.auto_advance_hide_next
+					}
+					onChange={ ( value ) =>
+						updatePageBreakSettings(
+							'auto_advance_hide_next',
+							value
+						)
+					}
+				/>
+			) }
 		</>
 	);
 };

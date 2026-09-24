@@ -21,7 +21,7 @@ use SRFM\Inc\Admin\Html_Form_Detector;
  * the full integration path (which is exercised end-to-end in
  * Playwright runs).
  */
-class Test_Html_Form_Detector extends TestCase {
+class Test_Html_Form_Detector extends SRFM_Unit_Test_Case {
 
 	/**
 	 * Detector instance under test.
@@ -232,10 +232,13 @@ class Test_Html_Form_Detector extends TestCase {
 		$this->assertSame( 'px', $styling['form_padding_unit'] );
 		$this->assertTrue( $styling['form_padding_link'] );
 
-		// Empty styling: meta stays untouched.
+		// Empty styling: meta stays untouched. Compare against what the form was
+		// created with rather than '' - creating a form seeds its own styling meta,
+		// so an empty-string assertion was really asserting the seeding was absent.
 		$other_form = self::factory()->post->create( [ 'post_type' => SRFM_FORMS_POST_TYPE ] );
+		$before     = get_post_meta( $other_form, '_srfm_forms_styling', true );
 		$this->call_protected( 'apply_native_card_styling', [ $other_form, [] ] );
-		$this->assertSame( '', get_post_meta( $other_form, '_srfm_forms_styling', true ) );
+		$this->assertSame( $before, get_post_meta( $other_form, '_srfm_forms_styling', true ) );
 
 		wp_delete_post( $form_id, true );
 		wp_delete_post( $other_form, true );
@@ -451,9 +454,14 @@ class Test_Html_Form_Detector extends TestCase {
 		);
 
 		$this->assertCount( 1, $result );
-		$this->assertSame( 'Name alert(1)', $result[0]['label'] );
-		$this->assertSame( 'Hint ', $result[0]['helpText'] );
-		$this->assertSame( 'Yes ', $result[0]['fieldOptions'][0]['label'] );
+
+		// A <script> element is removed whole - tags and the code between them -
+		// so the payload does not survive as text the way an <img>/<iframe>
+		// attribute payload does.
+		$this->assertSame( 'Name', $result[0]['label'] );
+		// The sweep trims, so the gap left by the removed tag does not linger.
+		$this->assertSame( 'Hint', $result[0]['helpText'] );
+		$this->assertSame( 'Yes', $result[0]['fieldOptions'][0]['label'] );
 		$this->assertSame( 'yes', $result[0]['fieldOptions'][0]['value'] );
 		$this->assertSame( 'No', $result[0]['fieldOptions'][1]['label'] );
 		// Scalars survive.
@@ -464,10 +472,21 @@ class Test_Html_Form_Detector extends TestCase {
 	}
 
 	public function test_strip_form_for_preservation_kses_for_non_unfiltered() {
-		// Site admin without `unfiltered_html` (mirrors a multisite
-		// site admin) — `<script>` outside the form must be stripped.
+		/*
+		 * A user without `unfiltered_html` - `<script>` outside the form must be
+		 * stripped. The role alone is not enough to express that: on single-site
+		 * WordPress an editor *does* hold unfiltered_html (only multisite takes
+		 * it away), so the cap has to be denied explicitly or this asserts the
+		 * unfiltered branch by accident.
+		 */
 		$user_id = self::factory()->user->create( [ 'role' => 'editor' ] );
 		wp_set_current_user( $user_id );
+
+		$deny_unfiltered_html = static function ( $allcaps ) {
+			unset( $allcaps['unfiltered_html'] );
+			return $allcaps;
+		};
+		add_filter( 'user_has_cap', $deny_unfiltered_html );
 
 		$html = '<div class="wrap"><h2>Free eBook</h2>'
 			. '<form><input type="email" name="email" required></form>'
@@ -481,8 +500,16 @@ class Test_Html_Form_Detector extends TestCase {
 		$this->assertStringContainsString( 'Thanks for signing up', $preserved );
 		$this->assertStringNotContainsString( '<form', $preserved );
 		$this->assertStringNotContainsString( '<script', $preserved );
-		$this->assertStringNotContainsString( 'alert("xss")', $preserved );
 
+		// wp_kses_post() removes the element but keeps its text, which is inert
+		// once the tags are gone. Assert the whole result so any future change to
+		// what survives has to be made deliberately.
+		$this->assertSame(
+			'<div class="wrap"><h2>Free eBook</h2><p>Thanks for signing up.</p>alert("xss")</div>',
+			$preserved
+		);
+
+		remove_filter( 'user_has_cap', $deny_unfiltered_html );
 		wp_delete_user( $user_id );
 	}
 

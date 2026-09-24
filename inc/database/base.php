@@ -790,7 +790,12 @@ abstract class Base {
 	 * @return int|false The number of rows deleted, or false on error.
 	 */
 	public function use_delete( $where, $where_format = null ) {
-		return $this->wpdb->delete( $this->get_tablename(), $where, $where_format );
+		$result = $this->wpdb->delete( $this->get_tablename(), $where, $where_format );
+
+		// Reset cache so subsequent queries in the same request exclude the deleted row.
+		$this->cache_reset();
+
+		return $result;
 	}
 
 	/**

@@ -14,12 +14,19 @@ use SRFM\Inc\AI_Form_Builder\AI_Helper;
 class Test_AI_Helper extends TestCase {
 
 	/**
-	 * Test get_error_message returns string for WP_Error.
+	 * get_error_message() returns the display payload, not a bare string.
+	 *
+	 * An unrecognised error code falls through to the generic title/message pair,
+	 * with the original code preserved so the caller can still report it.
 	 */
 	public function test_get_error_message() {
 		$error  = new \WP_Error( 'test_error', 'Test error message' );
 		$result = AI_Helper::get_error_message( $error );
-		$this->assertIsString( $result );
+
+		$this->assertIsArray( $result );
+		$this->assertSame( 'test_error', $result['code'] );
+		$this->assertSame( 'Unknown Error', $result['title'] );
+		$this->assertSame( 'An unknown error occurred.', $result['message'] );
 	}
 
 	/**
@@ -227,7 +234,14 @@ class Test_AI_Helper extends TestCase {
 	 */
 	public function test_sanitize_ai_error_message_passes_through_clean_messages() {
 		$message = 'Rate limit exceeded. Please retry in a few seconds.';
-		$this->assertSame( $message, AI_Helper::sanitize_ai_error_message( $message ) );
+
+		// The wording survives intact; only trailing punctuation is trimmed, which
+		// is what stops a message ending in " ." after a token has been redacted
+		// out of the tail.
+		$this->assertSame(
+			'Rate limit exceeded. Please retry in a few seconds',
+			AI_Helper::sanitize_ai_error_message( $message )
+		);
 	}
 
 	/**

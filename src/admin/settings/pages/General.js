@@ -1,6 +1,7 @@
 import { __ } from '@wordpress/i18n';
 import { useState, useEffect } from '@wordpress/element';
 import apiFetch from '@wordpress/api-fetch';
+import { applyFilters } from '@wordpress/hooks';
 import { Button, Input, Loader, Select, Switch, toast } from '@bsf/force-ui';
 import ContentSection from '../components/ContentSection';
 import LoadingSkeleton from '@Admin/components/LoadingSkeleton';
@@ -245,16 +246,6 @@ const FormViewsTrackingContent = ( {
 					// stacked, however they are displayed themselves. The wrapper
 					// is the single item; its children stack as ordinary blocks.
 					<span className="block">
-						{ /* Kept verbatim from 2.12.6: all seven shipped locales
-						     already translate this msgid, and re-punctuating it
-						     to add the sentence below would orphan every one of
-						     them. New copy goes in its own __() call. */ }
-						<span className="block">
-							{ __(
-								'Adds the Views and Conversion Rate columns to the Forms list. A view is counted once per page visit when the form appears on screen, and the conversion rate is the share of those views that ended in a submission. Counting starts the first time you turn this on, so submissions received before then are not counted towards the rate. Turning it off afterwards only hides the columns — counting continues, so the figures are up to date if you switch it back on.',
-								'sureforms'
-							) }
-						</span>
 						<span className="block mt-1">
 							{ __(
 								'Views and submissions by anyone who can edit the site are normally left out, so testing your own forms does not change these figures.',
@@ -572,6 +563,13 @@ const GeneralPage = ( {
 					/>
 				}
 			/>
+			{ /* Extension slot for add-on sections, such as SureForms Pro's
+			     Distraction Free. Renders nothing on its own. */ }
+			{ applyFilters(
+				'srfm.settings.general.additionalSections',
+				null,
+				{ loading }
+			) }
 			{ /* Everything above is something SureForms does for this site.
 			     Analytics is the one setting that sends anything outward, so it
 			     sits last, behind a rule, rather than reading as one more form

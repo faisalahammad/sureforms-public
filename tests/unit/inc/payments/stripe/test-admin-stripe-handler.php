@@ -179,18 +179,34 @@ class Test_Admin_Stripe_Handler extends TestCase {
 		$this->assertSame( $default, $result );
 	}
 
-	public function test_process_stripe_subscription_cancellation_skips_empty_gateway() {
+	/**
+	 * An empty gateway is Stripe, not "unknown".
+	 *
+	 * Unlike process_stripe_refund(), which is handed an explicit gateway, this
+	 * runs against a payments row whose `gateway` column defaults to '' for
+	 * legacy and imported records. Stripe is the only gateway in the free plugin,
+	 * so the handler deliberately claims those rows; only an explicitly different
+	 * gateway is passed through untouched.
+	 */
+	public function test_process_stripe_subscription_cancellation_claims_empty_gateway() {
 		$default = [ 'success' => false, 'message' => 'default' ];
 		$payment = [ 'gateway' => '' ];
 		$result  = $this->handler->process_stripe_subscription_cancellation( $default, $payment );
-		$this->assertSame( $default, $result );
+		$this->assertNotSame( $default, $result );
+		$this->assertFalse( $result['success'] );
+		$this->assertStringContainsString( 'Subscription ID not found', $result['message'] );
 	}
 
-	public function test_process_stripe_subscription_cancellation_skips_missing_gateway() {
+	/**
+	 * Same for a row with no gateway key at all.
+	 */
+	public function test_process_stripe_subscription_cancellation_claims_missing_gateway() {
 		$default = [ 'success' => false, 'message' => 'default' ];
 		$payment = [];
 		$result  = $this->handler->process_stripe_subscription_cancellation( $default, $payment );
-		$this->assertSame( $default, $result );
+		$this->assertNotSame( $default, $result );
+		$this->assertFalse( $result['success'] );
+		$this->assertStringContainsString( 'Subscription ID not found', $result['message'] );
 	}
 
 	public function test_process_stripe_subscription_cancellation_fails_missing_subscription_id() {
