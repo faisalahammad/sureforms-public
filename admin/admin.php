@@ -4683,6 +4683,10 @@ CSS;
 	 * URL length every mail client enforces. The finished URL is capped at
 	 * SUPPORT_MAILTO_MAX_LENGTH, and the log is what gives way to meet it.
 	 *
+	 * The subject and body are English on every site, deliberately untranslated:
+	 * they are written for SureForms support, and plain literals cannot be
+	 * rewritten by a locale, a translation plugin or a gettext filter.
+	 *
 	 * @param string $category   One of Client_Logger::CATEGORIES, naming the failure
 	 *                           being reported. An unknown or absent one gets
 	 *                           deliberately neutral wording via get_support_copy().
@@ -4697,19 +4701,6 @@ CSS;
 		$subject = sprintf( $copy['subject'], $host );
 
 		$url = $this->build_support_mailto_within_limit( $category, $form_title, $subject );
-
-		// Translated labels in a non-Latin script are two to three UTF-8 bytes a
-		// character, six to nine once percent-encoded, so on a Cyrillic, CJK or
-		// Arabic site the body alone runs past the cap before any log is added.
-		// The body goes to SureForms' own inbox, which reads English, so it is
-		// rebuilt in English before settling for the subject. The subject stays in
-		// the site's language: it is short, and it is what the person sees first.
-		// switch_to_locale() returns false when the site is already in English,
-		// where a retry would build the same URL again.
-		if ( '' === $url && switch_to_locale( 'en_US' ) ) {
-			$url = $this->build_support_mailto_within_limit( $category, $form_title, $subject );
-			restore_previous_locale();
-		}
 
 		// The last resort: the subject alone still names the problem and the site.
 		if ( '' === $url ) {
@@ -4756,9 +4747,6 @@ CSS;
 	 * eight times once percent-encoded. The log gives way first, because the
 	 * site details are the part support cannot do without.
 	 *
-	 * The body is built here rather than passed in, so a caller that has switched
-	 * locale gets it in that locale.
-	 *
 	 * @param string $category   The failure being reported.
 	 * @param string $form_title Form the failure was recorded against, or ''.
 	 * @param string $subject    Subject line.
@@ -4775,7 +4763,7 @@ CSS;
 		foreach ( [ 1200, 800, 400, 0 ] as $budget ) {
 			$log = 0 < $budget
 				? $this->get_support_log_block( $budget )
-				: '---' . "\n" . __( 'Debug log left out to keep this email short enough to send. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
+				: '---' . "\n" . 'Debug log left out to keep this email short enough to send. The full log can be downloaded from SureForms → Settings → General.';
 
 			$url = $this->build_support_mailto( $subject, $message . "\r\n\r\n" . str_replace( "\n", "\r\n", $log ) );
 
@@ -4828,12 +4816,11 @@ CSS;
 		$block = '---' . "\n";
 
 		if ( '' === $log['text'] ) {
-			return $block . __( 'Debug log: no entries recorded.', 'sureforms' );
+			return $block . 'Debug log: no entries recorded.';
 		}
 
 		$block .= sprintf(
-			/* translators: 1: entries shown, 2: entries recorded. */
-			__( 'Debug log (most recent %1$d of %2$d entries)', 'sureforms' ),
+			'Debug log (most recent %1$d of %2$d entries)',
 			$log['shown'],
 			$log['total']
 		) . "\n";
@@ -4843,7 +4830,7 @@ CSS;
 		$block .= '```' . "\n" . $log['text'] . "\n" . '```';
 
 		if ( $log['shown'] < $log['total'] ) {
-			$block .= "\n\n" . __( 'Older entries were left out to keep this excerpt readable. The full log can be downloaded from SureForms → Settings → General.', 'sureforms' );
+			$block .= "\n\n" . 'Older entries were left out to keep this excerpt readable. The full log can be downloaded from SureForms → Settings → General.';
 		}
 
 		return $block;
@@ -4854,8 +4841,7 @@ CSS;
 	 *
 	 * Both come from here so they cannot drift apart: a subject naming one problem
 	 * over a body describing another is worse than either alone. The counted form
-	 * of the opening line lives in get_support_count_sentence(), which needs
-	 * `_n()`'s literals and so cannot be an array lookup.
+	 * of the opening line lives in get_support_count_sentence().
 	 *
 	 * An unknown or absent category gets deliberately neutral wording. The
 	 * alternative -- defaulting to the submission copy -- states something specific
@@ -4869,22 +4855,16 @@ CSS;
 	private function get_support_copy( $category ) {
 		$copy = [
 			'submission'   => [
-				/* translators: %s: site host. */
-				'subject' => __( 'SureForms: form submissions are failing on %s', 'sureforms' ),
-				/* translators: %s: site host. */
-				'anon'    => __( 'SureForms has recorded form submissions on %s that could not be completed.', 'sureforms' ),
+				'subject' => 'SureForms: form submissions are failing on %s',
+				'anon'    => 'SureForms has recorded form submissions on %s that could not be completed.',
 			],
 			'notification' => [
-				/* translators: %s: site host. */
-				'subject' => __( 'SureForms: notification emails are not being sent on %s', 'sureforms' ),
-				/* translators: %s: site host. */
-				'anon'    => __( 'SureForms saved entries on %s but could not send the notification emails for them.', 'sureforms' ),
+				'subject' => 'SureForms: notification emails are not being sent on %s',
+				'anon'    => 'SureForms saved entries on %s but could not send the notification emails for them.',
 			],
 			'integration'  => [
-				/* translators: %s: site host. */
-				'subject' => __( 'SureForms: an integration is not receiving entries on %s', 'sureforms' ),
-				/* translators: %s: site host. */
-				'anon'    => __( 'SureForms saved entries on %s but could not pass them to a connected service.', 'sureforms' ),
+				'subject' => 'SureForms: an integration is not receiving entries on %s',
+				'anon'    => 'SureForms saved entries on %s but could not pass them to a connected service.',
 			],
 		];
 
@@ -4893,22 +4873,16 @@ CSS;
 		}
 
 		return [
-			/* translators: %s: site host. */
-			'subject' => __( 'SureForms: a problem with the forms on %s', 'sureforms' ),
-			/* translators: %s: site host. */
-			'anon'    => __( 'SureForms has recorded a problem with the forms on %s.', 'sureforms' ),
+			'subject' => 'SureForms: a problem with the forms on %s',
+			'anon'    => 'SureForms has recorded a problem with the forms on %s.',
 		];
 	}
 
 	/**
 	 * The sentence that opens the support email, with the failure count in it.
 	 *
-	 * A switch with literal `_n()` calls rather than a singular/plural pair looked
-	 * up from an array. `_n()` has to see its two literals at extraction time to
-	 * emit an `msgid_plural`, and only that lets a locale supply the number of
-	 * forms it actually uses -- Polish and Russian need three, Arabic six,
-	 * Japanese one. Choosing on `1 === $count` in PHP is correct for English and
-	 * wrong everywhere with a different plural rule.
+	 * English only, like the rest of the support email, so `1 === $count` is the
+	 * whole plural rule.
 	 *
 	 * @param string $category One of Client_Logger::CATEGORIES. Unknown or absent
 	 *                         gets neutral wording rather than a specific claim.
@@ -4920,49 +4894,33 @@ CSS;
 		switch ( $category ) {
 			case 'submission':
 				return sprintf(
-					/* translators: %d: number of failed submissions. */
-					_n(
-						'SureForms has recorded %d form submission that could not be completed.',
-						'SureForms has recorded %d form submissions that could not be completed.',
-						$count,
-						'sureforms'
-					),
+					( 1 === $count
+						? 'SureForms has recorded %d form submission that could not be completed.'
+						: 'SureForms has recorded %d form submissions that could not be completed.' ),
 					$count
 				);
 
 			case 'notification':
 				return sprintf(
-					/* translators: %d: number of failed notifications. */
-					_n(
-						'SureForms saved %d entry but could not send the notification email for it.',
-						'SureForms saved %d entries but could not send the notification emails for them.',
-						$count,
-						'sureforms'
-					),
+					( 1 === $count
+						? 'SureForms saved %d entry but could not send the notification email for it.'
+						: 'SureForms saved %d entries but could not send the notification emails for them.' ),
 					$count
 				);
 
 			case 'integration':
 				return sprintf(
-					/* translators: %d: number of failed integration hand-offs. */
-					_n(
-						'SureForms saved %d entry but could not pass it to a connected service.',
-						'SureForms saved %d entries but could not pass them to a connected service.',
-						$count,
-						'sureforms'
-					),
+					( 1 === $count
+						? 'SureForms saved %d entry but could not pass it to a connected service.'
+						: 'SureForms saved %d entries but could not pass them to a connected service.' ),
 					$count
 				);
 
 			default:
 				return sprintf(
-					/* translators: %d: number of recorded problems. */
-					_n(
-						'SureForms has recorded %d problem with the forms on this site.',
-						'SureForms has recorded %d problems with the forms on this site.',
-						$count,
-						'sureforms'
-					),
+					( 1 === $count
+						? 'SureForms has recorded %d problem with the forms on this site.'
+						: 'SureForms has recorded %d problems with the forms on this site.' ),
 					$count
 				);
 		}
@@ -4996,7 +4954,7 @@ CSS;
 		$host = Helper::get_string_value( wp_parse_url( home_url(), PHP_URL_HOST ) );
 
 		$lines = [
-			__( 'Hello SureForms support,', 'sureforms' ),
+			'Hello SureForms support,',
 			'',
 			$count > 0
 				? $this->get_support_count_sentence( $category, $count )
@@ -5006,8 +4964,7 @@ CSS;
 		if ( '' !== $form_title ) {
 			$lines[] = '';
 			$lines[] = sprintf(
-				/* translators: %s: form title. */
-				__( 'Form: %s', 'sureforms' ),
+				'Form: %s',
 				$form_title
 			);
 		}
@@ -5020,33 +4977,22 @@ CSS;
 			[
 				'',
 				'---',
-				__( 'Site details', 'sureforms' ),
-				// Labels translated, values not. The site owner reads this on screen
-				// before sending it, so the labels are copy; the values are machine
-				// data -- a version, a URL, a plugin name -- and stay verbatim. The
-				// debug log below is left alone entirely for the same reason.
-				/* translators: %s: site address. */
-				sprintf( __( 'Site: %s', 'sureforms' ), home_url() ),
-				/* translators: %s: SureForms version. */
-				sprintf( __( 'SureForms: %s', 'sureforms' ), SRFM_VER ),
+				'Site details',
+				sprintf( 'Site: %s', home_url() ),
+				sprintf( 'SureForms: %s', SRFM_VER ),
 				sprintf(
-					/* translators: %s: SureForms Pro version, or a note that it is not active. */
-					__( 'SureForms Pro: %s', 'sureforms' ),
-					Helper::has_pro() && defined( 'SRFM_PRO_VER' ) ? SRFM_PRO_VER : __( 'not active', 'sureforms' )
+					'SureForms Pro: %s',
+					Helper::has_pro() && defined( 'SRFM_PRO_VER' ) ? SRFM_PRO_VER : 'not active'
 				),
-				/* translators: %s: WordPress version. */
-				sprintf( __( 'WordPress: %s', 'sureforms' ), Helper::get_string_value( $wp_version ) ),
-				/* translators: %s: PHP version. */
-				sprintf( __( 'PHP: %s', 'sureforms' ), PHP_VERSION ),
+				sprintf( 'WordPress: %s', Helper::get_string_value( $wp_version ) ),
+				sprintf( 'PHP: %s', PHP_VERSION ),
 				sprintf(
-					/* translators: %s: caching plugin name, or a note that none was detected. */
-					__( 'Caching: %s', 'sureforms' ),
-					'' !== $caching ? $caching : __( 'none detected', 'sureforms' )
+					'Caching: %s',
+					'' !== $caching ? $caching : 'none detected'
 				),
 				sprintf(
-					/* translators: %s: number of recorded failures, or a note that none were. */
-					__( 'Recorded failures: %s', 'sureforms' ),
-					$count > 0 ? Helper::get_string_value( $count ) : __( 'none recorded', 'sureforms' )
+					'Recorded failures: %s',
+					$count > 0 ? Helper::get_string_value( $count ) : 'none recorded'
 				),
 			]
 		);
@@ -5069,8 +5015,7 @@ CSS;
 
 		if ( $acked_at > 0 ) {
 			$lines[] = sprintf(
-				/* translators: %s: date and time of the previous report, in the site's timezone. */
-				__( 'Previously reported: %s', 'sureforms' ),
+				'Previously reported: %s',
 				Helper::get_string_value( wp_date( 'Y-m-d H:i T', $acked_at ) )
 			);
 		}
