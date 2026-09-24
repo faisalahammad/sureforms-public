@@ -28,6 +28,12 @@ function GeneralSettings( props ) {
 	let sureformsKeys = useSelect( ( select ) =>
 		select( editorStore ).getEditedPostAttribute( 'meta' )
 	);
+	const selectedPageBreakId = useSelect( ( select ) =>
+		'srfm/page-break' ===
+		select( 'core/block-editor' ).getSelectedBlock()?.name
+			? select( 'core/block-editor' ).getSelectedBlockClientId()
+			: null
+	);
 
 	const deviceType = useDeviceType();
 	const [ rootContainer, setRootContainer ] = useState(
@@ -300,8 +306,11 @@ function GeneralSettings( props ) {
 			</SRFMAdvancedPanelBody>
 			{ isPageBreak && (
 				<SRFMAdvancedPanelBody
+					// Keyed on the selection so choosing a Page Break block opens
+					// the panel even when it was collapsed; still collapsible after.
+					key={ selectedPageBreakId || 'none' }
 					title={ __( 'Page Break', 'sureforms' ) }
-					initialOpen={ false }
+					initialOpen={ !! selectedPageBreakId }
 				>
 					<PageBreakSettings />
 				</SRFMAdvancedPanelBody>
