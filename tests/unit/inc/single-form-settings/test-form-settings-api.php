@@ -14,7 +14,7 @@ use SRFM\Inc\Single_Form_Settings\Form_Settings_Api;
  * (allowlist enforcement, non-form CPT rejection, and the sanitize
  * round-trip via `get_post_meta`).
  */
-class Test_Form_Settings_Api extends TestCase {
+class Test_Form_Settings_Api extends SRFM_Unit_Test_Case {
 
 	/**
 	 * @var Form_Settings_Api
@@ -191,9 +191,22 @@ class Test_Form_Settings_Api extends TestCase {
 		$this->assertInstanceOf( WP_Error::class, $result );
 		$this->assertSame( 'srfm_invalid_form_id', $result->get_error_code() );
 
-		// 3. Allowlisted keys persist; rejected keys are silently skipped.
+		/*
+		 * 3. Allowlisted keys persist; rejected keys are silently skipped.
+		 *
+		 * _srfm_form_confirmation is a registered array meta whose sanitize
+		 * callback returns [] for anything that is not an array, so a plain
+		 * string could never have round-tripped - use the real shape.
+		 */
+		$confirmation = [
+			[
+				'id'                => 1,
+				'confirmation_type' => 'same page',
+				'message'           => 'Thanks for your submission.',
+			],
+		];
 		$payload = [
-			'_srfm_form_confirmation' => 'allowed-value',
+			'_srfm_form_confirmation' => $confirmation,
 			'_srfm_evil_key'          => 'should-be-rejected',
 		];
 		$request = $this->build_request(
@@ -208,10 +221,10 @@ class Test_Form_Settings_Api extends TestCase {
 		$this->assertTrue( $data['success'] );
 		$this->assertArrayHasKey( '_srfm_form_confirmation', $data['meta'] );
 		$this->assertArrayNotHasKey( '_srfm_evil_key', $data['meta'] );
-		$this->assertSame(
-			'allowed-value',
-			get_post_meta( $this->form_id, '_srfm_form_confirmation', true )
-		);
+		$stored = get_post_meta( $this->form_id, '_srfm_form_confirmation', true );
+		$this->assertIsArray( $stored );
+		$this->assertSame( 'same page', $stored[0]['confirmation_type'] );
+		$this->assertSame( 'Thanks for your submission.', $stored[0]['message'] );
 		$this->assertSame(
 			'',
 			get_post_meta( $this->form_id, '_srfm_evil_key', true )

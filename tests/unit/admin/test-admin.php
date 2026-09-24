@@ -3652,6 +3652,19 @@ class Test_Thankyou_Prompt_Notice extends TestCase {
 		set_current_screen( 'plugins' );
 		delete_user_meta( is_wp_error( $admin_user ) ? 0 : (int) $admin_user, 'srfm-thankyou-prompt' );
 
+		/*
+		 * A broken-site action item outranks this notice, and Client_Logger's fault
+		 * state is site-wide: any earlier test that recorded submission failures
+		 * leaves has_action_item_warnings() true for the rest of the run. Turn
+		 * logging off for the duration so the precedence being tested is the only
+		 * thing in play.
+		 */
+		$logs_option = get_option( 'srfm_general_settings_options', [] );
+		update_option(
+			'srfm_general_settings_options',
+			array_merge( is_array( $logs_option ) ? $logs_option : [], [ 'srfm_enable_logs' => false ] )
+		);
+
 		try {
 			// Negative: no qualifying starter-template form → nothing registered.
 			Admin::reset_thankyou_prompt_cache();
@@ -3680,6 +3693,7 @@ class Test_Thankyou_Prompt_Notice extends TestCase {
 
 			wp_delete_post( $form_id, true );
 		} finally {
+			update_option( 'srfm_general_settings_options', $logs_option );
 			$prop->setValue( null, is_array( $original ) ? $original : [] );
 			Admin::reset_thankyou_prompt_cache();
 			wp_set_current_user( 0 );
@@ -3802,6 +3816,30 @@ class Test_Thankyou_Prompt_Notice extends TestCase {
 		set_current_screen( 'plugins' );
 		delete_user_meta( is_wp_error( $admin_user ) ? 0 : (int) $admin_user, Admin::THANKYOU_PROMPT_NOTICE_ID );
 
+		/*
+		 * show_if also yields to the rating notice, which is memoised on the Admin
+		 * singleton from the first call anywhere in the suite - by now enough forms
+		 * exist that it is stuck on true. Pin it off so this test measures the one
+		 * condition it is about: yielding to the Thank You prompt.
+		 */
+		$rating_memo = new \ReflectionProperty( Admin::class, 'should_show_rating' );
+		$rating_memo->setAccessible( true );
+		$previous_rating_memo = $rating_memo->getValue( $admin );
+		$rating_memo->setValue( $admin, false );
+
+		/*
+		 * A broken-site action item outranks this notice, and Client_Logger's fault
+		 * state is site-wide: any earlier test that recorded submission failures
+		 * leaves has_action_item_warnings() true for the rest of the run. Turn
+		 * logging off for the duration so the precedence being tested is the only
+		 * thing in play.
+		 */
+		$logs_option = get_option( 'srfm_general_settings_options', [] );
+		update_option(
+			'srfm_general_settings_options',
+			array_merge( is_array( $logs_option ) ? $logs_option : [], [ 'srfm_enable_logs' => false ] )
+		);
+
 		try {
 			// No qualifying form: the Getting Started notice is free to register.
 			Admin::reset_thankyou_prompt_cache();
@@ -3834,6 +3872,8 @@ class Test_Thankyou_Prompt_Notice extends TestCase {
 
 			wp_delete_post( $form_id, true );
 		} finally {
+			update_option( 'srfm_general_settings_options', $logs_option );
+			$rating_memo->setValue( $admin, $previous_rating_memo );
 			$prop->setValue( null, is_array( $original ) ? $original : [] );
 			Admin::reset_thankyou_prompt_cache();
 			wp_set_current_user( 0 );

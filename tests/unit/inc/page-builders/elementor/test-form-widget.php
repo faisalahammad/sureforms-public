@@ -551,13 +551,21 @@ class Test_Form_Widget extends TestCase {
 	 * Test get_block_attrs populates bgGradient when bgType is 'gradient'.
 	 */
 	public function test_get_block_attrs_gradient_integration(): void {
-		$widget   = $this->create_widget_instance();
 		$settings = [
 			'formTheme'          => 'classic',
 			'bgType'             => 'gradient',
 			'bgGradient_color'   => '#FF0000',
 			'bgGradient_color_b' => '#0000FF',
 		];
+
+		/*
+		 * The gradient branch deliberately reads $this->get_settings() (raw) rather
+		 * than the array it was handed, because Elementor nulls group-control
+		 * children in the display settings. A bare reflection instance answers that
+		 * call with nothing, so the raw settings have to be supplied too.
+		 */
+		$widget               = ( new ReflectionClass( SRFM_Test_Form_Widget_Raw_Settings::class ) )->newInstanceWithoutConstructor();
+		$widget->raw_settings = $settings;
 
 		$result = $this->invoke_get_block_attrs( $widget, $settings );
 
@@ -695,5 +703,29 @@ class Test_Form_Widget extends TestCase {
 		$output = ob_get_clean();
 		// render() may return void or string — either way no fatal.
 		$this->assertIsString( $output );
+	}
+}
+
+/**
+ * Form_Widget with controllable raw settings.
+ *
+ * Elementor's get_settings() is the widget's own persisted state, which a
+ * reflection-constructed instance does not have.
+ */
+class SRFM_Test_Form_Widget_Raw_Settings extends Form_Widget {
+
+	/**
+	 * Raw settings returned by get_settings().
+	 *
+	 * @var array<string, mixed>
+	 */
+	public $raw_settings = [];
+
+	/**
+	 * @param string|null $setting Unused - the whole array is returned.
+	 * @return array<string, mixed>
+	 */
+	public function get_settings( $setting = null ) {
+		return $this->raw_settings;
 	}
 }

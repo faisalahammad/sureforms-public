@@ -246,7 +246,8 @@ class Test_Rest_Api extends TestCase {
 		$args      = $endpoints['forms/manage']['args'];
 		$this->assertTrue( $args['form_ids']['required'] );
 		$this->assertTrue( $args['action']['required'] );
-		$this->assertEquals( [ 'trash', 'restore', 'delete' ], $args['action']['enum'] );
+		// 'draft' joined the set when bulk un-publishing landed (rest-api.php:1910).
+		$this->assertEquals( [ 'trash', 'restore', 'delete', 'draft' ], $args['action']['enum'] );
 	}
 
 	public function test_forms_duplicate_requires_form_id() {

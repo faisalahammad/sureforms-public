@@ -62,7 +62,10 @@ class Test_Spec_Image extends TestCase {
 
 	public function test_render_html(): void {
 		// Malicious headingTag must be rejected and fall back to the default `h2`.
+		// The heading is only rendered in the overlay layout; with the default
+		// layout there is no heading in the output to assert on at all.
 		$attrs               = $this->base_attributes();
+		$attrs['layout']     = 'overlay';
 		$attrs['headingTag'] = 'h1 onmouseover=alert(1)';
 		$output              = $this->render( $attrs );
 
@@ -83,6 +86,7 @@ class Test_Spec_Image extends TestCase {
 
 		// headingId is escaped and emitted as an id attribute.
 		$attrs               = $this->base_attributes();
+		$attrs['layout']     = 'overlay';
 		$attrs['headingTag'] = 'h2';
 		$attrs['headingId']  = 'my-heading';
 		$output              = $this->render( $attrs );

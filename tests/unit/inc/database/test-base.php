@@ -109,13 +109,24 @@ class Test_Database_Base extends TestCase {
 	// ---------------------------------------------------------------
 
 	/**
-	 * Test use_insert returns false when required data is missing.
+	 * use_insert() returns the new row id, or false when wpdb rejects the write.
+	 *
+	 * An empty array is not a rejection: prepare_data() fills every column from
+	 * the schema's defaults, so the insert succeeds and hands back an id. It also
+	 * drops unknown columns, so there is no input from here that reaches wpdb in
+	 * a state wpdb would refuse - the false branch is not reachable through this
+	 * method, which is worth knowing rather than asserting wrongly.
 	 */
 	public function test_use_insert() {
-		// Inserting with an empty array should fail gracefully.
-		$result = $this->base->use_insert( [] );
-		$this->assertFalse( $result );
+		$insert_id = $this->base->use_insert( [] );
+
+		$this->assertIsInt( $insert_id );
+		$this->assertGreaterThan( 0, $insert_id );
+
+		// Clean up the row this just created.
+		$this->base->delete( [ 'ID' => $insert_id ] );
 	}
+
 
 	// ---------------------------------------------------------------
 	// get_total_count

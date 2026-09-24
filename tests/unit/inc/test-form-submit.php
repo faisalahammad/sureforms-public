@@ -17,7 +17,7 @@ use SRFM\Inc\Submit_Token;
  * Tests Plugin Initialization.
  *
  */
-class Test_Form_Submit extends TestCase {
+class Test_Form_Submit extends SRFM_Unit_Test_Case {
 
 	protected $form_submit;
 
@@ -404,7 +404,15 @@ class Test_Form_Submit extends TestCase {
 		}
 		ob_end_clean();
 
-		// If we reach here, form processed successfully (no die) — that's the expected behavior.
+		// If we reach here, form processed successfully (no die) — that's the
+		// expected behavior, and it is worth saying so rather than ending the
+		// test having asserted nothing at all.
+		$this->assertNotInstanceOf(
+			\WP_Error::class,
+			$result,
+			'A form with honeypot disabled and no honeypot field must not be rejected.'
+		);
+
 		wp_delete_post( $form_id, true );
 		delete_option( 'srfm_security_settings_options' );
 	}
@@ -568,11 +576,24 @@ class Test_Form_Submit extends TestCase {
 	}
 
 	/**
-	 * Test permissions_check is callable.
+	 * permissions_check() returns true for a capable user and a WP_Error otherwise.
+	 *
+	 * It is a REST permission_callback, so the denial has to carry the 401/403
+	 * status - returning a bare false would surrender that.
 	 */
 	public function test_permissions_check() {
-		$result = $this->form_submit->permissions_check();
-		$this->assertIsBool( $result );
+		$previous_user = get_current_user_id();
+
+		wp_set_current_user( 0 );
+		$denied = $this->form_submit->permissions_check();
+		$this->assertInstanceOf( \WP_Error::class, $denied );
+		$this->assertSame( 'rest_forbidden', $denied->get_error_code() );
+		$this->assertSame( rest_authorization_required_code(), $denied->get_error_data()['status'] );
+
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
+		$this->assertTrue( $this->form_submit->permissions_check() );
+
+		wp_set_current_user( $previous_user );
 	}
 
 	/**

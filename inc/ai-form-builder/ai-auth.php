@@ -94,7 +94,10 @@ class AI_Auth {
 		}
 
 		// get body data.
-		$body = json_decode( $request->get_body(), true );
+		// get_body() is null for an empty request, and passing null to json_decode()
+		// is deprecated on PHP 8.1+ - the notice lands in the response body and makes
+		// the JSON unparseable wherever display_errors is on.
+		$body = json_decode( Helper::get_string_value( $request->get_body() ), true );
 
 		if ( empty( $body ) ) {
 			wp_send_json_error( [ 'message' => __( 'Error processing Access Key.', 'sureforms' ) ] );

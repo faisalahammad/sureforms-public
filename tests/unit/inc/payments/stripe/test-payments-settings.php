@@ -239,18 +239,26 @@ class Test_Payments_Settings extends TestCase {
 	}
 
 	/**
-	 * Test delete_payment_webhooks returns result.
+	 * delete_payment_webhooks() answers over REST, so the payload is wrapped.
 	 */
 	public function test_delete_payment_webhooks() {
 		$result = $this->payments_settings->delete_payment_webhooks();
-		$this->assertIsArray( $result );
+
+		$this->assertInstanceOf( \WP_REST_Response::class, $result );
+
+		$data = $result->get_data();
+		$this->assertIsArray( $data );
+		$this->assertFalse( $data['success'] );
+		$this->assertStringContainsString( 'not connected', $data['message'] );
 	}
 
 	/**
-	 * Test get_account_name returns REST response.
+	 * get_account_name() returns a bare string, and an empty one until Stripe is
+	 * connected - there is no account to name yet.
 	 */
 	public function test_get_account_name() {
 		$result = $this->payments_settings->get_account_name();
-		$this->assertInstanceOf( \WP_REST_Response::class, $result );
+
+		$this->assertSame( '', $result );
 	}
 }
