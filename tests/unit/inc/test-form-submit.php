@@ -735,6 +735,76 @@ class Test_Form_Submit extends TestCase {
 	}
 
 	/**
+	 * The email notification log written during a submission reaches the stored entry.
+	 *
+	 * send_email() runs after Entries::add() so {entry_id} resolves, and records its
+	 * log on the in-memory Entries instance. handle_form_entry() must persist that
+	 * log to the entry it just created, exactly once.
+	 */
+	public function test_handle_form_entry_persists_the_email_notification_log() {
+		$form_id = wp_insert_post(
+			[
+				'post_type'   => 'sureforms_form',
+				'post_title'  => 'Entry Log Form',
+				'post_status' => 'publish',
+			]
+		);
+
+		update_post_meta(
+			$form_id,
+			'_srfm_email_notification',
+			[
+				[
+					'id'     => 1,
+					'status' => true,
+				],
+			]
+		);
+
+		$parsed = static function () {
+			return [
+				'to'      => 'owner@example.com',
+				'subject' => 'New entry',
+				'message' => 'An entry arrived.',
+				'headers' => [],
+			];
+		};
+		$sent   = static function () {
+			return true;
+		};
+
+		add_filter( 'srfm_email_notification', $parsed, 99 );
+		add_filter( 'pre_wp_mail', $sent, 99 );
+
+		// The instance is a per-request singleton; start from a clean request.
+		EntriesTable::get_instance()->reset_logs();
+
+		$response = $this->form_submit->handle_form_entry( [ 'form-id' => (string) $form_id ] );
+
+		remove_filter( 'pre_wp_mail', $sent, 99 );
+		remove_filter( 'srfm_email_notification', $parsed, 99 );
+
+		$this->assertTrue( $response['success'] );
+
+		$entry_id = Helper::get_integer_value( $response['data']['submission_id'] );
+		$logs     = Helper::get_array_value( EntriesTable::get( $entry_id )['logs'] );
+		$email    = array_values(
+			array_filter(
+				$logs,
+				static function ( $log ) {
+					return 'Email notification passed to the sending server' === $log['title'];
+				}
+			)
+		);
+
+		$this->assertCount( 1, $email, 'The notification log must be stored on the entry exactly once.' );
+		$this->assertSame( [ 'Email notification recipient: owner@example.com' ], $email[0]['messages'] );
+
+		EntriesTable::delete( $entry_id );
+		wp_delete_post( $form_id, true );
+	}
+
+	/**
 	 * One recipient succeeding while another fails is still a failure.
 	 *
 	 * This is the case the flag is hoisted out of the loop for, and the one
