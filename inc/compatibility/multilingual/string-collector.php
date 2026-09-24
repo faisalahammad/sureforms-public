@@ -281,21 +281,27 @@ class String_Collector {
 			// reply_to is an email address (or a smart tag resolving to one), not
 			// human-readable copy, so it is intentionally excluded from the
 			// translatable set. from_name can legitimately be a localized display name.
+			// [ meta key, label, editor type ]. The string name stays keyed on
+			// 'body' for continuity, but the value has to be read from
+			// `email_body` - that is what _srfm_email_notification's sanitize
+			// callback stores, so reading 'body' always found nothing and the
+			// message body was never registered for translation at all.
 			$fields = [
-				'subject'   => [ __( 'Subject', 'sureforms' ), 'LINE' ],
-				'body'      => [ __( 'Message body', 'sureforms' ), 'AREA' ],
-				'from_name' => [ __( '"From" name', 'sureforms' ), 'LINE' ],
+				'subject'   => [ 'subject', __( 'Subject', 'sureforms' ), 'LINE' ],
+				'body'      => [ 'email_body', __( 'Message body', 'sureforms' ), 'AREA' ],
+				'from_name' => [ 'from_name', __( '"From" name', 'sureforms' ), 'LINE' ],
 			];
 			/* translators: %d is the notification number. */
 			$notification_group = __( 'Notifications', 'sureforms' ) . '/' . sprintf( __( 'Notification #%d', 'sureforms' ), (int) $index + 1 );
 			foreach ( $fields as $field => $meta ) {
-				$value = isset( $notification[ $field ] ) ? Helper::get_string_value( $notification[ $field ] ) : '';
+				$meta_key = $meta[0];
+				$value    = isset( $notification[ $meta_key ] ) ? Helper::get_string_value( $notification[ $meta_key ] ) : '';
 				$this->register_form_string(
 					$form_id,
 					String_Translator::notification_name( (int) $index, $field ),
 					$value,
-					$notification_group . ': ' . $meta[0],
-					$meta[1]
+					$notification_group . ': ' . $meta[1],
+					$meta[2]
 				);
 			}
 		}

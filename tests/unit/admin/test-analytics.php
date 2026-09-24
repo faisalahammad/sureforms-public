@@ -31,6 +31,17 @@ class Test_Analytics extends TestCase {
 		// Reset analytics events dedup state.
 		Helper::update_srfm_option( 'usage_events_pushed', [] );
 		Helper::update_srfm_option( 'usage_events_pending', [] );
+
+		/*
+		 * did_action( 'shutdown' ) is process-global, and Analytics deliberately
+		 * tracks plugin_activated immediately once it is non-zero. The tests below
+		 * fire shutdown by hand, so without this reset the first of them changes
+		 * the behaviour under test for every later one - the event gets recorded
+		 * at construction, before the test has set up the state it is asserting on.
+		 * Leaked callbacks from a previous instance are dropped for the same reason.
+		 */
+		remove_all_actions( 'shutdown' );
+		unset( $GLOBALS['wp_actions']['shutdown'] );
 	}
 
 	/**

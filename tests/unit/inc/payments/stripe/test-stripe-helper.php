@@ -454,6 +454,67 @@ class Test_Stripe_Helper extends TestCase {
 	}
 
 	// ──────────────────────────────────────────────
+	// Blocking license checks on the public checkout path
+	// ──────────────────────────────────────────────
+
+	/**
+	 * A cache miss in the Pro licensing check makes blocking wp_remote_request calls
+	 * with a 30 second timeout. The checkout handlers run on wp_ajax_nopriv_, so an
+	 * unauthenticated visitor must never be made to wait on SureCart - and a slow
+	 * response must not be able to pin the cached verdict for the whole site from an
+	 * anonymous request.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_checkout_never_requests_a_blocking_license_check() {
+		require_once dirname( __DIR__, 3 ) . '/mock/sureforms-pro/admin/licensing.php';
+
+		\SRFM_Pro\Admin\Licensing::$remote_check_calls = [];
+		\SRFM_Pro\Admin\Licensing::$is_active         = true;
+
+		$this->assertSame( 'mock-license-key', Stripe_Helper::get_license_key( false ) );
+		$this->assertSame(
+			[ false ],
+			\SRFM_Pro\Admin\Licensing::$remote_check_calls,
+			'The checkout path must ask for a non-blocking license check.'
+		);
+	}
+
+	/**
+	 * Callers that do not opt out keep the original blocking behaviour, so admin
+	 * screens still get a freshly verified answer.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_license_check_still_defaults_to_allowing_a_remote_check() {
+		require_once dirname( __DIR__, 3 ) . '/mock/sureforms-pro/admin/licensing.php';
+
+		\SRFM_Pro\Admin\Licensing::$remote_check_calls = [];
+		\SRFM_Pro\Admin\Licensing::$is_active         = true;
+
+		$this->assertTrue( Stripe_Helper::is_pro_license_active() );
+		$this->assertSame( [ true ], \SRFM_Pro\Admin\Licensing::$remote_check_calls );
+	}
+
+	/**
+	 * An inactive license still yields no key, whichever mode was asked for.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_inactive_license_returns_no_key_on_the_checkout_path() {
+		require_once dirname( __DIR__, 3 ) . '/mock/sureforms-pro/admin/licensing.php';
+
+		\SRFM_Pro\Admin\Licensing::$remote_check_calls = [];
+		\SRFM_Pro\Admin\Licensing::$is_active         = false;
+
+		$this->assertSame( '', Stripe_Helper::get_license_key( false ) );
+		$this->assertSame( [ false ], \SRFM_Pro\Admin\Licensing::$remote_check_calls );
+	}
+
+	// ──────────────────────────────────────────────
 	// is_transaction_present (public) - payments table presence check
 	// ──────────────────────────────────────────────
 
@@ -466,7 +527,7 @@ class Test_Stripe_Helper extends TestCase {
 		// The boolean must reflect the actual row state of the payments table:
 		// true only when at least one transaction row exists, false when the table
 		// is empty or absent. Computed from a direct count here (read-only, no mutation).
-		$table    = \SRFM\Inc\Payments\Payments::get_instance()->get_tablename();
+		$table    = \SRFM\Inc\Database\Tables\Payments::get_instance()->get_tablename();
 		$expected = false;
 		if ( is_string( $table ) && '' !== $table ) {
 			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching

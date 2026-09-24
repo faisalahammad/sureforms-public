@@ -109,13 +109,24 @@ class Test_Database_Base extends TestCase {
 	// ---------------------------------------------------------------
 
 	/**
-	 * Test use_insert returns false when required data is missing.
+	 * use_insert() returns the new row id, or false when wpdb rejects the write.
+	 *
+	 * An empty array is not a rejection: prepare_data() fills every column from
+	 * the schema's defaults, so the insert succeeds and hands back an id. It also
+	 * drops unknown columns, so there is no input from here that reaches wpdb in
+	 * a state wpdb would refuse - the false branch is not reachable through this
+	 * method, which is worth knowing rather than asserting wrongly.
 	 */
 	public function test_use_insert() {
-		// Inserting with an empty array should fail gracefully.
-		$result = $this->base->use_insert( [] );
-		$this->assertFalse( $result );
+		$insert_id = $this->base->use_insert( [] );
+
+		$this->assertIsInt( $insert_id );
+		$this->assertGreaterThan( 0, $insert_id );
+
+		// Clean up the row this just created.
+		$this->base->delete( [ 'ID' => $insert_id ] );
 	}
+
 
 	// ---------------------------------------------------------------
 	// get_total_count
@@ -843,6 +854,52 @@ class Test_Database_Base extends TestCase {
 			$after,
 			$wpdb->num_queries,
 			'The second identical lookup must come from the cache, not the database.'
+		);
+	}
+
+	// ---------------------------------------------------------------
+	// use_delete
+	// ---------------------------------------------------------------
+
+	/**
+	 * A delete invalidates the per-request query cache.
+	 *
+	 * use_insert() and use_update() both reset the cache; use_delete() did not,
+	 * so a count or lookup already cached earlier in the request kept answering
+	 * with the deleted row still in it. Asserted through get_total_count(),
+	 * because that is the reader the stale answer actually came back from.
+	 */
+	public function test_use_delete_resets_the_query_cache() {
+		// An id nothing else can match, so the count is ours alone.
+		$form_id = 987654322;
+		$where   = [
+			[
+				[
+					'key'     => 'form_id',
+					'compare' => '=',
+					'value'   => $form_id,
+				],
+			],
+		];
+
+		$entry_id = $this->entries_table->use_insert(
+			[
+				'form_id'    => $form_id,
+				'created_at' => current_time( 'mysql' ),
+			]
+		);
+
+		$this->assertIsInt( $entry_id, 'Precondition: the row has to exist before it can be deleted.' );
+
+		// Prime the cache with the answer the delete below must invalidate.
+		$this->assertSame( 1, $this->entries_table->get_total_count( $where ) );
+
+		$this->entries_table->use_delete( [ 'ID' => $entry_id ], [ '%d' ] );
+
+		$this->assertSame(
+			0,
+			$this->entries_table->get_total_count( $where ),
+			'The count must reflect the delete, not the cached pre-delete answer.'
 		);
 	}
 

@@ -40,7 +40,8 @@ const TextShadowControl = ( props ) => {
 	const activeClass = showAdvancedControls ? 'active' : '';
 
 	useLayoutEffect( () => {
-		window.addEventListener( 'click', function ( e ) {
+		// Named so the cleanup can remove it.
+		const handleOutsideClick = ( e ) => {
 			const popupButton = document.querySelector(
 				`.active.popup-${ blockId } .spectra-control-popup__options--action-button`
 			);
@@ -80,7 +81,13 @@ const TextShadowControl = ( props ) => {
 					);
 				}
 			}
-		} );
+		};
+
+		window.addEventListener( 'click', handleOutsideClick );
+
+		return () => {
+			window.removeEventListener( 'click', handleOutsideClick );
+		};
 	}, [] );
 
 	// Array of all the current Typography Control's Labels.

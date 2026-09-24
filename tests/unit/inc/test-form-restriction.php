@@ -394,7 +394,11 @@ class Test_Form_Restriction extends TestCase {
 					'hours'            => '12',
 					'minutes'          => '00',
 					'meridiem'         => 'AM',
-					'message'          => 'Sorry, this form is closed.',
+					// A form past its scheduled end reports the scheduling message,
+					// not the entry-limit one - `message` alone is never reached in
+					// this state.
+					'message'                     => 'Sorry, this form is closed.',
+					'schedulingEndedMessage'      => 'Sorry, this form is closed.',
 				]
 			)
 		);

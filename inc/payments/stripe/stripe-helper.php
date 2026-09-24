@@ -391,17 +391,21 @@ class Stripe_Helper {
 	/**
 	 * Get the SureForms Pro License Key.
 	 *
+	 * @param bool $allow_remote_check Whether a license-cache miss may block on the
+	 *                                 SureCart API. Pass false from front-end request
+	 *                                 paths - see is_pro_license_active().
 	 * @since 2.0.0
+	 * @since x.x.x Added the $allow_remote_check parameter.
 	 * @return string The SureForms Pro License Key.
 	 */
-	public static function get_license_key() {
+	public static function get_license_key( $allow_remote_check = true ) {
 		$licensing = self::get_licensing_instance();
 		if ( ! $licensing ||
 		! method_exists( $licensing, 'licensing_setup' ) || ! method_exists( $licensing->licensing_setup(), 'settings' ) ) {
 			return '';
 		}
 		// Check if the SureForms Pro license is active.
-		$is_license_active = self::is_pro_license_active();
+		$is_license_active = self::is_pro_license_active( $allow_remote_check );
 		// If the license is active, get the license key.
 		$license_setup = $licensing->licensing_setup();
 		return ! empty( $is_license_active ) && is_object( $license_setup ) && method_exists( $license_setup, 'settings' ) ? $license_setup->settings()->license_key : '';
@@ -410,17 +414,27 @@ class Stripe_Helper {
 	/**
 	 * Check if the SureForms Pro license is active.
 	 *
+	 * On a cache miss the Pro licensing check makes blocking wp_remote_request calls
+	 * with a 30 second timeout each. That is fine on an admin screen, but this helper
+	 * is also reached from wp_ajax_nopriv_ checkout handlers, where an unauthenticated
+	 * visitor would wait on SureCart before their payment intent is created - and a
+	 * single slow response would pin the cached verdict for the whole site.
+	 *
+	 * Pass false from those paths to read the last known status instead.
+	 *
+	 * @param bool $allow_remote_check Whether a cache miss may block on the SureCart API.
 	 * @since 2.0.0
+	 * @since x.x.x Added the $allow_remote_check parameter.
 	 * @return bool|string True if the SureForms Pro license is active, false otherwise.
 	 */
-	public static function is_pro_license_active() {
+	public static function is_pro_license_active( $allow_remote_check = true ) {
 		$licensing = self::get_licensing_instance();
 		if ( ! $licensing || ! method_exists( $licensing, 'is_license_active' )
 		) {
 			return '';
 		}
 		// Check if the SureForms Pro license is active.
-		return $licensing->is_license_active();
+		return $licensing->is_license_active( $allow_remote_check );
 	}
 
 	/**

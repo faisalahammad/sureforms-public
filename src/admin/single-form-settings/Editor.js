@@ -66,6 +66,7 @@ const SureformsFormSpecificSettings = () => {
 		blockCount,
 		blocks,
 		editorMode,
+		selectedPageBreakId,
 	} = useSelect( ( select ) => {
 		const { get } = select( preferencesStore );
 		return {
@@ -75,6 +76,11 @@ const SureformsFormSpecificSettings = () => {
 				select( editorStore ).getEditedPostAttribute( 'meta' ),
 			blockCount: select( blockEditorStore ).getBlockCount(),
 			blocks: select( 'core/block-editor' ).getBlocks(),
+			selectedPageBreakId:
+				'srfm/page-break' ===
+				select( blockEditorStore ).getSelectedBlock()?.name
+					? select( blockEditorStore ).getSelectedBlockClientId()
+					: null,
 		};
 	} );
 
@@ -153,6 +159,26 @@ const SureformsFormSpecificSettings = () => {
 
 		return () => clearInterval( ensureOpen );
 	}, [] );
+
+	// Every Page Break setting is form-level, so selecting the block opens where
+	// they live: Form tab > Page Break (GeneralSettings expands that panel when a
+	// Page Break is selected). Deferred because Gutenberg switches to the Block
+	// tab in response to the same selection; switching back in the same tick
+	// would be overridden.
+	useEffect( () => {
+		if ( ! selectedPageBreakId ) {
+			return undefined;
+		}
+
+		const timeoutId = setTimeout( () => {
+			dataDispatch( 'core/edit-post' )?.openGeneralSidebar?.(
+				'edit-post/document'
+			);
+			forcePanel();
+		} );
+
+		return () => clearTimeout( timeoutId );
+	}, [ selectedPageBreakId ] );
 
 	useEffect( () => {
 		let intervalId = null;
