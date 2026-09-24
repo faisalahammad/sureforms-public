@@ -519,14 +519,15 @@ class Client_Logger {
 	/**
 	 * The most recent whole log lines, up to a character budget.
 	 *
-	 * An excerpt for reading and pasting. The budget is the caller's: the details
-	 * dialog shows it on screen and copies it to a clipboard, neither of which has
-	 * a length limit worth designing around, while an excerpt embedded anywhere
-	 * length-bound needs a smaller one. Newest entries are the ones that describe
-	 * the failure being reported, so the tail is the useful end and the oldest are
-	 * what a smaller budget drops.
+	 * An excerpt for a support email. The budget is the caller's, and it is a
+	 * ceiling: the excerpt goes into a mailto: URL, which a mail client drops
+	 * whole when it runs past its length limit. Newest entries are the ones that
+	 * describe the failure being reported, so the tail is the useful end and the
+	 * oldest are what a smaller budget drops.
 	 *
-	 * Whole lines only -- half a JSON object helps nobody.
+	 * Whole lines only -- half a JSON object helps nobody -- except when the
+	 * newest line alone is over the budget. That one is cut and marked, because
+	 * an empty excerpt helps nobody either.
 	 *
 	 * @param int $max_chars Character budget for the returned text.
 	 * @since 2.12.6
@@ -583,10 +584,17 @@ class Client_Logger {
 		foreach ( array_reverse( $lines ) as $line ) {
 			$length = strlen( $line ) + 1;
 
-			// Always keep one line, even if it alone exceeds the budget: an empty
-			// excerpt is worse than a long one.
 			if ( $used + $length > $max_chars && ! empty( $kept ) ) {
 				break;
+			}
+
+			// Always keep one line, since an empty excerpt is worse than a long one --
+			// but never past the budget, which is a ceiling the caller relies on. The
+			// start is kept because it names what failed. Lines are wp_json_encode()d,
+			// so they are ASCII and a byte cut cannot split a character.
+			if ( $length > $max_chars ) {
+				$marker = ' [truncated]';
+				$line   = substr( $line, 0, max( 0, $max_chars - strlen( $marker ) ) ) . $marker;
 			}
 
 			array_unshift( $kept, $line );
