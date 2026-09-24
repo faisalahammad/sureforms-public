@@ -42,7 +42,6 @@ const Component = ( { path, subpage } ) => {
 		srfm_admin_notification: true,
 		srfm_form_views_tracking: false,
 		srfm_enable_logs: false,
-		srfm_distraction_free: false,
 	} );
 	// Server-reported log status. Deliberately outside generalTabOptions: it is
 	// read-only, so including it would make the tab permanently dirty.
@@ -277,7 +276,6 @@ const Component = ( { path, subpage } ) => {
 						// Opt-in: absent means the feature was never switched on.
 						srfm_form_views_tracking = false,
 						srfm_enable_logs,
-						srfm_distraction_free = false,
 					} = data.srfm_general_settings_options;
 					const snap = {
 						srfm_ip_log,
@@ -286,7 +284,6 @@ const Component = ( { path, subpage } ) => {
 						srfm_admin_notification,
 						srfm_form_views_tracking,
 						srfm_enable_logs,
-						srfm_distraction_free,
 					};
 					setGeneralTabOptions( snap );
 					nextBaselines[ 'general-settings' ] = snap;

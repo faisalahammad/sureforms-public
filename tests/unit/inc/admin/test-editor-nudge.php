@@ -622,23 +622,20 @@ class Test_Editor_Nudge extends SRFM_Unit_Test_Case {
 	}
 
 	/**
-	 * Distraction Free suppresses the nudge even when every other condition
+	 * Hidden promotions suppress the nudge even when every other condition
 	 * would show it.
-	 *
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
 	 */
-	public function test_allow_load_returns_false_in_distraction_free() {
-		define( 'SRFM_PRO_VER', '1.0.0' );
+	public function test_allow_load_returns_false_when_promotions_hidden() {
 		wp_set_current_user( $this->admin_id );
 		$this->force_block_editor_screen( 'page' );
 		$this->set_current_post( $this->post_id );
 
-		update_option( 'srfm_general_settings_options', [ 'srfm_distraction_free' => false ] );
-		$this->assertTrue( $this->nudge->allow_load(), 'Control: the nudge loads when the setting is off.' );
+		$this->assertTrue( $this->nudge->allow_load(), 'Control: the nudge loads by default.' );
 
-		update_option( 'srfm_general_settings_options', [ 'srfm_distraction_free' => true ] );
-		$this->assertFalse( $this->nudge->allow_load(), 'Distraction Free must suppress the nudge.' );
+		add_filter( 'srfm_hide_promotions', '__return_true' );
+		$allowed = $this->nudge->allow_load();
+		remove_filter( 'srfm_hide_promotions', '__return_true' );
+		$this->assertFalse( $allowed, 'Hidden promotions must suppress the nudge.' );
 	}
 
 }

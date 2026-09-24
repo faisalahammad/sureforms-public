@@ -1,6 +1,7 @@
 import { __ } from '@wordpress/i18n';
 import { useState, useEffect } from '@wordpress/element';
 import apiFetch from '@wordpress/api-fetch';
+import { applyFilters } from '@wordpress/hooks';
 import { Button, Input, Loader, Select, Switch, toast } from '@bsf/force-ui';
 import ContentSection from '../components/ContentSection';
 import LoadingSkeleton from '@Admin/components/LoadingSkeleton';
@@ -285,36 +286,6 @@ const FormViewsTrackingContent = ( {
 		/>
 	);
 };
-
-/**
- * Distraction Free settings section. Pro only.
- *
- * @param {Object}   props
- * @param {Object}   props.generalTabOptions    - General settings.
- * @param {Function} props.updateGlobalSettings - Settings update handler.
- */
-const DistractionFreeContent = ( {
-	generalTabOptions,
-	updateGlobalSettings,
-} ) => (
-	<Switch
-		label={ {
-			heading: __( 'Enable Distraction Free mode', 'sureforms' ),
-			description: __(
-				'Hides SureForms promotional content in the dashboard, such as review requests, plugin suggestions and announcements. Useful when handing a site over to a client.',
-				'sureforms'
-			),
-		} }
-		value={ !! generalTabOptions.srfm_distraction_free }
-		onChange={ ( value ) =>
-			updateGlobalSettings(
-				'srfm_distraction_free',
-				value,
-				'general-settings'
-			)
-		}
-	/>
-);
 
 /**
  * Usage Tracking / Analytics settings section.
@@ -602,17 +573,12 @@ const GeneralPage = ( {
 					/>
 				}
 			/>
-			{ srfm_admin?.is_pro_active && (
-				<ContentSection
-					loading={ loading }
-					title={ __( 'Distraction Free', 'sureforms' ) }
-					content={
-						<DistractionFreeContent
-							generalTabOptions={ generalTabOptions }
-							updateGlobalSettings={ updateGlobalSettings }
-						/>
-					}
-				/>
+			{ /* Extension slot for add-on sections, such as SureForms Pro's
+			     Distraction Free. Renders nothing on its own. */ }
+			{ applyFilters(
+				'srfm.settings.general.additionalSections',
+				null,
+				{ loading }
 			) }
 			{ /* Everything above is something SureForms does for this site.
 			     Analytics is the one setting that sends anything outward, so it

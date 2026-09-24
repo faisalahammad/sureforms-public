@@ -13,7 +13,7 @@ import Tooltip from './Tooltip';
 const {
 	site_url: siteURL = '',
 	is_pro_active: isProActive = false,
-	is_distraction_free: isDistractionFree = false,
+	hide_promotions: hidePromotions = false,
 	additional_header_nav_items: additionalNavItems = [],
 } = srfm_admin;
 
@@ -76,8 +76,9 @@ const HeaderTooltipItem = ( { title, icon, onClick, children } ) => (
 );
 
 /**
- * "What's New" announcements flyout. A separate component so Distraction
- * Free can skip it without calling the RSS hook conditionally.
+ * "What's New" announcements flyout. A separate component so it can be
+ * skipped while promotions are hidden without calling the RSS hook
+ * conditionally.
  *
  * @return {JSX.Element} What's New header item.
  */
@@ -338,7 +339,7 @@ const Header = ( { breadCrumb } ) => {
 							)
 						}
 					/>
-					{ ! isDistractionFree && <WhatsNew /> }
+					{ ! hidePromotions && <WhatsNew /> }
 				</Topbar.Right>
 			</Topbar>
 		</div>

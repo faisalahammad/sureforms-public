@@ -3329,29 +3329,21 @@ class Test_Helper extends TestCase {
 	}
 
     /**
-     * Distraction Free is a Pro setting: off without Pro even when stored on,
-     * and with Pro it follows the stored general setting.
-     *
-     * Defining SRFM_PRO_VER is permanent for the process, hence the separate process.
-     *
-     * @runInSeparateProcess
-     * @preserveGlobalState disabled
+     * Promotions show by default and are hidden only through the filter.
      */
-    public function test_is_distraction_free() {
-        update_option( 'srfm_general_settings_options', [ 'srfm_distraction_free' => true ] );
-        $this->assertFalse( Helper::is_distraction_free(), 'Must stay off without Pro.' );
+    public function test_hide_promotions() {
+        $this->assertFalse( Helper::hide_promotions(), 'Free never hides promotions on its own.' );
 
-        define( 'SRFM_PRO_VER', '1.0.0' );
-        $this->assertTrue( Helper::is_distraction_free(), 'Must be on with Pro and the setting on.' );
+        add_filter( 'srfm_hide_promotions', '__return_true' );
+        $this->assertTrue( Helper::hide_promotions() );
+        remove_filter( 'srfm_hide_promotions', '__return_true' );
 
-        update_option( 'srfm_general_settings_options', [ 'srfm_distraction_free' => false ] );
-        $this->assertFalse( Helper::is_distraction_free(), 'Must be off when the setting is off.' );
-
-        update_option( 'srfm_general_settings_options', [ 'srfm_ip_log' => true ] );
-        $this->assertFalse( Helper::is_distraction_free(), 'An absent key must mean off.' );
-
-        update_option( 'srfm_general_settings_options', 'corrupt' );
-        $this->assertFalse( Helper::is_distraction_free(), 'A non-array option must mean off.' );
+        $truthy = static function () {
+            return 1;
+        };
+        add_filter( 'srfm_hide_promotions', $truthy );
+        $this->assertTrue( Helper::hide_promotions(), 'A truthy filter value is cast to bool.' );
+        remove_filter( 'srfm_hide_promotions', $truthy );
     }
 
 }

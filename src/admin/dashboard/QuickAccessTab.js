@@ -41,7 +41,7 @@ export default () => {
 			link: 'https://wordpress.org/support/plugin/sureforms/reviews/?rate=5#new-post',
 		},
 	].filter(
-		( { key } ) => ! ( srfm_admin?.is_distraction_free && key === 'rate-us' )
+		( { key } ) => ! ( srfm_admin?.hide_promotions && key === 'rate-us' )
 	);
 
 	const QuickAccessButtons = () => {

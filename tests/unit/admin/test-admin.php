@@ -2632,33 +2632,27 @@ class Test_Admin extends TestCase {
 	}
 
 	/**
-	 * The SMTP (SureMail cross-sell) submenu is not registered in Distraction Free.
-	 *
-	 * @runInSeparateProcess
-	 * @preserveGlobalState disabled
+	 * The SMTP (SureMail cross-sell) submenu is not registered while promotions are hidden.
 	 */
-	public function test_add_suremail_page_not_registered_in_distraction_free() {
-		define( 'SRFM_PRO_VER', '1.0.0' );
-
-		update_option( 'srfm_general_settings_options', [ 'srfm_distraction_free' => true ] );
+	public function test_add_suremail_page_not_registered_when_promotions_hidden() {
+		add_filter( 'srfm_hide_promotions', '__return_true' );
 		$admin = new Admin();
+		remove_filter( 'srfm_hide_promotions', '__return_true' );
 		$this->assertFalse( has_action( 'admin_menu', [ $admin, 'add_suremail_page' ] ) );
 
-		update_option( 'srfm_general_settings_options', [ 'srfm_distraction_free' => false ] );
 		$admin = new Admin();
-		$this->assertNotFalse( has_action( 'admin_menu', [ $admin, 'add_suremail_page' ] ), 'Control: registered when the setting is off.' );
+		$this->assertNotFalse( has_action( 'admin_menu', [ $admin, 'add_suremail_page' ] ), 'Control: registered by default.' );
 	}
 
 
 	/**
-	 * The localized admin data carries the Distraction Free flag and drops the
+	 * The localized admin data carries the hide_promotions flag and drops the
 	 * rotating cross-sell banner, which is what the dashboard ExtendTab reads.
 	 *
 	 * @runInSeparateProcess
 	 * @preserveGlobalState disabled
 	 */
-	public function test_enqueue_scripts_localizes_distraction_free() {
-		define( 'SRFM_PRO_VER', '1.0.0' );
+	public function test_enqueue_scripts_localizes_hide_promotions() {
 		wp_set_current_user( (int) wp_insert_user( [ 'user_login' => 'srfm_df_loc_' . wp_rand(), 'user_pass' => 'password', 'user_email' => 'srfm_df_loc_' . wp_rand() . '@example.com', 'role' => 'administrator' ] ) );
 		set_current_screen( 'toplevel_page_sureforms_menu' );
 		$_GET['page']     = 'sureforms_menu';
@@ -2673,16 +2667,16 @@ class Test_Admin extends TestCase {
 			}
 		);
 
-		update_option( 'srfm_general_settings_options', [ 'srfm_distraction_free' => true ] );
+		add_filter( 'srfm_hide_promotions', '__return_true' );
 		Admin::get_instance()->enqueue_scripts();
+		remove_filter( 'srfm_hide_promotions', '__return_true' );
 		$this->assertNotEmpty( $captured, 'The dashboard localization must run.' );
-		$this->assertTrue( $captured[0]['is_distraction_free'] );
+		$this->assertTrue( $captured[0]['hide_promotions'] );
 		$this->assertNull( $captured[0]['rotating_plugin_banner'] );
 
 		$captured = [];
-		update_option( 'srfm_general_settings_options', [ 'srfm_distraction_free' => false ] );
 		Admin::get_instance()->enqueue_scripts();
-		$this->assertFalse( $captured[0]['is_distraction_free'], 'Control: flag is off when the setting is off.' );
+		$this->assertFalse( $captured[0]['hide_promotions'], 'Control: off by default.' );
 	}
 }
 
@@ -2841,29 +2835,28 @@ class Test_Rating_Notice extends TestCase {
 	}
 
 	/**
-	 * Distraction Free never asks for a review. The control run with the setting
-	 * off proves the notice would otherwise be registered in this environment.
+	 * No review request while promotions are hidden. The control run proves the
+	 * notice would otherwise be registered in this environment.
 	 *
 	 * @runInSeparateProcess
 	 * @preserveGlobalState disabled
 	 */
-	public function test_display_srfm_rating_notice_skipped_in_distraction_free() {
+	public function test_display_srfm_rating_notice_skipped_when_promotions_hidden() {
 		if ( ! class_exists( '\\Astra_Notices' ) ) {
 			$this->markTestSkipped( 'Astra_Notices not available.' );
 		}
 
-		define( 'SRFM_PRO_VER', '1.0.0' );
 		wp_set_current_user( (int) wp_insert_user( [ 'user_login' => 'srfm_df_' . wp_rand(), 'user_pass' => 'password', 'user_email' => 'srfm_df_' . wp_rand() . '@example.com', 'role' => 'administrator' ] ) );
 		$admin = Admin::get_instance();
 
-		update_option( 'srfm_general_settings_options', [ 'srfm_distraction_free' => true ] );
+		add_filter( 'srfm_hide_promotions', '__return_true' );
 		$before = $this->get_astra_notices_count();
 		$admin->display_srfm_rating_notice();
-		$this->assertSame( $before, $this->get_astra_notices_count(), 'No review notice in Distraction Free.' );
+		remove_filter( 'srfm_hide_promotions', '__return_true' );
+		$this->assertSame( $before, $this->get_astra_notices_count(), 'No review notice while promotions are hidden.' );
 
-		update_option( 'srfm_general_settings_options', [ 'srfm_distraction_free' => false ] );
 		$admin->display_srfm_rating_notice();
-		$this->assertSame( $before + 1, $this->get_astra_notices_count(), 'Control: the notice registers when the setting is off.' );
+		$this->assertSame( $before + 1, $this->get_astra_notices_count(), 'Control: the notice registers by default.' );
 	}
 }
 

@@ -178,7 +178,7 @@ class Admin {
 		add_action( 'admin_menu', [ $this, 'settings_page' ] );
 		add_action( 'admin_menu', [ $this, 'add_learn_page' ] );
 		add_action( 'admin_menu', [ $this, 'add_new_form' ] );
-		if ( ! Helper::is_distraction_free() ) {
+		if ( ! Helper::hide_promotions() ) {
 			add_action( 'admin_menu', [ $this, 'add_suremail_page' ] );
 		}
 		if ( ! Helper::has_pro() ) {
@@ -1817,9 +1817,9 @@ JS;
 			'field_spacing_vars'           => Helper::get_css_vars(),
 			'is_ver_lower_than_6_7'        => version_compare( $wp_version, '6.6.2', '<=' ),
 			'integrations'                 => Helper::sureforms_get_integration(),
-			'is_distraction_free'          => Helper::is_distraction_free(),
+			'hide_promotions'              => Helper::hide_promotions(),
 			// Null makes the dashboard's ExtendTab render nothing.
-			'rotating_plugin_banner'       => Helper::is_distraction_free() ? null : Helper::get_rotating_plugin_banner(),
+			'rotating_plugin_banner'       => Helper::hide_promotions() ? null : Helper::get_rotating_plugin_banner(),
 			'ajax_url'                     => admin_url( 'admin-ajax.php' ),
 			'client_logs_nonce'            => Helper::current_user_can() ? wp_create_nonce( 'srfm_client_logs' ) : '',
 			'action_items'                 => $this->get_action_items(),
@@ -2678,8 +2678,8 @@ JS;
 			return;
 		}
 
-		// Allow the notice to be disabled. Distraction Free never asks for a review.
-		if ( Helper::is_distraction_free() || ! apply_filters( 'srfm_show_rating_notice', true ) ) {
+		// Allow the notice to be disabled; never shown while promotions are hidden.
+		if ( Helper::hide_promotions() || ! apply_filters( 'srfm_show_rating_notice', true ) ) {
 			return;
 		}
 

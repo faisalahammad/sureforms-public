@@ -110,25 +110,6 @@ class Test_Get_Global_Settings extends TestCase {
 		$this->assertArrayNotHasKey( 'security', $result );
 	}
 
-	/**
-	 * The Abilities API reports srfm_distraction_free, defaulting to off, the same
-	 * way the Settings REST endpoint does.
-	 */
-	public function test_execute_general_reports_distraction_free_default() {
-		$backup = get_option( 'srfm_general_settings_options', [] );
 
-		try {
-			foreach ( [ 'fresh install' => null, 'older option' => [ 'srfm_ip_log' => true ] ] as $case => $stored ) {
-				null === $stored ? delete_option( 'srfm_general_settings_options' ) : update_option( 'srfm_general_settings_options', $stored );
 
-				$result = $this->ability->execute( [ 'categories' => [ 'general' ] ] );
-
-				$this->assertIsArray( $result, $case );
-				$this->assertArrayHasKey( 'srfm_distraction_free', $result['general'], $case );
-				$this->assertFalse( $result['general']['srfm_distraction_free'], $case );
-			}
-		} finally {
-			update_option( 'srfm_general_settings_options', $backup );
-		}
-	}
 }

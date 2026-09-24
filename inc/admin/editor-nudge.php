@@ -85,7 +85,7 @@ class Editor_Nudge {
 	 * @return bool
 	 */
 	public function allow_load() {
-		if ( ! is_admin() || Helper::is_distraction_free() ) {
+		if ( ! is_admin() || Helper::hide_promotions() ) {
 			return false;
 		}
 

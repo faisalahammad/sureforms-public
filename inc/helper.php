@@ -2144,23 +2144,24 @@ class Helper {
 	}
 
 	/**
-	 * Whether Distraction Free mode is on.
+	 * Whether SureForms promotional content should be hidden.
 	 *
-	 * Distraction Free hides SureForms promotional content (review requests,
-	 * cross-sell banners, announcements). It is a Pro setting, so it is only
-	 * on while SureForms Pro is active and the stored general setting is true.
+	 * Covers review requests, cross-sell banners and announcements. The free
+	 * plugin never hides them on its own; SureForms Pro's Distraction Free mode
+	 * turns this on through the filter.
 	 *
 	 * @since 2.12.8
 	 * @return bool
 	 */
-	public static function is_distraction_free() {
-		if ( ! self::has_pro() ) {
-			return false;
-		}
-
-		$options = get_option( 'srfm_general_settings_options', [] );
-
-		return is_array( $options ) && ! empty( $options['srfm_distraction_free'] );
+	public static function hide_promotions() {
+		/**
+		 * Filter whether SureForms hides its promotional content in wp-admin.
+		 *
+		 * @since 2.12.8
+		 *
+		 * @param bool $hide Default false.
+		 */
+		return (bool) apply_filters( 'srfm_hide_promotions', false );
 	}
 
 	/**
