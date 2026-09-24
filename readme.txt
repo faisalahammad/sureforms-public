@@ -429,12 +429,15 @@ You can report security issues through our [Bug Bounty Program](https://brainsto
 = 2.12.8 - 24th September 2026 =
 * New: Added a Distraction Free mode that hides promotional content in wp-admin, ideal for client sites (requires SureForms Pro).
 * New: Added Auto-Advance to Next Step and Hide Next Button settings for multi-step forms (requires SureForms Pro).
+* Improvement: Contact Support on a submission failure notice opens your mail client again, with the full report already written.
 * Improvement: Redesigned the guided setup with a clearer step-by-step flow, refreshed visuals, and a tour of the add-on features.
 * Improvement: The debug log no longer records routine validation stops, such as an empty required field, keeping it focused on real failures.
 * Improvement: The guided setup now flags an active caching plugin and links to its setup guide, so cache rules never silently break a form.
+* Fix: Entry counts and lookups no longer include an entry that was just deleted.
 * Fix: Entry Logs now record the email notification sent when a form is submitted.
 * Fix: Resolved an editor crash that prevented forms containing a Register block from opening.
 * Fix: Stripe checkout no longer stalls on a remote license check.
+* Fix: The template picker now opens reliably when the WordPress admin toolbar is not shown.
 = 2.12.7 - 12th September 2026 =
 * Improvement: Submission failure notices now offer View details, so you can read and copy the full diagnostics before contacting support.
 * Improvement: The Form Checks panel now appears only when something genuinely needs attention, with clearer wording, keeping the sidebar focused.
