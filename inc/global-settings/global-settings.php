@@ -157,6 +157,12 @@ class Global_Settings {
 		// Absent means on, matching Client_Logger::is_enabled(). A save that omits
 		// the key must not be read as the site opting out.
 		$srfm_enable_logs = isset( $setting_options['srfm_enable_logs'] ) ? (bool) $setting_options['srfm_enable_logs'] : true;
+		// Absent keeps the stored value. The Abilities API saves a partial array
+		// without this key, and that save must not switch Distraction Free off.
+		$stored_options        = get_option( 'srfm_general_settings_options', [] );
+		$srfm_distraction_free = isset( $setting_options['srfm_distraction_free'] )
+			? (bool) $setting_options['srfm_distraction_free']
+			: is_array( $stored_options ) && ! empty( $stored_options['srfm_distraction_free'] );
 
 		$settings = [
 			'srfm_ip_log'              => $srfm_ip_log,
@@ -164,6 +170,7 @@ class Global_Settings {
 			'srfm_admin_notification'  => $srfm_admin_notification,
 			'srfm_form_views_tracking' => $srfm_form_views_tracking,
 			'srfm_enable_logs'         => $srfm_enable_logs,
+			'srfm_distraction_free'    => $srfm_distraction_free,
 		];
 
 		/**
@@ -672,7 +679,12 @@ class Global_Settings {
 					'srfm_admin_notification'  => true,
 					'srfm_form_views_tracking' => false,
 					'srfm_enable_logs'         => true,
+					'srfm_distraction_free'    => false,
 				];
+		}
+
+		if ( ! isset( $global_setting_options['srfm_general_settings_options']['srfm_distraction_free'] ) ) {
+				$global_setting_options['srfm_general_settings_options']['srfm_distraction_free'] = false;
 		}
 
 		if ( ! isset( $global_setting_options['srfm_general_settings_options']['srfm_admin_notification'] ) ) {

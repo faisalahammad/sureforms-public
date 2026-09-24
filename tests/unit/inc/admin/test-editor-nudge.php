@@ -620,4 +620,25 @@ class Test_Editor_Nudge extends SRFM_Unit_Test_Case {
 		ob_end_clean();
 		$this->fail( 'Expected WPDieException for missing post_id.' );
 	}
+
+	/**
+	 * Distraction Free suppresses the nudge even when every other condition
+	 * would show it.
+	 *
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_allow_load_returns_false_in_distraction_free() {
+		define( 'SRFM_PRO_VER', '1.0.0' );
+		wp_set_current_user( $this->admin_id );
+		$this->force_block_editor_screen( 'page' );
+		$this->set_current_post( $this->post_id );
+
+		update_option( 'srfm_general_settings_options', [ 'srfm_distraction_free' => false ] );
+		$this->assertTrue( $this->nudge->allow_load(), 'Control: the nudge loads when the setting is off.' );
+
+		update_option( 'srfm_general_settings_options', [ 'srfm_distraction_free' => true ] );
+		$this->assertFalse( $this->nudge->allow_load(), 'Distraction Free must suppress the nudge.' );
+	}
+
 }

@@ -287,6 +287,36 @@ const FormViewsTrackingContent = ( {
 };
 
 /**
+ * Distraction Free settings section. Pro only.
+ *
+ * @param {Object}   props
+ * @param {Object}   props.generalTabOptions    - General settings.
+ * @param {Function} props.updateGlobalSettings - Settings update handler.
+ */
+const DistractionFreeContent = ( {
+	generalTabOptions,
+	updateGlobalSettings,
+} ) => (
+	<Switch
+		label={ {
+			heading: __( 'Enable Distraction Free mode', 'sureforms' ),
+			description: __(
+				'Hides SureForms promotional content in the dashboard, such as review requests, plugin suggestions and announcements. Useful when handing a site over to a client.',
+				'sureforms'
+			),
+		} }
+		value={ !! generalTabOptions.srfm_distraction_free }
+		onChange={ ( value ) =>
+			updateGlobalSettings(
+				'srfm_distraction_free',
+				value,
+				'general-settings'
+			)
+		}
+	/>
+);
+
+/**
  * Usage Tracking / Analytics settings section.
  *
  * @param {Object}   props
@@ -572,6 +602,18 @@ const GeneralPage = ( {
 					/>
 				}
 			/>
+			{ srfm_admin?.is_pro_active && (
+				<ContentSection
+					loading={ loading }
+					title={ __( 'Distraction Free', 'sureforms' ) }
+					content={
+						<DistractionFreeContent
+							generalTabOptions={ generalTabOptions }
+							updateGlobalSettings={ updateGlobalSettings }
+						/>
+					}
+				/>
+			) }
 			{ /* Everything above is something SureForms does for this site.
 			     Analytics is the one setting that sends anything outward, so it
 			     sits last, behind a rule, rather than reading as one more form

@@ -2144,6 +2144,26 @@ class Helper {
 	}
 
 	/**
+	 * Whether Distraction Free mode is on.
+	 *
+	 * Distraction Free hides SureForms promotional content (review requests,
+	 * cross-sell banners, announcements). It is a Pro setting, so it is only
+	 * on while SureForms Pro is active and the stored general setting is true.
+	 *
+	 * @since 2.12.8
+	 * @return bool
+	 */
+	public static function is_distraction_free() {
+		if ( ! self::has_pro() ) {
+			return false;
+		}
+
+		$options = get_option( 'srfm_general_settings_options', [] );
+
+		return is_array( $options ) && ! empty( $options['srfm_distraction_free'] );
+	}
+
+	/**
 	 * Verifies the request by checking the nonce and user capabilities.
 	 *
 	 * @param string $request_type The type of request, either 'rest' or 'ajax'.

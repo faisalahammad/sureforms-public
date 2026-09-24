@@ -150,7 +150,12 @@ class Get_Global_Settings extends Abstract_Ability {
 				'srfm_admin_notification'  => true,
 				'srfm_form_views_tracking' => false,
 				'srfm_enable_logs'         => true,
+				'srfm_distraction_free'    => false,
 			];
+		}
+
+		if ( ! isset( $settings['srfm_distraction_free'] ) ) {
+			$settings['srfm_distraction_free'] = false;
 		}
 
 		if ( ! isset( $settings['srfm_admin_notification'] ) ) {

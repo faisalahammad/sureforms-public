@@ -3328,4 +3328,30 @@ class Test_Helper extends TestCase {
 		$this->assertSame( '', $detected );
 	}
 
+    /**
+     * Distraction Free is a Pro setting: off without Pro even when stored on,
+     * and with Pro it follows the stored general setting.
+     *
+     * Defining SRFM_PRO_VER is permanent for the process, hence the separate process.
+     *
+     * @runInSeparateProcess
+     * @preserveGlobalState disabled
+     */
+    public function test_is_distraction_free() {
+        update_option( 'srfm_general_settings_options', [ 'srfm_distraction_free' => true ] );
+        $this->assertFalse( Helper::is_distraction_free(), 'Must stay off without Pro.' );
+
+        define( 'SRFM_PRO_VER', '1.0.0' );
+        $this->assertTrue( Helper::is_distraction_free(), 'Must be on with Pro and the setting on.' );
+
+        update_option( 'srfm_general_settings_options', [ 'srfm_distraction_free' => false ] );
+        $this->assertFalse( Helper::is_distraction_free(), 'Must be off when the setting is off.' );
+
+        update_option( 'srfm_general_settings_options', [ 'srfm_ip_log' => true ] );
+        $this->assertFalse( Helper::is_distraction_free(), 'An absent key must mean off.' );
+
+        update_option( 'srfm_general_settings_options', 'corrupt' );
+        $this->assertFalse( Helper::is_distraction_free(), 'A non-array option must mean off.' );
+    }
+
 }

@@ -40,7 +40,9 @@ export default () => {
 			icon: <Star size={ 16 } />,
 			link: 'https://wordpress.org/support/plugin/sureforms/reviews/?rate=5#new-post',
 		},
-	];
+	].filter(
+		( { key } ) => ! ( srfm_admin?.is_distraction_free && key === 'rate-us' )
+	);
 
 	const QuickAccessButtons = () => {
 		return quickAccessOptions.map( ( { key, label, icon, link } ) => (
