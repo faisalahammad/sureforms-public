@@ -18,9 +18,22 @@ use Yoast\PHPUnitPolyfills\TestCases\TestCase;
  */
 class Test_Client_Logger extends TestCase {
 
+	/**
+	 * General settings as they were before the test, restored in tearDown().
+	 *
+	 * These tests switch logging on and off. Without the restore, the last test
+	 * leaves logging off for every later test class, and anything that depends on
+	 * Client_Logger recording (such as the notification fault tests in
+	 * test-form-submit.php) fails only when run after this class.
+	 *
+	 * @var mixed
+	 */
+	private $general_settings_backup;
+
 	protected function setUp(): void {
 		parent::setUp();
 
+		$this->general_settings_backup = get_option( 'srfm_general_settings_options', null );
 		$this->set_logging( true );
 		Client_Logger::clear();
 		delete_option( Client_Logger::FAILURES_OPTION );
@@ -29,8 +42,13 @@ class Test_Client_Logger extends TestCase {
 
 	protected function tearDown(): void {
 		Client_Logger::clear();
-		$this->set_logging( false );
 		delete_option( Client_Logger::FILENAME_OPTION );
+
+		if ( null === $this->general_settings_backup ) {
+			delete_option( 'srfm_general_settings_options' );
+		} else {
+			update_option( 'srfm_general_settings_options', $this->general_settings_backup );
+		}
 
 		parent::tearDown();
 	}

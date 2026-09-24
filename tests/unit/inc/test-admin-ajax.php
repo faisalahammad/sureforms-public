@@ -331,22 +331,26 @@ class Test_Admin_Ajax extends TestCase {
 		);
 
 		// With the capability and a good nonce it succeeds and removes the file.
-		$general                     = (array) get_option( 'srfm_general_settings_options', [] );
+		// The original settings are restored afterwards: leaving logging off here
+		// silently disables Client_Logger for every later test class.
+		$original                    = get_option( 'srfm_general_settings_options', null );
+		$general                     = (array) $original;
 		$general['srfm_enable_logs'] = true;
 		update_option( 'srfm_general_settings_options', $general );
 
-		Client_Logger::append( [ 'type' => 'error', 'message' => 'temporary' ] );
-		$path = Client_Logger::get_log_path( false );
-		$this->assertFileExists( $path );
+		try {
+			Client_Logger::append( [ 'type' => 'error', 'message' => 'temporary' ] );
+			$path = Client_Logger::get_log_path( false );
+			$this->assertFileExists( $path );
 
-		wp_set_current_user( $this->make_user( 'administrator' ) );
-		$body = $this->run_log_handler( 'clear_client_log', wp_create_nonce( 'srfm_client_logs' ) );
+			wp_set_current_user( $this->make_user( 'administrator' ) );
+			$body = $this->run_log_handler( 'clear_client_log', wp_create_nonce( 'srfm_client_logs' ) );
 
-		$this->assertStringContainsString( '"success":true', $body );
-		$this->assertFileDoesNotExist( $path );
-
-		$general['srfm_enable_logs'] = false;
-		update_option( 'srfm_general_settings_options', $general );
+			$this->assertStringContainsString( '"success":true', $body );
+			$this->assertFileDoesNotExist( $path );
+		} finally {
+			null === $original ? delete_option( 'srfm_general_settings_options' ) : update_option( 'srfm_general_settings_options', $original );
+		}
 	}
 
 	/**
