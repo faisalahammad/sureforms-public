@@ -810,10 +810,24 @@ class Form_Submit {
 				$provider->switch_language( $entry_language );
 			}
 
+			// Entries::add() has stored the logs collected so far. Start the instance
+			// empty so the update below writes only what send_email() records --
+			// Entries::update() merges with the stored logs, so anything left here
+			// would be written twice.
+			$entries_db_instance = Entries::get_instance();
+			$entries_db_instance->reset_logs();
+
 			// Send email after entry creation so {entry_id} is available when smart tags are processed.
 			$send_email = $this->send_email( $id, $submission_data, $form_data );
 			if ( $send_email ) {
 				$emails = $send_email['emails'];
+			}
+
+			// send_email() logs to the in-memory instance; the entry already exists,
+			// so the log only reaches it through an update.
+			$notification_logs = $entries_db_instance->get_logs();
+			if ( ! empty( $notification_logs ) ) {
+				Entries::update( Helper::get_integer_value( $entry_id ), [ 'logs' => $notification_logs ] );
 			}
 
 			$confirmation_message = Generate_Form_Markup::get_confirmation_markup( $form_data, $submission_data );
