@@ -426,7 +426,7 @@ Visit the [SureForms features page](https://sureforms.com/features/?utm_source=w
 You can report security issues through our [Bug Bounty Program](https://brainstormforce.com/bug-bounty-program/). We collaborate with Patchstack to validate, triage, and handle security reports.
 
 ## Changelog ##
-### 2.12.8 - 24th September 2026 ###
+### 2.12.8 - 25th September 2026 ###
 * Improvement: The debug log no longer records routine validation stops, such as an empty required field, keeping it focused on real failures.
 * Fix: Entry Logs now record the email notification sent when a form is submitted.
 * Fix: Resolved an editor crash that prevented forms containing a Register block from opening.
