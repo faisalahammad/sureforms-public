@@ -630,7 +630,7 @@ class Admin {
 	 * @return void
 	 */
 	public function register_form_setup_widget() {
-		if ( ! Helper::current_user_can() ) {
+		if ( ! Helper::current_user_can() || Helper::hide_promotions() ) {
 			return;
 		}
 
@@ -737,7 +737,7 @@ class Admin {
 	 * @return void
 	 */
 	public function enqueue_form_setup_widget_assets( $hook_suffix ) {
-		if ( 'index.php' !== $hook_suffix || ! Helper::current_user_can() ) {
+		if ( 'index.php' !== $hook_suffix || ! Helper::current_user_can() || Helper::hide_promotions() ) {
 			return;
 		}
 
@@ -3152,8 +3152,9 @@ JS;
 	 */
 	public function maybe_register_dashboard_widget() {
 
-		// Only for users with manage_options capability.
-		if ( ! Helper::current_user_can() ) {
+		// Only for users with manage_options capability, and never while
+		// promotions are hidden: no SureForms widget on the WordPress dashboard.
+		if ( ! Helper::current_user_can() || Helper::hide_promotions() ) {
 			return;
 		}
 
@@ -3258,7 +3259,7 @@ JS;
 	 */
 	public function enqueue_ai_dashboard_widget_assets( $hook_suffix ) {
 		// Only on the main dashboard, and only for capable users (matches the widget gate).
-		if ( 'index.php' !== $hook_suffix || ! Helper::current_user_can() ) {
+		if ( 'index.php' !== $hook_suffix || ! Helper::current_user_can() || Helper::hide_promotions() ) {
 			return;
 		}
 
