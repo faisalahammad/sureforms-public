@@ -1839,6 +1839,10 @@ JS;
 			'privacy_policy_url'           => Helper::get_sureforms_website_url( 'privacy-policy/' ),
 			'is_rtl'                       => $is_rtl,
 			'onboarding_completed'         => method_exists( $onboarding_instance, 'get_onboarding_status' ) ? $onboarding_instance->get_onboarding_status() : false,
+			// Read by the onboarding cache-conflict step: the name decides whether the
+			// step renders, the URL is where "View full guide" points.
+			'caching_plugin'               => Helper::get_active_caching_plugin(),
+			'caching_plugin_doc_url'       => Helper::get_caching_plugin_doc_url( 'onboarding' ),
 			'migration_banner_dismissed'   => method_exists( $onboarding_instance, 'is_migration_banner_dismissed' ) ? $onboarding_instance->is_migration_banner_dismissed() : false,
 			'migration_settings_url'       => admin_url( 'admin.php?page=sureforms_form_settings&tab=migration-settings' ),
 			'onboarding_redirect'          => isset( $_GET['srfm-activation-redirect'] ), // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Nonce is not required for the activation redirection.

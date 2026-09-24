@@ -426,6 +426,9 @@ Visit the [SureForms features page](https://sureforms.com/features/?utm_source=w
 You can report security issues through our [Bug Bounty Program](https://brainstormforce.com/bug-bounty-program/). We collaborate with Patchstack to validate, triage, and handle security reports.
 
 == Changelog ==
+= 2.13.0 - DD Month 2026 =
+* Improvement: Redesigned the guided setup with a clearer step-by-step flow, refreshed visuals, and a tour of the add-on features.
+* Improvement: The guided setup now flags an active caching plugin and links to its setup guide, so cache rules never silently break a form.
 = 2.12.7 - 12th September 2026 =
 * Improvement: Submission failure notices now offer View details, so you can read and copy the full diagnostics before contacting support.
 * Improvement: The Form Checks panel now appears only when something genuinely needs attention, with clearer wording, keeping the sidebar focused.

@@ -130,6 +130,11 @@ class Test_Admin extends TestCase {
         $source      = implode( '', array_slice( file( $source_file ), $start_line - 1, $end_line - $start_line + 1 ) );
 
         $this->assertStringContainsString( 'current_user_login', $source, 'Localization data should include current_user_login.' );
+
+        // The onboarding cache-conflict step reads these two keys to decide whether
+        // to render and where "View full guide" points.
+        $this->assertStringContainsString( "'caching_plugin'", $source, 'Localization data should include caching_plugin.' );
+        $this->assertStringContainsString( "'caching_plugin_doc_url'", $source, 'Localization data should include caching_plugin_doc_url.' );
     }
 
     /**
