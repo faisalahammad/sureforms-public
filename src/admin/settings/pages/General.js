@@ -487,6 +487,9 @@ const GeneralPage = ( {
 			'learn'
 	);
 	const [ showLearnTip, setShowLearnTip ] = useState( false );
+	// Section keys an add-on asked to hide ('logs', 'analytics'), set through
+	// the additionalSections slot. SureForms Pro's Distraction Free uses it.
+	const [ hiddenSections, setHiddenSections ] = useState( [] );
 
 	useEffect( () => {
 		if ( ! isLearnSource ) {
@@ -552,39 +555,48 @@ const GeneralPage = ( {
 				}
 			/>
 			{ /* Extension slot for add-on sections, such as SureForms Pro's
-			     Distraction Free. Renders nothing on its own. */ }
+			     Distraction Free. Renders nothing on its own.
+			     updateGlobalSettings lets a section stage changes to other
+			     General settings, saved with the same Save button;
+			     setHiddenSections lets it hide the Logs and Analytics sections. */ }
 			{ applyFilters(
 				'srfm.settings.general.additionalSections',
 				null,
-				{ loading }
+				{ loading, updateGlobalSettings, setHiddenSections }
 			) }
-			<ContentSection
-				loading={ loading }
-				title={ __( 'Logs', 'sureforms' ) }
-				content={
-					<LogsContent
-						generalTabOptions={ generalTabOptions }
-						updateGlobalSettings={ updateGlobalSettings }
-						logMeta={ logMeta }
-						setLogMeta={ setLogMeta }
-					/>
-				}
-			/>
+			{ ! hiddenSections.includes( 'logs' ) && (
+				<ContentSection
+					loading={ loading }
+					title={ __( 'Logs', 'sureforms' ) }
+					content={
+						<LogsContent
+							generalTabOptions={ generalTabOptions }
+							updateGlobalSettings={ updateGlobalSettings }
+							logMeta={ logMeta }
+							setLogMeta={ setLogMeta }
+						/>
+					}
+				/>
+			) }
 			{ /* Everything above is something SureForms does for this site.
 			     Analytics is the one setting that sends anything outward, so it
 			     sits last, behind a rule, rather than reading as one more form
 			     setting. */ }
-			<hr className="w-full m-0 border-0 border-t border-solid border-border-subtle" />
-			<ContentSection
-				loading={ loading }
-				title={ __( 'Anonymous Analytics', 'sureforms' ) }
-				content={
-					<UsageTrackingContent
-						generalTabOptions={ generalTabOptions }
-						updateGlobalSettings={ updateGlobalSettings }
+			{ ! hiddenSections.includes( 'analytics' ) && (
+				<>
+					<hr className="w-full m-0 border-0 border-t border-solid border-border-subtle" />
+					<ContentSection
+						loading={ loading }
+						title={ __( 'Anonymous Analytics', 'sureforms' ) }
+						content={
+							<UsageTrackingContent
+								generalTabOptions={ generalTabOptions }
+								updateGlobalSettings={ updateGlobalSettings }
+							/>
+						}
 					/>
-				}
-			/>
+				</>
+			) }
 		</div>
 	);
 };
