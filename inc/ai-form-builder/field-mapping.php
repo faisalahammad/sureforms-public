@@ -35,7 +35,11 @@ class Field_Mapping {
 		$params = $request->get_params();
 
 		// check parama is empty or not and is an array and consist form_data key.
-		if ( empty( $params ) || ! is_array( $params ) || ! isset( $params['form_data'] ) || 0 === count( $params['form_data'] ) ) {
+		// count() is guarded by is_array(): a non-array form_data is a TypeError in PHP 8,
+		// and this endpoint is reachable with any JSON value. It falls through to the
+		// invalid_form_data check below instead.
+		if ( empty( $params ) || ! is_array( $params ) || ! isset( $params['form_data'] )
+			|| ( is_array( $params['form_data'] ) && 0 === count( $params['form_data'] ) ) ) {
 			return new WP_Error(
 				'srfm_ai_mapping_missing_form_data',
 				__( 'The AI form data is missing. Please try again.', 'sureforms' ),

@@ -8,7 +8,7 @@
 use Yoast\PHPUnitPolyfills\TestCases\TestCase;
 use SRFM\Inc\Single_Form_Settings\Compliance_Settings;
 
-class Test_Compliance_Settings extends TestCase {
+class Test_Compliance_Settings extends SRFM_Unit_Test_Case {
 
 	/**
 	 * Test pre_auto_delete_entries does not throw warnings when compliance meta is empty array.

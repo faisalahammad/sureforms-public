@@ -56,8 +56,11 @@ class Test_Phone_Markup extends TestCase {
 		$this->assertStringContainsString( 'type="tel"', $markup );
 		$this->assertStringContainsString( 'srfm-input-phone', $markup );
 		$this->assertStringContainsString( 'default-country="in"', $markup );
-		// The auto-country attribute is no longer emitted — frontend JS reads default-country directly.
-		$this->assertStringNotContainsString( 'auto-country=', $markup );
+		// The bare `auto-country` attribute is gone; the flag phone.js reads is the
+		// data-prefixed one. Asserting on the unprefixed substring alone matched
+		// `data-auto-country=` too, so it could never pass.
+		$this->assertStringContainsString( 'data-auto-country="true"', $markup );
+		$this->assertStringNotContainsString( ' auto-country=', $markup );
 		$this->assertStringContainsString( 'data-block-id="phone001"', $markup );
 		$this->assertStringContainsString( 'data-required="true"', $markup );
 
@@ -66,14 +69,34 @@ class Test_Phone_Markup extends TestCase {
 	}
 
 	/**
-	 * Test that auto country falls back to 'us' when IP is unavailable.
+	 * With no usable IP, detection degrades to the country configured on the block.
+	 *
+	 * Helper::get_geo_country() is called with the block's defaultCountry as the
+	 * fallback precisely so a failed lookup lands on the site owner's choice
+	 * rather than a hardcoded 'us'.
 	 */
-	public function test_auto_country_falls_back_to_us_on_unknown_ip() {
+	public function test_auto_country_falls_back_to_configured_default_on_unknown_ip() {
 		unset( $_SERVER['REMOTE_ADDR'] );
 
 		$attributes                = $this->get_auto_country_attributes();
 		$attributes['block_id']    = 'phone003';
 		$attributes['defaultCountry'] = 'GB';
+
+		$phone  = new Phone_Markup( $attributes );
+		$markup = $phone->markup();
+
+		$this->assertStringContainsString( 'default-country="gb"', $markup );
+	}
+
+	/**
+	 * ...and to 'us' only when the block has no configured default either.
+	 */
+	public function test_auto_country_falls_back_to_us_when_no_default_configured() {
+		unset( $_SERVER['REMOTE_ADDR'] );
+
+		$attributes                   = $this->get_auto_country_attributes();
+		$attributes['block_id']       = 'phone005';
+		$attributes['defaultCountry'] = '';
 
 		$phone  = new Phone_Markup( $attributes );
 		$markup = $phone->markup();
@@ -114,7 +137,9 @@ class Test_Phone_Markup extends TestCase {
 		$markup = $phone->markup();
 
 		$this->assertStringContainsString( 'default-country="GB"', $markup );
-		// The auto-country attribute is no longer emitted — frontend JS reads default-country directly.
+
+		// With autoCountry off the flag is not emitted at all, so phone.js leaves
+		// the configured country alone.
 		$this->assertStringNotContainsString( 'auto-country=', $markup );
 	}
 

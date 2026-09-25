@@ -17,7 +17,7 @@ use SRFM\Inc\Submit_Token;
  * Tests Plugin Initialization.
  *
  */
-class Test_Form_Submit extends TestCase {
+class Test_Form_Submit extends SRFM_Unit_Test_Case {
 
 	protected $form_submit;
 
@@ -404,7 +404,15 @@ class Test_Form_Submit extends TestCase {
 		}
 		ob_end_clean();
 
-		// If we reach here, form processed successfully (no die) — that's the expected behavior.
+		// If we reach here, form processed successfully (no die) — that's the
+		// expected behavior, and it is worth saying so rather than ending the
+		// test having asserted nothing at all.
+		$this->assertNotInstanceOf(
+			\WP_Error::class,
+			$result,
+			'A form with honeypot disabled and no honeypot field must not be rejected.'
+		);
+
 		wp_delete_post( $form_id, true );
 		delete_option( 'srfm_security_settings_options' );
 	}
@@ -568,11 +576,24 @@ class Test_Form_Submit extends TestCase {
 	}
 
 	/**
-	 * Test permissions_check is callable.
+	 * permissions_check() returns true for a capable user and a WP_Error otherwise.
+	 *
+	 * It is a REST permission_callback, so the denial has to carry the 401/403
+	 * status - returning a bare false would surrender that.
 	 */
 	public function test_permissions_check() {
-		$result = $this->form_submit->permissions_check();
-		$this->assertIsBool( $result );
+		$previous_user = get_current_user_id();
+
+		wp_set_current_user( 0 );
+		$denied = $this->form_submit->permissions_check();
+		$this->assertInstanceOf( \WP_Error::class, $denied );
+		$this->assertSame( 'rest_forbidden', $denied->get_error_code() );
+		$this->assertSame( rest_authorization_required_code(), $denied->get_error_data()['status'] );
+
+		wp_set_current_user( self::factory()->user->create( [ 'role' => 'administrator' ] ) );
+		$this->assertTrue( $this->form_submit->permissions_check() );
+
+		wp_set_current_user( $previous_user );
 	}
 
 	/**
@@ -732,6 +753,76 @@ class Test_Form_Submit extends TestCase {
 		wp_delete_post( $broken, true );
 		wp_delete_post( $working, true );
 		delete_option( Client_Logger::FAILURES_OPTION );
+	}
+
+	/**
+	 * The email notification log written during a submission reaches the stored entry.
+	 *
+	 * send_email() runs after Entries::add() so {entry_id} resolves, and records its
+	 * log on the in-memory Entries instance. handle_form_entry() must persist that
+	 * log to the entry it just created, exactly once.
+	 */
+	public function test_handle_form_entry_persists_the_email_notification_log() {
+		$form_id = wp_insert_post(
+			[
+				'post_type'   => 'sureforms_form',
+				'post_title'  => 'Entry Log Form',
+				'post_status' => 'publish',
+			]
+		);
+
+		update_post_meta(
+			$form_id,
+			'_srfm_email_notification',
+			[
+				[
+					'id'     => 1,
+					'status' => true,
+				],
+			]
+		);
+
+		$parsed = static function () {
+			return [
+				'to'      => 'owner@example.com',
+				'subject' => 'New entry',
+				'message' => 'An entry arrived.',
+				'headers' => [],
+			];
+		};
+		$sent   = static function () {
+			return true;
+		};
+
+		add_filter( 'srfm_email_notification', $parsed, 99 );
+		add_filter( 'pre_wp_mail', $sent, 99 );
+
+		// The instance is a per-request singleton; start from a clean request.
+		EntriesTable::get_instance()->reset_logs();
+
+		$response = $this->form_submit->handle_form_entry( [ 'form-id' => (string) $form_id ] );
+
+		remove_filter( 'pre_wp_mail', $sent, 99 );
+		remove_filter( 'srfm_email_notification', $parsed, 99 );
+
+		$this->assertTrue( $response['success'] );
+
+		$entry_id = Helper::get_integer_value( $response['data']['submission_id'] );
+		$logs     = Helper::get_array_value( EntriesTable::get( $entry_id )['logs'] );
+		$email    = array_values(
+			array_filter(
+				$logs,
+				static function ( $log ) {
+					return 'Email notification passed to the sending server' === $log['title'];
+				}
+			)
+		);
+
+		$this->assertCount( 1, $email, 'The notification log must be stored on the entry exactly once.' );
+		$this->assertSame( [ 'Email notification recipient: owner@example.com' ], $email[0]['messages'] );
+
+		EntriesTable::delete( $entry_id );
+		wp_delete_post( $form_id, true );
 	}
 
 	/**
