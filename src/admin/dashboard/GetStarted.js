@@ -26,7 +26,7 @@ export default () => {
 			className="w-full bg-background-primary p-4 gap-8 shadow-sm-blur-1 rounded-xl border-0.5 border-solid border-border-subtle"
 			containerType="grid"
 			cols={ 12 }
-			align="center"
+			align="start"
 		>
 			<Container.Item className="flex flex-col gap-6 p-2 col-span-12 md:col-span-7 lg:col-span-7">
 				<Container direction="column" className="gap-1">
