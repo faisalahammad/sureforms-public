@@ -11,7 +11,7 @@ use SRFM\Inc\Admin\Editor_Nudge;
 /**
  * Tests for Editor_Nudge.
  */
-class Test_Editor_Nudge extends TestCase {
+class Test_Editor_Nudge extends SRFM_Unit_Test_Case {
 
 	/**
 	 * Editor_Nudge instance.
@@ -65,7 +65,7 @@ class Test_Editor_Nudge extends TestCase {
 		wp_delete_post( $this->other_post_id, true );
 		wp_delete_user( $this->admin_id );
 		wp_delete_user( $this->subscriber_id );
-		unset( $_POST['nonce'], $_POST['post_id'] );
+		unset( $_POST['nonce'], $_POST['post_id'], $_REQUEST['nonce'] );
 		$GLOBALS['post']           = null;
 		$GLOBALS['current_screen'] = null;
 		parent::tearDown();
@@ -78,6 +78,14 @@ class Test_Editor_Nudge extends TestCase {
 	 * @param string $post_type Post type slug, e.g. 'page' or SRFM_FORMS_POST_TYPE.
 	 */
 	protected function force_block_editor_screen( $post_type ) {
+		/*
+		 * This is all that is needed to make is_admin() true: it reads the current
+		 * screen first and only falls back to the WP_ADMIN constant when no screen
+		 * is set, and WP_Screen::get() marks every id but 'front' as in-admin.
+		 * These tests used to define( 'WP_ADMIN', true ) as well, which cannot be
+		 * undone for the rest of the process and left every later front-end test
+		 * in the suite believing it was running in wp-admin.
+		 */
 		$screen                 = \WP_Screen::get( $post_type );
 		$screen->id             = $post_type;
 		$screen->post_type      = $post_type;
@@ -162,10 +170,6 @@ class Test_Editor_Nudge extends TestCase {
 	public function test_allow_load_returns_false_when_post_already_dismissed() {
 		wp_set_current_user( $this->admin_id );
 
-		if ( ! defined( 'WP_ADMIN' ) ) {
-			define( 'WP_ADMIN', true );
-		}
-
 		$this->force_block_editor_screen( 'page' );
 		$this->set_current_post( $this->post_id );
 		update_post_meta( $this->post_id, Editor_Nudge::DISMISS_META_KEY, time() );
@@ -183,10 +187,6 @@ class Test_Editor_Nudge extends TestCase {
 	 */
 	public function test_allow_load_isolated_per_post() {
 		wp_set_current_user( $this->admin_id );
-
-		if ( ! defined( 'WP_ADMIN' ) ) {
-			define( 'WP_ADMIN', true );
-		}
 
 		$this->force_block_editor_screen( 'page' );
 
@@ -210,10 +210,6 @@ class Test_Editor_Nudge extends TestCase {
 	 */
 	public function test_allow_load_treats_expired_dismissal_as_inactive() {
 		wp_set_current_user( $this->admin_id );
-
-		if ( ! defined( 'WP_ADMIN' ) ) {
-			define( 'WP_ADMIN', true );
-		}
 
 		$this->force_block_editor_screen( 'page' );
 		$this->set_current_post( $this->post_id );
@@ -249,10 +245,6 @@ class Test_Editor_Nudge extends TestCase {
 	public function test_allow_load_returns_true_when_all_conditions_met() {
 		wp_set_current_user( $this->admin_id );
 
-		if ( ! defined( 'WP_ADMIN' ) ) {
-			define( 'WP_ADMIN', true );
-		}
-
 		$this->force_block_editor_screen( 'page' );
 		$this->set_current_post( $this->post_id );
 
@@ -268,10 +260,6 @@ class Test_Editor_Nudge extends TestCase {
 	 */
 	public function test_allow_load_returns_false_on_sureforms_form_screen() {
 		wp_set_current_user( $this->admin_id );
-
-		if ( ! defined( 'WP_ADMIN' ) ) {
-			define( 'WP_ADMIN', true );
-		}
 
 		$this->force_block_editor_screen( SRFM_FORMS_POST_TYPE );
 
@@ -301,10 +289,6 @@ class Test_Editor_Nudge extends TestCase {
 	public function test_nudge_does_not_show_after_successful_dismissal() {
 		wp_set_current_user( $this->admin_id );
 
-		if ( ! defined( 'WP_ADMIN' ) ) {
-			define( 'WP_ADMIN', true );
-		}
-
 		$this->force_block_editor_screen( 'page' );
 		$this->set_current_post( $this->post_id );
 
@@ -316,6 +300,8 @@ class Test_Editor_Nudge extends TestCase {
 
 		// Simulate the dismissal AJAX flow.
 		$_POST['nonce']   = wp_create_nonce( Editor_Nudge::NONCE_ACTION );
+		// check_ajax_referer() reads $_REQUEST, not $_POST.
+		$_REQUEST['nonce'] = $_POST['nonce'];
 		$_POST['post_id'] = $this->post_id;
 
 		ob_start();
@@ -378,10 +364,6 @@ class Test_Editor_Nudge extends TestCase {
 	public function test_enqueue_scripts_tags_create_form_url_with_utm_attribution() {
 		wp_set_current_user( $this->admin_id );
 
-		if ( ! defined( 'WP_ADMIN' ) ) {
-			define( 'WP_ADMIN', true );
-		}
-
 		$this->force_block_editor_screen( 'page' );
 		$this->set_current_post( $this->post_id );
 
@@ -427,6 +409,8 @@ class Test_Editor_Nudge extends TestCase {
 	public function test_handle_dismiss_rejects_user_without_capability() {
 		wp_set_current_user( $this->subscriber_id );
 		$_POST['nonce']   = wp_create_nonce( Editor_Nudge::NONCE_ACTION );
+		// check_ajax_referer() reads $_REQUEST, not $_POST.
+		$_REQUEST['nonce'] = $_POST['nonce'];
 		$_POST['post_id'] = $this->post_id;
 
 		ob_start();
@@ -454,6 +438,8 @@ class Test_Editor_Nudge extends TestCase {
 	public function test_handle_dismiss_persists_post_meta_on_success() {
 		wp_set_current_user( $this->admin_id );
 		$_POST['nonce']   = wp_create_nonce( Editor_Nudge::NONCE_ACTION );
+		// check_ajax_referer() reads $_REQUEST, not $_POST.
+		$_REQUEST['nonce'] = $_POST['nonce'];
 		$_POST['post_id'] = $this->post_id;
 
 		$before = time();
@@ -498,6 +484,8 @@ class Test_Editor_Nudge extends TestCase {
 	public function test_handle_dismiss_rejects_invalid_nonce() {
 		wp_set_current_user( $this->admin_id );
 		$_POST['nonce']   = 'definitely-not-a-valid-nonce';
+		// check_ajax_referer() reads $_REQUEST, not $_POST.
+		$_REQUEST['nonce'] = $_POST['nonce'];
 		$_POST['post_id'] = $this->post_id;
 
 		ob_start();
@@ -534,6 +522,8 @@ class Test_Editor_Nudge extends TestCase {
 		);
 
 		$_POST['nonce']   = wp_create_nonce( Editor_Nudge::NONCE_ACTION );
+		// check_ajax_referer() reads $_REQUEST, not $_POST.
+		$_REQUEST['nonce'] = $_POST['nonce'];
 		$_POST['post_id'] = $form_id;
 
 		ob_start();
@@ -567,6 +557,8 @@ class Test_Editor_Nudge extends TestCase {
 	public function test_handle_dismiss_rejects_user_without_edit_post_capability() {
 		wp_set_current_user( $this->admin_id );
 		$_POST['nonce']   = wp_create_nonce( Editor_Nudge::NONCE_ACTION );
+		// check_ajax_referer() reads $_REQUEST, not $_POST.
+		$_REQUEST['nonce'] = $_POST['nonce'];
 		$_POST['post_id'] = $this->post_id;
 
 		$target_post_id = $this->post_id;
@@ -606,7 +598,9 @@ class Test_Editor_Nudge extends TestCase {
 	 */
 	public function test_handle_dismiss_rejects_missing_post_id() {
 		wp_set_current_user( $this->admin_id );
-		$_POST['nonce'] = wp_create_nonce( Editor_Nudge::NONCE_ACTION );
+		$_POST['nonce']   = wp_create_nonce( Editor_Nudge::NONCE_ACTION );
+		// check_ajax_referer() reads $_REQUEST, not $_POST.
+		$_REQUEST['nonce'] = $_POST['nonce'];
 		unset( $_POST['post_id'] );
 
 		ob_start();
@@ -626,4 +620,22 @@ class Test_Editor_Nudge extends TestCase {
 		ob_end_clean();
 		$this->fail( 'Expected WPDieException for missing post_id.' );
 	}
+
+	/**
+	 * Hidden promotions suppress the nudge even when every other condition
+	 * would show it.
+	 */
+	public function test_allow_load_returns_false_when_promotions_hidden() {
+		wp_set_current_user( $this->admin_id );
+		$this->force_block_editor_screen( 'page' );
+		$this->set_current_post( $this->post_id );
+
+		$this->assertTrue( $this->nudge->allow_load(), 'Control: the nudge loads by default.' );
+
+		add_filter( 'srfm_hide_promotions', '__return_true' );
+		$allowed = $this->nudge->allow_load();
+		remove_filter( 'srfm_hide_promotions', '__return_true' );
+		$this->assertFalse( $allowed, 'Hidden promotions must suppress the nudge.' );
+	}
+
 }

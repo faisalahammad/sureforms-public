@@ -286,7 +286,9 @@ class Test_String_Collector extends TestCase {
 				return $row['name'] === 'form_' . $form_id . '_submit_button';
 			}
 		);
-		$row     = array_values( $matched )[0];
+		// Creating the form already registered the default label through the same
+		// save hook, so take the most recent row rather than the first.
+		$row = end( $matched );
 		$this->assertSame( 'Send', $row['value'] );
 		$this->assertSame( 'sureforms', $row['domain'] );
 	}
@@ -460,11 +462,13 @@ class Test_String_Collector extends TestCase {
 		$this->install_stub_provider();
 		$form_id = $this->make_form();
 
+		// `email_body` is the key the meta's sanitize callback actually stores;
+		// a 'body' key is dropped on the way in.
 		$notifications = [
 			[
-				'subject'   => 'Subject A',
-				'body'      => 'Body A',
-				'from_name' => 'From A',
+				'subject'    => 'Subject A',
+				'email_body' => 'Body A',
+				'from_name'  => 'From A',
 			],
 		];
 		update_post_meta( $form_id, '_srfm_email_notification', $notifications );
@@ -570,7 +574,9 @@ class Test_String_Collector extends TestCase {
 			}
 		);
 		$this->assertNotEmpty( $matched );
-		$row = array_values( $matched )[0];
+
+		// As above: the form's own creation registered the default first.
+		$row = end( $matched );
 		$this->assertSame( 'Click me', $row['value'] );
 	}
 

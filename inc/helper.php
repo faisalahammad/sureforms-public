@@ -2144,6 +2144,27 @@ class Helper {
 	}
 
 	/**
+	 * Whether SureForms promotional content should be hidden.
+	 *
+	 * Covers review requests, cross-sell banners and announcements. The free
+	 * plugin never hides them on its own; SureForms Pro's Distraction Free mode
+	 * turns this on through the filter.
+	 *
+	 * @since 2.12.8
+	 * @return bool
+	 */
+	public static function hide_promotions() {
+		/**
+		 * Filter whether SureForms hides its promotional content in wp-admin.
+		 *
+		 * @since 2.12.8
+		 *
+		 * @param bool $hide Default false.
+		 */
+		return (bool) apply_filters( 'srfm_hide_promotions', false );
+	}
+
+	/**
 	 * Verifies the request by checking the nonce and user capabilities.
 	 *
 	 * @param string $request_type The type of request, either 'rest' or 'ajax'.
@@ -2239,20 +2260,25 @@ class Helper {
 	 * always has somewhere to send them.
 	 *
 	 * @since 2.12.7
+	 * @param string $medium Placement the link is rendered in, used as utm_medium.
+	 *                       Two surfaces show this guide -- the dashboard notice and
+	 *                       the onboarding step -- and a shared value would make the
+	 *                       two indistinguishable in reporting, which is the whole
+	 *                       point of the attribution.
 	 * @return string Absolute documentation URL.
 	 */
-	public static function get_caching_plugin_doc_url() {
+	public static function get_caching_plugin_doc_url( $medium = 'form_checks_notice' ) {
 		$entry = self::get_active_caching_plugin_entry();
 		$slug  = null === $entry || '' === $entry[1] ? 'how-to-set-up-sureforms-with-caching-plugins' : $entry[1];
 
 		// Through the central builder rather than hardcoding the domain, so the
 		// link carries the same UTM attribution as every other doc link and a
-		// domain change is one edit. utm_content is the slug, so the notice can be
+		// domain change is one edit. utm_content is the slug, so the caller can be
 		// told which guide people actually open.
 		return self::get_sureforms_website_url(
 			'docs/' . $slug . '/',
 			[
-				'utm_medium'  => 'form_checks_notice',
+				'utm_medium'  => self::get_string_value( $medium ),
 				'utm_content' => $slug,
 			]
 		);
