@@ -551,6 +551,13 @@ const GeneralPage = ( {
 					/>
 				}
 			/>
+			{ /* Extension slot for add-on sections, such as SureForms Pro's
+			     Distraction Free. Renders nothing on its own. */ }
+			{ applyFilters(
+				'srfm.settings.general.additionalSections',
+				null,
+				{ loading }
+			) }
 			<ContentSection
 				loading={ loading }
 				title={ __( 'Logs', 'sureforms' ) }
@@ -563,13 +570,6 @@ const GeneralPage = ( {
 					/>
 				}
 			/>
-			{ /* Extension slot for add-on sections, such as SureForms Pro's
-			     Distraction Free. Renders nothing on its own. */ }
-			{ applyFilters(
-				'srfm.settings.general.additionalSections',
-				null,
-				{ loading }
-			) }
 			{ /* Everything above is something SureForms does for this site.
 			     Analytics is the one setting that sends anything outward, so it
 			     sits last, behind a rule, rather than reading as one more form
