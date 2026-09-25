@@ -4054,4 +4054,34 @@ class Test_Thankyou_Prompt_Notice extends TestCase {
 		wp_deregister_script( 'srfm-thankyou-notice-track' );
 	}
 
+	/**
+	 * The first-form pointer on the WordPress Dashboard is a promotion, so it
+	 * is not enqueued while promotions are hidden (Distraction Free).
+	 */
+	public function test_enqueue_admin_pointer_respects_hide_promotions() {
+		global $pagenow;
+		$previous_pagenow = $pagenow;
+		$pagenow          = 'index.php';
+
+		$admin = Admin::get_instance();
+		$reset = static function () {
+			wp_dequeue_script( 'sureforms-admin-pointer' );
+			wp_deregister_script( 'sureforms-admin-pointer' );
+		};
+
+		// Precondition: with promotions shown, the pointer does load here.
+		$reset();
+		$admin->enqueue_admin_pointer();
+		$this->assertTrue( wp_script_is( 'sureforms-admin-pointer', 'enqueued' ), 'Pointer should load on the Dashboard by default.' );
+
+		$reset();
+		add_filter( 'srfm_hide_promotions', '__return_true' );
+		$admin->enqueue_admin_pointer();
+		remove_filter( 'srfm_hide_promotions', '__return_true' );
+		$this->assertFalse( wp_script_is( 'sureforms-admin-pointer', 'enqueued' ), 'Pointer should not load while promotions are hidden.' );
+
+		$reset();
+		$pagenow = $previous_pagenow;
+	}
+
 }

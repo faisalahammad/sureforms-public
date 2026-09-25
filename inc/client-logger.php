@@ -130,16 +130,22 @@ class Client_Logger {
 	 * write path re-checks here.
 	 *
 	 * @since 2.12.6
+	 * @since 2.12.8 Filterable through `srfm_enable_logs`.
 	 * @return bool
 	 */
 	public static function is_enabled() {
 		$general = get_option( 'srfm_general_settings_options', [] );
+		$enabled = ! is_array( $general ) || ! isset( $general['srfm_enable_logs'] ) || (bool) $general['srfm_enable_logs'];
 
-		if ( ! is_array( $general ) || ! isset( $general['srfm_enable_logs'] ) ) {
-			return true;
-		}
-
-		return (bool) $general['srfm_enable_logs'];
+		/**
+		 * Filter whether client logging is on, without changing the stored
+		 * setting. SureForms Pro's Distraction Free mode turns it off here.
+		 *
+		 * @since 2.12.8
+		 *
+		 * @param bool $enabled The stored setting (true when never saved).
+		 */
+		return (bool) apply_filters( 'srfm_enable_logs', $enabled );
 	}
 
 	/**

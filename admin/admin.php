@@ -1309,10 +1309,7 @@ JS;
 		add_submenu_page(
 			'sureforms_menu',
 			__( 'Quiz Entries', 'sureforms' ),
-			__( 'Quizzes', 'sureforms' ) .
-				' <span style="color:#4ADE80;font-size:9px;font-weight:600;">' .
-				esc_html__( 'New', 'sureforms' ) .
-				'</span>',
+			__( 'Quizzes', 'sureforms' ),
 			self::$sureforms_page_default_capability,
 			'sureforms_quiz_entries',
 			[ $this, 'render_quiz_empty_state' ],
@@ -1342,10 +1339,7 @@ JS;
 		add_submenu_page(
 			'sureforms_menu',
 			__( 'Survey Reports', 'sureforms' ),
-			__( 'Survey Reports', 'sureforms' ) .
-				' <span style="color:#4ADE80;font-size:9px;font-weight:600;">' .
-				esc_html__( 'New', 'sureforms' ) .
-				'</span>',
+			__( 'Survey Reports', 'sureforms' ),
 			self::$sureforms_page_default_capability,
 			'sureforms_survey_reports',
 			[ $this, 'render_survey_empty_state' ],
@@ -1375,10 +1369,7 @@ JS;
 		add_submenu_page(
 			'sureforms_menu',
 			__( 'Partial Entries', 'sureforms' ),
-			__( 'Partial Entries', 'sureforms' ) .
-				' <span style="color:#4ADE80;font-size:9px;font-weight:600;">' .
-				esc_html__( 'New', 'sureforms' ) .
-				'</span>',
+			__( 'Partial Entries', 'sureforms' ),
 			self::$sureforms_page_default_capability,
 			'sureforms_partial_entries',
 			[ $this, 'render_partial_entries_empty_state' ],
@@ -4548,9 +4539,11 @@ CSS;
 		global $pagenow;
 		$allowed_pages = [ 'index.php', 'options-general.php' ];
 
-		// Do not show if pointer dismissed, accepted, or more than 1 form exists.
+		// Do not show if promotions are hidden, the pointer was dismissed or
+		// accepted, or more than 1 form exists.
 		if (
-			! empty( Helper::get_srfm_option( 'pointer_popup_dismissed' ) )
+			Helper::hide_promotions()
+			|| ! empty( Helper::get_srfm_option( 'pointer_popup_dismissed' ) )
 			|| ! empty( Helper::get_srfm_option( 'pointer_popup_accepted' ) )
 			|| (int) ( wp_count_posts( SRFM_FORMS_POST_TYPE )->publish ?? 0 ) > 1
 		) {
