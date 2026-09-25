@@ -13,6 +13,17 @@ class Test_Generate_Form_Markup extends TestCase {
 	protected $generate_form_markup;
 
 	protected function setUp(): void {
+		parent::setUp();
+
+		/*
+		 * These tests are all front-end rendering. is_admin() reads the global
+		 * current screen, which any earlier test that called set_current_screen()
+		 * leaves behind for the rest of the process - and both the Edit Form pill
+		 * and collect_queried_form_ids() bail out on is_admin(). Clear it so the
+		 * context is the one under test rather than whatever ran before.
+		 */
+		set_current_screen( 'front' );
+
 		$this->generate_form_markup = new Generate_Form_Markup();
 	}
 
@@ -299,8 +310,24 @@ class Test_Generate_Form_Markup extends TestCase {
 		$wp_query->queried_object    = get_post( $page_id );
 		$wp_query->queried_object_id = $page_id;
 
-		$this->generate_form_markup->collect_queried_form_ids();
-		$this->assertArrayHasKey( $form_id, $registry->getValue(), 'The embedded form ID should be collected from the queried post at `wp`.' );
+		/*
+		 * collect_queried_form_ids() only does the parse when the admin bar is
+		 * actually going to be rendered for a user who can see its node - that
+		 * guard is what keeps parse_blocks() off every anonymous request. Stand
+		 * both up, or the method returns before collecting anything.
+		 */
+		$admin_user = $this->set_current_user_with_role( 'administrator' );
+		$show_bar   = static function () {
+			return true;
+		};
+		add_filter( 'show_admin_bar', $show_bar );
+
+		try {
+			$this->generate_form_markup->collect_queried_form_ids();
+			$this->assertArrayHasKey( $form_id, $registry->getValue(), 'The embedded form ID should be collected from the queried post at `wp`.' );
+		} finally {
+			remove_filter( 'show_admin_bar', $show_bar );
+		}
 
 		// Not a singular view → no-op.
 		$registry->setValue( null, [] );
@@ -597,11 +624,13 @@ class Test_Generate_Form_Markup extends TestCase {
 	public function test_form_markup_contains_submit_token() {
 		remove_all_actions( 'wp_insert_post_data' );
 
+		// A block is required so the container - and with it the <form> tag the
+		// token lives on - is emitted at all.
 		$form_id = wp_insert_post( [
 			'post_title'   => 'Token Markup Test',
 			'post_type'    => 'sureforms_form',
 			'post_status'  => 'publish',
-			'post_content' => '',
+			'post_content' => '<!-- wp:paragraph -->x<!-- /wp:paragraph -->',
 		] );
 
 		$markup = Generate_Form_Markup::get_form_markup( $form_id );

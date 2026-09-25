@@ -18,9 +18,22 @@ use Yoast\PHPUnitPolyfills\TestCases\TestCase;
  */
 class Test_Client_Logger extends TestCase {
 
+	/**
+	 * General settings as they were before the test, restored in tearDown().
+	 *
+	 * These tests switch logging on and off. Without the restore, the last test
+	 * leaves logging off for every later test class, and anything that depends on
+	 * Client_Logger recording (such as the notification fault tests in
+	 * test-form-submit.php) fails only when run after this class.
+	 *
+	 * @var mixed
+	 */
+	private $general_settings_backup;
+
 	protected function setUp(): void {
 		parent::setUp();
 
+		$this->general_settings_backup = get_option( 'srfm_general_settings_options', null );
 		$this->set_logging( true );
 		Client_Logger::clear();
 		delete_option( Client_Logger::FAILURES_OPTION );
@@ -29,8 +42,13 @@ class Test_Client_Logger extends TestCase {
 
 	protected function tearDown(): void {
 		Client_Logger::clear();
-		$this->set_logging( false );
 		delete_option( Client_Logger::FILENAME_OPTION );
+
+		if ( null === $this->general_settings_backup ) {
+			delete_option( 'srfm_general_settings_options' );
+		} else {
+			update_option( 'srfm_general_settings_options', $this->general_settings_backup );
+		}
 
 		parent::tearDown();
 	}
@@ -62,6 +80,23 @@ class Test_Client_Logger extends TestCase {
 		unset( $general['srfm_enable_logs'] );
 		update_option( 'srfm_general_settings_options', $general );
 
+		$this->assertTrue( Client_Logger::is_enabled() );
+	}
+
+	/**
+	 * `srfm_enable_logs` can turn logging off without touching the stored
+	 * setting (SureForms Pro's Distraction Free), and removing the callback
+	 * restores the stored value.
+	 */
+	public function test_is_enabled_is_filterable() {
+		$this->assertTrue( Client_Logger::is_enabled() );
+
+		add_filter( 'srfm_enable_logs', '__return_false' );
+		$this->assertFalse( Client_Logger::is_enabled() );
+		remove_filter( 'srfm_enable_logs', '__return_false' );
+
+		$general = (array) get_option( 'srfm_general_settings_options', [] );
+		$this->assertTrue( ! isset( $general['srfm_enable_logs'] ) || (bool) $general['srfm_enable_logs'], 'The stored setting is untouched.' );
 		$this->assertTrue( Client_Logger::is_enabled() );
 	}
 
@@ -516,13 +551,15 @@ class Test_Client_Logger extends TestCase {
 	}
 
 	/**
-	 * A captcha stop is the visitor's to clear, and raises nothing.
+	 * A visitor-correctable stop is not written to the log at all.
 	 *
-	 * Pinned because it is the precedent the after-submission rule above follows, and
-	 * because "Please verify that you are not a robot" is among the most common lines
-	 * in a real log -- counting it would tell healthy sites to contact support.
+	 * "This field is required" and "Please verify that you are not a robot" were
+	 * the most common lines in a real log, and every one of them was pasted into
+	 * a support report about some other failure. They are dropped at the shape
+	 * gate, so no caller -- the REST route or a future server-side one -- can
+	 * write them.
 	 */
-	public function test_a_blocked_entry_is_not_a_fault() {
+	public function test_sanitize_entry_drops_a_blocked_entry() {
 		$entry = Client_Logger::sanitize_entry(
 			[
 				'type'    => 'blocked',
@@ -531,8 +568,7 @@ class Test_Client_Logger extends TestCase {
 			]
 		);
 
-		$this->assertNotEmpty( $entry );
-		$this->assertFalse( Client_Logger::is_fault( $entry ) );
+		$this->assertSame( [], $entry );
 	}
 
 	/**
@@ -697,6 +733,29 @@ class Test_Client_Logger extends TestCase {
 		foreach ( explode( "\n", $tail['text'] ) as $line ) {
 			$this->assertNotNull( json_decode( $line, true ), 'Every line must be whole JSON.' );
 		}
+	}
+
+	/**
+	 * The budget is a ceiling even when the newest entry alone is over it.
+	 *
+	 * An empty excerpt is worse than a long one, so the newest entry is always kept
+	 * -- but trimmed to the budget, because the caller is building a mailto: and a
+	 * URL past the client's limit loses the whole body.
+	 */
+	public function test_get_tail_trims_a_single_oversized_entry() {
+		Client_Logger::clear();
+		Client_Logger::append( [ 'type' => 'error', 'message' => 'failure number 1' ] );
+		Client_Logger::append( [ 'type' => 'error', 'message' => str_repeat( 'x', 5000 ) ] );
+
+		$tail = Client_Logger::get_tail( 400 );
+
+		$this->assertSame( 1, $tail['shown'], 'Only the newest entry fits.' );
+		$this->assertSame( 2, $tail['total'] );
+		$this->assertLessThanOrEqual( 400, strlen( $tail['text'] ), 'The budget holds for a single entry too.' );
+		$this->assertStringStartsWith( '{"type":"error"', $tail['text'], 'The start of the entry says what failed, so it is the part kept.' );
+		$this->assertStringEndsWith( '[truncated]', $tail['text'] );
+
+		Client_Logger::clear();
 	}
 
 	/**

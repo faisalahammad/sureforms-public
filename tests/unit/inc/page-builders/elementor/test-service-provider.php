@@ -20,12 +20,56 @@ class Test_Elementor_Service_Provider extends TestCase {
 	 *
 	 * @return void
 	 */
+	/**
+	 * Previous Elementor\Plugin::$instance, restored in tearDown().
+	 *
+	 * @var mixed
+	 */
+	private $previous_elementor_instance;
+
 	protected function setUp(): void {
 		parent::setUp();
 
 		if ( ! class_exists( '\Elementor\Plugin' ) ) {
 			$this->markTestSkipped( 'Elementor is not available.' );
 		}
+
+		/*
+		 * Form_Widget's constructor reads \Elementor\Plugin::$instance->preview,
+		 * and the stub leaves $instance null - reading ->preview on it is a fatal.
+		 * Stand up the smallest object that constructor needs.
+		 */
+		$this->previous_elementor_instance = \Elementor\Plugin::$instance;
+
+		\Elementor\Plugin::$instance = new class() {
+			/**
+			 * Preview handler exposing is_preview_mode().
+			 *
+			 * @var object
+			 */
+			public $preview;
+
+			public function __construct() {
+				$this->preview = new class() {
+					/**
+					 * Tests run outside the editor iframe.
+					 *
+					 * @return bool
+					 */
+					public function is_preview_mode() {
+						return false;
+					}
+				};
+			}
+		};
+	}
+
+	protected function tearDown(): void {
+		if ( class_exists( '\Elementor\Plugin' ) ) {
+			\Elementor\Plugin::$instance = $this->previous_elementor_instance;
+		}
+
+		parent::tearDown();
 	}
 
 	/**

@@ -11,6 +11,42 @@ use SRFM\Inc\Post_Types;
 class Test_Post_Types extends TestCase {
 
 	/**
+	 * Meta sanitize filters removed for the duration of a test.
+	 *
+	 * @var array<string, mixed>
+	 */
+	private $meta_filter_backup = [];
+
+	protected function setUp(): void {
+		parent::setUp();
+
+		/*
+		 * register_post_meta() appends a sanitize filter every time it runs, and
+		 * filters chain - so with the plugin's own registration already in place,
+		 * a test that calls register_post_metas() again sanitizes twice, the second
+		 * pass receiving the first pass's output. That turns a rejected non-array
+		 * into the defaults array. Production registers once, so clear first and
+		 * put the originals back afterwards.
+		 */
+		foreach ( array_keys( $GLOBALS['wp_filter'] ) as $hook ) {
+			if ( 0 === strpos( (string) $hook, 'sanitize_post_meta__srfm' ) ) {
+				$this->meta_filter_backup[ $hook ] = $GLOBALS['wp_filter'][ $hook ];
+				unset( $GLOBALS['wp_filter'][ $hook ] );
+			}
+		}
+	}
+
+	protected function tearDown(): void {
+		foreach ( $this->meta_filter_backup as $hook => $callbacks ) {
+			$GLOBALS['wp_filter'][ $hook ] = $callbacks;
+		}
+
+		$this->meta_filter_backup = [];
+
+		parent::tearDown();
+	}
+
+	/**
 	 * Test register_post_metas is callable.
 	 */
 	public function test_register_post_metas_callable() {
@@ -59,9 +95,40 @@ class Test_Post_Types extends TestCase {
 
 		$data = $result->get_data();
 		$this->assertIsArray( $data['meta']['_srfm_form_confirmation'] );
-		// Missing booleans should be normalized to false.
-		$this->assertFalse( $data['meta']['_srfm_form_confirmation'][0]['hide_copy'] );
-		$this->assertFalse( $data['meta']['_srfm_form_confirmation'][0]['hide_download_all'] );
+
+		/*
+		 * hide_copy and hide_download_all are normalized only when an extension
+		 * (SureForms Pro) has declared them in the REST schema - adding keys the
+		 * schema does not know about makes REST PUT reject the whole object. The
+		 * free plugin declares neither, so the item must come back untouched.
+		 */
+		$this->assertArrayNotHasKey( 'hide_copy', $data['meta']['_srfm_form_confirmation'][0] );
+		$this->assertArrayNotHasKey( 'hide_download_all', $data['meta']['_srfm_form_confirmation'][0] );
+
+		// With the properties declared, the same call fills the missing booleans in.
+		$registered_backup = $GLOBALS['wp_meta_keys']['post']['sureforms_form']['_srfm_form_confirmation'];
+
+		$GLOBALS['wp_meta_keys']['post']['sureforms_form']['_srfm_form_confirmation']['show_in_rest'] = [
+			'schema' => [
+				'type'  => 'array',
+				'items' => [
+					'type'       => 'object',
+					'properties' => [
+						'hide_copy'         => [ 'type' => 'boolean' ],
+						'hide_download_all' => [ 'type' => 'boolean' ],
+					],
+				],
+			],
+		];
+
+		try {
+			$declared = $post_types->sureforms_normalize_meta_for_rest( new WP_REST_Response( [ 'meta' => [] ] ), $post )->get_data();
+
+			$this->assertFalse( $declared['meta']['_srfm_form_confirmation'][0]['hide_copy'] );
+			$this->assertFalse( $declared['meta']['_srfm_form_confirmation'][0]['hide_download_all'] );
+		} finally {
+			$GLOBALS['wp_meta_keys']['post']['sureforms_form']['_srfm_form_confirmation'] = $registered_backup;
+		}
 
 		wp_delete_post( $form_id, true );
 	}
@@ -219,8 +286,14 @@ class Test_Post_Types extends TestCase {
 
 		$result = sanitize_meta( '_srfm_instant_form_settings', $input, 'post', SRFM_FORMS_POST_TYPE );
 
+		// esc_url_raw() drops a disallowed scheme outright...
 		$this->assertSame( '', $result['site_logo'] );
-		$this->assertSame( '', $result['cover_image'] );
+
+		// ...but for markup it strips the tags and prepends a scheme rather than
+		// returning empty. Assert the whole value so any future change to what
+		// survives has to be made deliberately.
+		$this->assertSame( 'http://scriptxss/script', $result['cover_image'] );
+		$this->assertStringNotContainsString( '<', $result['cover_image'] );
 	}
 
 	public function test_register_post_metas_instant_form_returns_empty_for_non_array() {

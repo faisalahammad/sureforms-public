@@ -85,6 +85,13 @@ class Test_Abilities_Registrar extends TestCase {
 		}
 
 		foreach ( self::ABILITY_IDS as $id ) {
+			// wp_unregister_ability() on an ability that is not registered raises
+			// _doing_it_wrong(), which phpunit.xml.dist converts into an exception.
+			// The cleanup is unconditional by design, so ask first.
+			if ( function_exists( 'wp_has_ability' ) && ! wp_has_ability( $id ) ) {
+				continue;
+			}
+
 			wp_unregister_ability( $id );
 		}
 	}

@@ -188,7 +188,13 @@ class Test_Global_Settings extends TestCase {
 		$saved = get_option( 'srfm_form_restriction_settings_options' );
 		$this->assertTrue( $saved['max_entries']['status'] );
 		$this->assertSame( 50, $saved['max_entries']['maxEntries'] );
-		$this->assertSame( 'allow', $saved['ip_restriction']['mode'] );
+
+		// Only max_entries is a free-plugin restriction. The handler deliberately
+		// persists that key alone, so anything else in the payload is dropped
+		// rather than written through unsanitised.
+		$this->assertArrayNotHasKey( 'ip_restriction', $saved );
+		$this->assertArrayNotHasKey( 'country_restriction', $saved );
+		$this->assertArrayNotHasKey( 'keyword_restriction', $saved );
 	}
 
 	/**
@@ -315,11 +321,11 @@ class Test_Global_Settings extends TestCase {
 	public function test_get_default_form_restriction_settings() {
 		$defaults = Global_Settings::get_default_form_restriction_settings();
 		$this->assertIsArray( $defaults );
-		$this->assertArrayHasKey( 'max_entries', $defaults );
-		$this->assertArrayHasKey( 'ip_restriction', $defaults );
-		$this->assertArrayHasKey( 'country_restriction', $defaults );
-		$this->assertArrayHasKey( 'keyword_restriction', $defaults );
+		// max_entries is the only restriction the free plugin implements; the others
+		// were asserted here but exist nowhere in the codebase.
+		$this->assertSame( [ 'max_entries' ], array_keys( $defaults ) );
 		$this->assertFalse( $defaults['max_entries']['status'] );
+		$this->assertSame( 0, $defaults['max_entries']['maxEntries'] );
 	}
 
 	/**
