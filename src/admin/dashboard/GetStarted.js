@@ -93,8 +93,10 @@ export default () => {
 			</Container.Item>
 
 			<Container.Item className="col-span-12 md:col-span-5 lg:col-span-5 p-2">
+				{ /* Capped so the thumbnail stays the same size when the card
+				     spans the full page (Distraction Free dashboard). */ }
 				<div
-					className="relative aspect-video cursor-pointer group"
+					className="relative aspect-video cursor-pointer group md:max-w-sm md:ml-auto"
 					onClick={ () => {
 						setPopupVideo( videoUrl );
 					} }
