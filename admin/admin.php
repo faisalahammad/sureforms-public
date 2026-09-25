@@ -1309,10 +1309,7 @@ JS;
 		add_submenu_page(
 			'sureforms_menu',
 			__( 'Quiz Entries', 'sureforms' ),
-			__( 'Quizzes', 'sureforms' ) .
-				' <span style="color:#4ADE80;font-size:9px;font-weight:600;">' .
-				esc_html__( 'New', 'sureforms' ) .
-				'</span>',
+			__( 'Quizzes', 'sureforms' ),
 			self::$sureforms_page_default_capability,
 			'sureforms_quiz_entries',
 			[ $this, 'render_quiz_empty_state' ],
@@ -1342,10 +1339,7 @@ JS;
 		add_submenu_page(
 			'sureforms_menu',
 			__( 'Survey Reports', 'sureforms' ),
-			__( 'Survey Reports', 'sureforms' ) .
-				' <span style="color:#4ADE80;font-size:9px;font-weight:600;">' .
-				esc_html__( 'New', 'sureforms' ) .
-				'</span>',
+			__( 'Survey Reports', 'sureforms' ),
 			self::$sureforms_page_default_capability,
 			'sureforms_survey_reports',
 			[ $this, 'render_survey_empty_state' ],
@@ -1375,10 +1369,7 @@ JS;
 		add_submenu_page(
 			'sureforms_menu',
 			__( 'Partial Entries', 'sureforms' ),
-			__( 'Partial Entries', 'sureforms' ) .
-				' <span style="color:#4ADE80;font-size:9px;font-weight:600;">' .
-				esc_html__( 'New', 'sureforms' ) .
-				'</span>',
+			__( 'Partial Entries', 'sureforms' ),
 			self::$sureforms_page_default_capability,
 			'sureforms_partial_entries',
 			[ $this, 'render_partial_entries_empty_state' ],
