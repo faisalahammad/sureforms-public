@@ -556,13 +556,11 @@ const GeneralPage = ( {
 			/>
 			{ /* Extension slot for add-on sections, such as SureForms Pro's
 			     Distraction Free. Renders nothing on its own.
-			     updateGlobalSettings lets a section stage changes to other
-			     General settings, saved with the same Save button;
 			     setHiddenSections lets it hide the Logs and Analytics sections. */ }
 			{ applyFilters(
 				'srfm.settings.general.additionalSections',
 				null,
-				{ loading, updateGlobalSettings, setHiddenSections }
+				{ loading, setHiddenSections }
 			) }
 			{ ! hiddenSections.includes( 'logs' ) && (
 				<ContentSection

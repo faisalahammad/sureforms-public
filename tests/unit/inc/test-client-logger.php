@@ -83,6 +83,23 @@ class Test_Client_Logger extends TestCase {
 		$this->assertTrue( Client_Logger::is_enabled() );
 	}
 
+	/**
+	 * `srfm_enable_logs` can turn logging off without touching the stored
+	 * setting (SureForms Pro's Distraction Free), and removing the callback
+	 * restores the stored value.
+	 */
+	public function test_is_enabled_is_filterable() {
+		$this->assertTrue( Client_Logger::is_enabled() );
+
+		add_filter( 'srfm_enable_logs', '__return_false' );
+		$this->assertFalse( Client_Logger::is_enabled() );
+		remove_filter( 'srfm_enable_logs', '__return_false' );
+
+		$general = (array) get_option( 'srfm_general_settings_options', [] );
+		$this->assertTrue( ! isset( $general['srfm_enable_logs'] ) || (bool) $general['srfm_enable_logs'], 'The stored setting is untouched.' );
+		$this->assertTrue( Client_Logger::is_enabled() );
+	}
+
 	// ---------------------------------------------------------------
 	// Writing
 	// ---------------------------------------------------------------
