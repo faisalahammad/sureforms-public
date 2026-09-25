@@ -4539,9 +4539,11 @@ CSS;
 		global $pagenow;
 		$allowed_pages = [ 'index.php', 'options-general.php' ];
 
-		// Do not show if pointer dismissed, accepted, or more than 1 form exists.
+		// Do not show if promotions are hidden, the pointer was dismissed or
+		// accepted, or more than 1 form exists.
 		if (
-			! empty( Helper::get_srfm_option( 'pointer_popup_dismissed' ) )
+			Helper::hide_promotions()
+			|| ! empty( Helper::get_srfm_option( 'pointer_popup_dismissed' ) )
 			|| ! empty( Helper::get_srfm_option( 'pointer_popup_accepted' ) )
 			|| (int) ( wp_count_posts( SRFM_FORMS_POST_TYPE )->publish ?? 0 ) > 1
 		) {
